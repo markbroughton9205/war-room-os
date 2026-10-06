@@ -3,14 +3,14 @@
  * at the active Terra location. Omits empty/uncovered groups.
  */
 import { nearbyPublicCameras, type NearbyCameraIndexFeature } from './nearbyCameras'
-import { nearbyCameraCoverageForPoint, type NearbyCameraLocationState } from './nearbyCameraCoverage'
+import { nearbyCameraCoverageForPoint, nearbyCameraProvidersCoveringPoint, type NearbyCameraLocationState } from './nearbyCameraCoverage'
 import { haversineKm } from '../geographicContext'
 
 export type NearbyGodsEyeRow = {
   id: string
   label: string
   count: number
-  state: 'COVERED' | 'PARTIAL' | 'NO_COVERAGE' | 'AUTH_REQUIRED' | 'PROVIDER_AUTH_REQUIRED' | 'NONE_WITHIN_RADIUS' | 'UNAVAILABLE' | 'EMPTY'
+  state: 'COVERED' | 'PARTIAL' | 'NO_COVERAGE' | 'AUTH_REQUIRED' | 'PROVIDER_AUTH_REQUIRED' | 'AUTH_FAIL' | 'NONE_WITHIN_RADIUS' | 'UNAVAILABLE' | 'EMPTY' | 'LOADING' | 'LIVE' | 'NO_DATA' | 'OFFLINE' | 'STALE'
   detail: string
 }
 
@@ -44,6 +44,7 @@ export function composeNearbyGodsEye(input: {
   cameraFeatures: readonly NearbyCameraIndexFeature[]
   cameraIndexLoaded?: boolean
   cameraAuthRequired?: boolean
+  cameraProviderAuthFailed?: boolean
   features?: readonly NearbyFeature[]
   localNewsCount?: number
   localNewsState?: string
@@ -58,11 +59,14 @@ export function composeNearbyGodsEye(input: {
     })
   )
 
+  const covering = nearbyCameraProvidersCoveringPoint(input.latitude, input.longitude)
+  const coveringLayerIds = covering.map(row => row.id)
   const cameras = nearbyPublicCameras({
     latitude: input.latitude,
     longitude: input.longitude,
     features: input.cameraFeatures,
     maxKm: radiusKm,
+    coveringLayerIds,
   })
   const cameraCoverage = nearbyCameraCoverageForPoint({
     latitude: input.latitude,
@@ -70,6 +74,7 @@ export function composeNearbyGodsEye(input: {
     nearbyCount: cameras.length,
     indexLoaded: input.cameraIndexLoaded,
     commanderAuthRequired: input.cameraAuthRequired,
+    providerAuthFailed: input.cameraProviderAuthFailed,
     radiusKm,
   })
 
@@ -95,11 +100,18 @@ export function composeNearbyGodsEye(input: {
   }
 
   if (cameraCoverage.locationState !== 'NO_COVERAGE') {
+    const displayState = cameraCoverage.truthState === 'LIVE' && cameras.length === 0
+      ? 'EMPTY'
+      : cameraCoverage.truthState === 'NO_DATA'
+        ? 'NONE_WITHIN_RADIUS'
+        : cameraCoverage.locationState === 'COVERED' && cameras.length === 0
+          ? 'EMPTY'
+          : cameraCoverage.locationState
     rows.push({
       id: 'TRAFFIC_CAMERAS',
       label: 'TRAFFIC CAMERAS',
       count: cameras.length,
-      state: cameraCoverage.locationState === 'COVERED' && cameras.length === 0 ? 'EMPTY' : cameraCoverage.locationState,
+      state: displayState,
       detail: cameraCoverage.reason,
     })
   }

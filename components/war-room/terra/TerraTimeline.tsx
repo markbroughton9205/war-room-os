@@ -60,7 +60,7 @@ export function TerraTimeline({
           {isLive ? 'LIVE — NOW' : `HISTORICAL — ${formatUtcLabel(time.currentTime)}`}
         </p>
         <div className="flex items-center gap-1">
-          {cinematicOrbiting && <span className="text-[9px] uppercase tracking-widest text-cyan-400/70">cinematic</span>}
+          {cinematicOrbiting && <span className="text-[9px] uppercase tracking-widest text-cyan-400/70">Living Orbit · presentation</span>}
           {!cinematicSuppressedByReducedMotion && !cinematicOrbiting && isLive && (
             <button type="button" onClick={onResumeCinematic} className="rounded border border-white/20 px-2 py-0.5 text-[9px] uppercase tracking-widest text-slate-400 hover:border-cyan-400/60 hover:text-cyan-400">
               Resume Cinematic View

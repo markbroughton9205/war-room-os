@@ -44,6 +44,9 @@ export function TerraEarthKnowledgePanel({ location, onDismiss, nearby, compact 
             {location.searchQuery && location.contextType === 'SEARCH' ? (
               <div className="flex justify-between gap-3"><dt>Selected</dt><dd className="text-right text-cyan-200">{location.searchQuery}</dd></div>
             ) : null}
+            {location.matchQuality ? (
+              <div className="flex justify-between gap-3"><dt>Match</dt><dd className="text-right text-amber-200" data-testid="terra-earth-knowledge-match-quality">{location.matchQuality === 'STREET' ? 'STREET — APPROXIMATE' : location.matchQuality === 'AMBIGUOUS' ? 'AMBIGUOUS — SELECT LOCATION' : location.matchQuality}</dd></div>
+            ) : null}
             {location.reverseSublocalityLabel ? (
               <div className="flex justify-between gap-3"><dt>Inside</dt><dd className="text-right text-slate-200">{location.reverseSublocalityLabel}</dd></div>
             ) : null}

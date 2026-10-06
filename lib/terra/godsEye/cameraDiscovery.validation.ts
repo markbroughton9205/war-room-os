@@ -28,6 +28,9 @@ function run(): CaseResult[] {
     check('nyc_is_provider_auth_viewer', planCameraDiscovery(40.7128, -74.006).providerAuthRequired === true && planCameraDiscovery(40.7128, -74.006).requiresCommanderSession === false, `providerAuth=${planCameraDiscovery(40.7128, -74.006).providerAuthRequired}`),
     check('richfield_selects_ohgo', planCameraDiscovery(41.2397, -81.6382).cameraLayerIds.includes('ohgo_cameras') && planCameraDiscovery(41.2397, -81.6382).requiresCommanderSession === false, planCameraDiscovery(41.2397, -81.6382).cameraLayerIds.join(',')),
     check('sf_selects_caltrans_without_commander', planCameraDiscovery(37.7749, -122.4194).cameraLayerIds.includes('caltrans_cctv') && planCameraDiscovery(37.7749, -122.4194).requiresCommanderSession === false, planCameraDiscovery(37.7749, -122.4194).cameraLayerIds.join(',')),
+    check('akron_selects_ohgo', planCameraDiscovery(41.1041339, -81.521585).cameraLayerIds.includes('ohgo_cameras'), planCameraDiscovery(41.1041339, -81.521585).cameraLayerIds.join(',')),
+    check('spain_has_no_ohgo', !planCameraDiscovery(40.4168, -3.7038).cameraLayerIds.includes('ohgo_cameras') && !planCameraDiscovery(40.4168, -3.7038).hasApiCoverage, planCameraDiscovery(40.4168, -3.7038).cameraLayerIds.join(',') || 'none'),
+    check('singapore_has_no_ohgo', !planCameraDiscovery(1.3521, 103.8198).hasApiCoverage, planCameraDiscovery(1.3521, 103.8198).coveringProviders.map(row => row.id).join(',') || 'none'),
   ]
 }
 

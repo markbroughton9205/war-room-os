@@ -561,7 +561,11 @@ export type CommanderStatusPill = {
 /** Compact Commander-facing status. Technical roster strings stay in Inspector. */
 export function commanderStatusCluster(
   snapshot: CouncilRosterSnapshot | null | undefined,
-  extras?: { researchActive?: boolean; systemsOk?: boolean },
+  extras?: {
+    researchActive?: boolean
+    systemsOk?: boolean
+    persistenceStatus?: 'HEALTHY' | 'DEGRADED' | 'UNAVAILABLE' | 'READ_ONLY' | 'MISCONFIGURED' | null
+  },
 ): CommanderStatusPill[] {
   const councilDegraded = snapshot?.operationalState === 'DEGRADED_PARTIAL' || Boolean(snapshot?.degradedByRoster)
   const councilOffline = !snapshot || snapshot.operationalState === 'UNAVAILABLE'
@@ -571,6 +575,24 @@ export function commanderStatusCluster(
   const researchActive = Boolean(extras?.researchActive)
   const internetDown = snapshot?.internetAccess === 'UNAVAILABLE'
   const systemsOk = extras?.systemsOk ?? (!councilOffline && !internetDown && !councilDegraded)
+  const persistenceStatus = extras?.persistenceStatus
+  const persistenceHealthy = persistenceStatus === 'HEALTHY'
+  const systemsLabel = councilOffline
+    ? 'OFFLINE'
+    : persistenceStatus == null
+      ? 'STARTING'
+      : !persistenceHealthy
+        ? 'DEGRADED'
+        : systemsOk
+          ? 'NOMINAL'
+          : 'WATCH'
+  const systemsTone = councilOffline
+    ? 'offline'
+    : systemsLabel === 'NOMINAL'
+      ? 'nominal'
+      : systemsLabel === 'STARTING'
+        ? 'active'
+        : 'degraded'
 
   return [
     {
@@ -594,8 +616,8 @@ export function commanderStatusCluster(
     {
       id: 'systems',
       kicker: 'Systems',
-      label: systemsOk ? 'NOMINAL' : councilOffline ? 'OFFLINE' : 'WATCH',
-      tone: systemsOk ? 'nominal' : councilOffline ? 'offline' : 'degraded',
+      label: systemsLabel,
+      tone: systemsTone,
     },
   ]
 }
@@ -616,6 +638,8 @@ export function resolveCommanderPresencePhase(input: {
   }
   if (research === 'active' || research === 'sources_queried' || input.councilState === 'researching') return 'researching'
   if (nebula === 'SYNTHESIZING') return 'synthesizing'
+  if (nebula === 'RESEARCHING') return 'researching'
+  if (nebula === 'VERIFYING') return 'verifying'
   if (nebula === 'PLANNING' || nebula === 'EXECUTING') return 'understanding'
   if (input.loading) return 'understanding'
   return 'idle'

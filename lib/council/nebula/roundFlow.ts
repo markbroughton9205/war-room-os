@@ -83,7 +83,7 @@ export function classifyAstraIntent(message: string): AstraIntent {
     return 'SOCIAL'
   }
   if (
-    /(?:status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary)/i.test(text)
+    /(?:status\s+(?:on|of|for)\s+(?:the\s+)?war\s*room|status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary)/i.test(text)
     || (/\b(status|health|who is (on|available)|runtime)\b/i.test(text) && /\b(war room|council|backend|model)\b/i.test(text))
   ) {
     return 'STATUS_CHECK'

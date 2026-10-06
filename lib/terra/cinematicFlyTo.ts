@@ -7,6 +7,7 @@
  * must already be a resolved TerraLocationTarget / observed event position.
  */
 import { CAMERA_CLUSTER_ALTITUDE_M, CAMERA_INSPECT_ALTITUDE_M, CAMERA_INSPECT_PITCH_DEG, isAdminOverviewPlaceType, isCameraClusterPlaceType, isCameraInspectPlaceType, isStreetInspectPlaceType } from './godsEye/navigationOwnership'
+import { framingToCinematicDestination, planLocationCameraFraming } from './placePrecision/locationCameraFraming'
 
 export type CinematicFlyOrigin = {
   longitude: number
@@ -21,6 +22,8 @@ export type CinematicFlyDestination = {
   placeType?: string | null
   altitudeMeters?: number | null
   headingDegrees?: number | null
+  matchClass?: import('./geocodeMatchQuality').TerraAddressMatchQuality | null
+  ring?: Array<{ longitude: number; latitude: number }> | null
 }
 
 export type CinematicFlyPlan = {
@@ -29,6 +32,15 @@ export type CinematicFlyPlan = {
   destination:
     | { kind: 'point'; longitude: number; latitude: number; heightMeters: number }
     | { kind: 'rectangle'; west: number; south: number; east: number; north: number }
+    | {
+      kind: 'boundingSphere'
+      longitude: number
+      latitude: number
+      points: Array<{ longitude: number; latitude: number }>
+      rangeMeters: number
+      headingDegrees: number
+      pitchDegrees: number
+    }
   maximumHeightMeters: number | null
   flyOverLongitude: number | null
   pitchAdjustHeightMeters: number | null
@@ -95,6 +107,18 @@ function cameraClusterDestination(to: CinematicFlyDestination): CinematicFlyPlan
 function cinematicDestination(to: CinematicFlyDestination): CinematicFlyPlan['destination'] {
   if (isCameraClusterPlaceType(to.placeType)) return cameraClusterDestination(to)
   if (isCameraInspectPlaceType(to.placeType)) return cameraInspectPoint(to)
+  if (to.matchClass) {
+    const framing = planLocationCameraFraming({
+      matchClass: to.matchClass,
+      longitude: to.longitude,
+      latitude: to.latitude,
+      boundingBox: to.boundingBox,
+      placeType: to.placeType,
+      ring: to.ring,
+      altitudeMeters: to.altitudeMeters,
+    })
+    return framingToCinematicDestination(framing)
+  }
   const heightMeters = to.altitudeMeters ?? settleAltitudeMeters(to.placeType, Boolean(to.boundingBox))
   const point = { kind: 'point' as const, longitude: to.longitude, latitude: to.latitude, heightMeters }
   const inspectAltitude = typeof to.altitudeMeters === 'number' && to.altitudeMeters <= 2_000
@@ -173,6 +197,23 @@ function emptyOrientation(): Pick<CinematicFlyPlan, 'headingDegrees' | 'pitchDeg
   return { headingDegrees: null, pitchDegrees: null }
 }
 
+function precisionOrientation(to: CinematicFlyDestination): Pick<CinematicFlyPlan, 'headingDegrees' | 'pitchDegrees'> {
+  if (!to.matchClass || to.matchClass === 'PLACE' || to.matchClass === 'AMBIGUOUS') return emptyOrientation()
+  const framing = planLocationCameraFraming({
+    matchClass: to.matchClass,
+    longitude: to.longitude,
+    latitude: to.latitude,
+    boundingBox: to.boundingBox,
+    placeType: to.placeType,
+    ring: to.ring,
+    altitudeMeters: to.altitudeMeters,
+  })
+  return {
+    headingDegrees: sourcedHeadingDegrees(to.headingDegrees) ?? framing.headingDegrees,
+    pitchDegrees: framing.pitchDegrees,
+  }
+}
+
 function shortestLongitudeDelta(from: number, to: number): number {
   let delta = to - from
   while (delta > 180) delta -= 360
@@ -210,7 +251,7 @@ export function planCinematicFlyTo(input: {
       maximumHeightMeters: null,
       flyOverLongitude: null,
       pitchAdjustHeightMeters: null,
-      ...emptyOrientation(),
+      ...precisionOrientation(input.to),
       reason: 'prefers-reduced-motion — instant jump, no cinematic traversal',
     }
   }
@@ -222,7 +263,7 @@ export function planCinematicFlyTo(input: {
       maximumHeightMeters: null,
       flyOverLongitude: null,
       pitchAdjustHeightMeters: null,
-      ...emptyOrientation(),
+      ...precisionOrientation(input.to),
       reason: 'Commander requested instant jump',
     }
   }
@@ -240,7 +281,7 @@ export function planCinematicFlyTo(input: {
       maximumHeightMeters: null,
       flyOverLongitude: null,
       pitchAdjustHeightMeters: null,
-      ...emptyOrientation(),
+      ...precisionOrientation(input.to),
       reason: `extremely short hop (${distanceKm.toFixed(2)} km) — no globe traversal`,
     }
   }
@@ -261,7 +302,7 @@ export function planCinematicFlyTo(input: {
     maximumHeightMeters: needsPullback ? PULLBACK_HEIGHT_M : null,
     flyOverLongitude: flyOver,
     pitchAdjustHeightMeters: needsPullback ? 400_000 : null,
-    ...emptyOrientation(),
+    ...precisionOrientation(input.to),
     reason: origin
       ? `cinematic traversal ${distanceKm.toFixed(0)} km`
       : 'cinematic traversal from unknown camera origin',

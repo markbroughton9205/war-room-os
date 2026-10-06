@@ -25,3 +25,23 @@ export function viewIntersectsRadarCoverage(view: TerraDegreeRectangle | null): 
   if (!view) return true
   return rectanglesIntersect(view, IEM_USCOMP_COVERAGE)
 }
+
+/**
+ * True only when the whole view sits inside the mosaic domain. A view that merely overlaps is
+ * PARTIAL coverage and must not be presented as fully radar-covered.
+ */
+export function viewWithinRadarCoverage(view: TerraDegreeRectangle | null): boolean {
+  if (!view) return false
+  const v = unwrapWestEast(view.west, view.east)
+  const c = unwrapWestEast(IEM_USCOMP_COVERAGE.west, IEM_USCOMP_COVERAGE.east)
+  return v.west >= c.west
+    && v.east <= c.east
+    && view.south >= IEM_USCOMP_COVERAGE.south
+    && view.north <= IEM_USCOMP_COVERAGE.north
+}
+
+/** Honest human description of the radar domain — never "worldwide". */
+export function radarCoverageLabel(): string {
+  const c = IEM_USCOMP_COVERAGE
+  return `CONUS mosaic · ${c.south}°–${c.north}°N, ${Math.abs(c.west)}°–${Math.abs(c.east)}°W`
+}

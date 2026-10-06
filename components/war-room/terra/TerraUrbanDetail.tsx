@@ -37,6 +37,8 @@ import type {
   TerraUrbanLod,
   TerraUrbanTilePayload,
 } from '@/lib/terra/urbanDetail/types'
+import { terraWorkerPool } from '@/lib/terra/worker/pool'
+import { TERRA_JOB_PRIORITIES } from '@/lib/terra/worker/types'
 
 export type TerraUrbanDetailStatus = {
   enabled: boolean
@@ -90,7 +92,7 @@ type CesiumNS = typeof import('cesium')
 type Destroyable = { destroy?: () => void; isDestroyed?: () => boolean }
 
 type UrbanSceneHandles = {
-  roadPrimitive: Destroyable | null
+  roadPrimitives: Destroyable[]
   buildingDataSource: { name?: string } | null
   signalDataSource: { name?: string } | null
   labelCollection: Destroyable | null
@@ -179,9 +181,9 @@ function destroyHandle(handle: Destroyable | null, collection: { remove: (value:
 function clearUrbanScene(viewer: CesiumViewer, handles: UrbanSceneHandles): UrbanSceneHandles {
   if (!isViewerAlive(viewer)) {
     clearUrbanBuildingsForPick()
-    return { roadPrimitive: null, buildingDataSource: null, signalDataSource: null, labelCollection: null }
+    return { roadPrimitives: [], buildingDataSource: null, signalDataSource: null, labelCollection: null }
   }
-  destroyHandle(handles.roadPrimitive, viewer.scene.groundPrimitives)
+  for (const primitive of handles.roadPrimitives) destroyHandle(primitive, viewer.scene.groundPrimitives)
   if (handles.buildingDataSource) {
     try {
       viewer.dataSources.remove(handles.buildingDataSource as never, true)
@@ -198,7 +200,7 @@ function clearUrbanScene(viewer: CesiumViewer, handles: UrbanSceneHandles): Urba
   }
   destroyHandle(handles.labelCollection, viewer.scene.primitives)
   clearUrbanBuildingsForPick()
-  return { roadPrimitive: null, buildingDataSource: null, signalDataSource: null, labelCollection: null }
+  return { roadPrimitives: [], buildingDataSource: null, signalDataSource: null, labelCollection: null }
 }
 
 async function sampleTerrainHeights(
@@ -243,33 +245,74 @@ async function renderUrbanTile(
 ): Promise<UrbanSceneHandles> {
   const handles = clearUrbanScene(viewer, previous)
   if (!isViewerAlive(viewer) || !viewer.scene?.globe) return handles
+  const workerPool = terraWorkerPool()
+  const generation = workerPool.getSnapshot().generation
 
   try {
     if (tile.roads.length > 0) {
       const groundSupported = typeof Cesium.GroundPolylinePrimitive?.isSupported === 'function' && Cesium.GroundPolylinePrimitive.isSupported(viewer.scene)
       if (groundSupported) {
-        const instances = tile.roads.flatMap(road => {
-          const geometry = uniqueCoordinates(road.geometry)
-          if (geometry.length < 2) return []
-          try {
-            const positions = Cesium.Cartesian3.fromDegreesArray(geometry.flatMap(coord => [coord.longitude, coord.latitude]))
-            return [new Cesium.GeometryInstance({
-              id: { terraUrban: true, kind: 'road', roadId: road.id },
-              geometry: new Cesium.GroundPolylineGeometry({ positions, width: highwayWidthPx(road.highway) }),
-              attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(roadColor(Cesium, road.highway)) },
-            })]
-          } catch {
-            return []
+        // Build bounded primitive groups from measured vertex/byte limits. No viewport can become
+        // one planet-scale GeometryInstance allocation, even if an upstream tile is malformed.
+        const roadChunks: typeof tile.roads[] = []
+        let chunk: typeof tile.roads = []
+        let chunkVertices = 0
+        for (const road of tile.roads) {
+          const vertices = road.geometry.length
+          const estimatedBytes = (chunkVertices + vertices) * 48
+          if (chunk.length > 0 && (
+            chunk.length >= workerPool.budget.maxFeatures
+            || chunkVertices + vertices >= workerPool.budget.maxVertices
+            || estimatedBytes >= workerPool.budget.maxEstimatedBytes
+          )) {
+            roadChunks.push(chunk)
+            chunk = []
+            chunkVertices = 0
           }
-        })
-        if (instances.length > 0) {
-          const primitive = new Cesium.GroundPolylinePrimitive({
-            geometryInstances: instances,
-            appearance: new Cesium.PolylineColorAppearance(),
-            asynchronous: false,
+          chunk.push(road)
+          chunkVertices += vertices
+        }
+        if (chunk.length) roadChunks.push(chunk)
+
+        for (let chunkIndex = 0; chunkIndex < roadChunks.length; chunkIndex++) {
+          const roads = roadChunks[chunkIndex]
+          await new Promise<void>(resolve => {
+            const accepted = workerPool.renderScheduler.enqueue({
+              id: `urban-roads:${generation}:${chunkIndex}`,
+              generation,
+              priority: TERRA_JOB_PRIORITIES.P1_CURRENT_VIEW,
+              layerId: 'urban-roads',
+              run: () => {
+                const instances = roads.flatMap(road => {
+                  const geometry = uniqueCoordinates(road.geometry)
+                  if (geometry.length < 2) return []
+                  try {
+                    const positions = Cesium.Cartesian3.fromDegreesArray(geometry.flatMap(coord => [coord.longitude, coord.latitude]))
+                    return [new Cesium.GeometryInstance({
+                      id: { terraUrban: true, kind: 'road', roadId: road.id },
+                      geometry: new Cesium.GroundPolylineGeometry({ positions, width: highwayWidthPx(road.highway) }),
+                      attributes: { color: Cesium.ColorGeometryInstanceAttribute.fromColor(roadColor(Cesium, road.highway)) },
+                    })]
+                  } catch {
+                    return []
+                  }
+                })
+                if (instances.length > 0 && isViewerAlive(viewer)) {
+                  const primitive = new Cesium.GroundPolylinePrimitive({
+                    geometryInstances: instances,
+                    appearance: new Cesium.PolylineColorAppearance(),
+                    asynchronous: true,
+                    releaseGeometryInstances: true,
+                  })
+                  viewer.scene.groundPrimitives.add(primitive)
+                  handles.roadPrimitives.push(primitive)
+                }
+                resolve()
+              },
+              drop: resolve,
+            })
+            if (!accepted) resolve()
           })
-          viewer.scene.groundPrimitives.add(primitive)
-          handles.roadPrimitive = primitive
         }
       } else {
         const collection = new Cesium.PolylineCollection()
@@ -283,7 +326,7 @@ async function renderUrbanTile(
           })
         }
         viewer.scene.primitives.add(collection)
-        handles.roadPrimitive = collection
+        handles.roadPrimitives.push(collection)
       }
     }
 
@@ -291,45 +334,62 @@ async function renderUrbanTile(
       const terrainHeights = extrudeBuildings ? await sampleTerrainHeights(Cesium, viewer, tile.buildings) : []
       if (!isViewerAlive(viewer) || !viewer.scene?.globe) return handles
       const dataSource = new Cesium.CustomDataSource('terra-urban-buildings')
-      for (let index = 0; index < tile.buildings.length; index++) {
-        const building = tile.buildings[index]
-        const ring = uniqueCoordinates(building.footprint)
-        if (ring.length < 3) continue
-        try {
-          if (extrudeBuildings) {
-            const terrainHeight = terrainHeights[index] ?? 0
-            dataSource.entities.add({
-              id: `${TERRA_URBAN_BUILDING_ENTITY_PREFIX}${building.id}`,
-              name: building.name ?? building.buildingType,
-              polygon: {
-                hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flatMap(coord => [coord.longitude, coord.latitude])),
-                height: terrainHeight,
-                extrudedHeight: terrainHeight + Math.max(2.2, building.heightMeters),
-                material: buildingColor(Cesium, building),
-                outline: false,
-              },
-            })
-          } else {
-            // IMAGERY_FIRST footprint — no height / no extrudedHeight. Ground classification stays
-            // pickable (OSM id + inspect) without a 3D mass over the photograph.
-            dataSource.entities.add({
-              id: `${TERRA_URBAN_BUILDING_ENTITY_PREFIX}${building.id}`,
-              name: building.name ?? building.buildingType,
-              polygon: {
-                hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flatMap(coord => [coord.longitude, coord.latitude])),
-                material: Cesium.Color.fromCssColorString('#67e8f9').withAlpha(0.03),
-                outline: false,
-                classificationType: Cesium.ClassificationType.TERRAIN,
-              },
-            })
-          }
-        } catch {
-          // Skip a single malformed footprint; keep the rest of the tile.
-        }
+      await viewer.dataSources.add(dataSource)
+      handles.buildingDataSource = dataSource
+      const batchSize = workerPool.getSnapshot().smoothMode ? 8 : 24
+      for (let start = 0; start < tile.buildings.length; start += batchSize) {
+        const buildingBatch = tile.buildings.slice(start, start + batchSize)
+        await new Promise<void>(resolve => {
+          const accepted = workerPool.renderScheduler.enqueue({
+            id: `urban-buildings:${generation}:${start}`,
+            generation,
+            priority: TERRA_JOB_PRIORITIES.P1_CURRENT_VIEW,
+            layerId: 'urban-buildings',
+            run: () => {
+              buildingBatch.forEach((building, batchIndex) => {
+                const index = start + batchIndex
+                const ring = uniqueCoordinates(building.footprint)
+                if (ring.length < 3) return
+                try {
+                  if (extrudeBuildings) {
+                    const terrainHeight = terrainHeights[index] ?? 0
+                    dataSource.entities.add({
+                      id: `${TERRA_URBAN_BUILDING_ENTITY_PREFIX}${building.id}`,
+                      name: building.name ?? building.buildingType,
+                      polygon: {
+                        hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flatMap(coord => [coord.longitude, coord.latitude])),
+                        height: terrainHeight,
+                        extrudedHeight: terrainHeight + Math.max(2.2, building.heightMeters),
+                        material: buildingColor(Cesium, building),
+                        outline: false,
+                      },
+                    })
+                  } else {
+                    dataSource.entities.add({
+                      id: `${TERRA_URBAN_BUILDING_ENTITY_PREFIX}${building.id}`,
+                      name: building.name ?? building.buildingType,
+                      polygon: {
+                        hierarchy: Cesium.Cartesian3.fromDegreesArray(ring.flatMap(coord => [coord.longitude, coord.latitude])),
+                        material: Cesium.Color.fromCssColorString('#67e8f9').withAlpha(0.03),
+                        outline: false,
+                        classificationType: Cesium.ClassificationType.TERRAIN,
+                      },
+                    })
+                  }
+                } catch {
+                  // Skip a single malformed footprint; keep the rest of the tile.
+                }
+              })
+              resolve()
+            },
+            drop: resolve,
+          })
+          if (!accepted) resolve()
+        })
       }
-      if (dataSource.entities.values.length > 0) {
-        await viewer.dataSources.add(dataSource)
-        handles.buildingDataSource = dataSource
+      if (dataSource.entities.values.length === 0 && isViewerAlive(viewer)) {
+        viewer.dataSources.remove(dataSource, true)
+        handles.buildingDataSource = null
       }
     }
 
@@ -368,9 +428,25 @@ async function renderUrbanTile(
       signals: tile.signals ?? [],
     })
 
+    let renderLabels = tile.labels
     if (tile.labels.length > 0) {
+      try {
+        const prepared = await workerPool.prepareCoordinates(tile.labels, {
+          layerId: 'urban-labels',
+          viewBand: 'CITY',
+          priority: TERRA_JOB_PRIORITIES.P2_NEAR_VIEW,
+          task: 'LABEL_CANDIDATE_BUILD',
+        })
+        renderLabels = Array.from(prepared.featureIndices).map(index => tile.labels[index]).filter(Boolean)
+      } catch {
+        if (generation !== workerPool.getSnapshot().generation) return handles
+        renderLabels = tile.labels
+      }
+    }
+
+    if (renderLabels.length > 0) {
       const collection = new Cesium.LabelCollection({ scene: viewer.scene })
-      for (const label of tile.labels) {
+      for (const label of renderLabels) {
         const houseNumber = label.kind === 'house_number'
         collection.add({
           position: Cesium.Cartesian3.fromDegrees(label.longitude, label.latitude, houseNumber ? 6 : 12),
@@ -441,7 +517,7 @@ export function TerraUrbanDetail({
   hasWorldTerrain,
   onStatusChange,
 }: Props) {
-  const handlesRef = useRef<UrbanSceneHandles>({ roadPrimitive: null, buildingDataSource: null, signalDataSource: null, labelCollection: null })
+  const handlesRef = useRef<UrbanSceneHandles>({ roadPrimitives: [], buildingDataSource: null, signalDataSource: null, labelCollection: null })
   const onStatusChangeRef = useRef(onStatusChange)
   const lastViewportKeyRef = useRef<string | null>(null)
   useEffect(() => {

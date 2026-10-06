@@ -1,6 +1,6 @@
 /**
- * Per-location traffic-camera coverage from wired regional envelopes.
- * Global camera coverage stays REGIONAL / AGENCY_DEPENDENT.
+ * Per-location traffic-camera coverage from the worldwide provider registry/envelopes.
+ * Eligibility is geographic, never city-hardcoded. Multiple lawful providers may cover one point.
  * An empty nearby list is not NO_COVERAGE when a provider actually covers the point.
  */
 import type { TerraDegreeRectangle } from '../aircraftBoundingBox'
@@ -14,9 +14,26 @@ export const NEARBY_CAMERA_LOCATION_STATES = [
   'NO_COVERAGE',
   'AUTH_REQUIRED',
   'PROVIDER_AUTH_REQUIRED',
+  'AUTH_FAIL',
   'UNAVAILABLE',
+  'LOADING',
+  'LIVE',
+  'STALE',
+  'OFFLINE',
+  'NO_DATA',
 ] as const
 export type NearbyCameraLocationState = (typeof NEARBY_CAMERA_LOCATION_STATES)[number]
+
+export const NEARBY_PROVIDER_TRUTH_STATES = [
+  'LOADING',
+  'LIVE',
+  'STALE',
+  'OFFLINE',
+  'AUTH_FAIL',
+  'NO_DATA',
+  'NO_COVERAGE',
+] as const
+export type NearbyProviderTruthState = (typeof NEARBY_PROVIDER_TRUTH_STATES)[number]
 
 export type NearbyCameraProviderEnvelope = {
   id: string
@@ -60,10 +77,14 @@ export function nearbyCameraCoverageForPoint(input: {
   commanderAuthRequired?: boolean
   authRequired?: boolean
   retrievalFailed?: boolean
+  providerAuthFailed?: boolean
+  stale?: boolean
   radiusKm?: number
 }): {
   locationState: NearbyCameraLocationState
+  truthState: NearbyProviderTruthState
   coveringProviders: NearbyCameraProviderEnvelope[]
+  coveringProviderIds: string[]
   reason: string
 } {
   const coveringProviders = nearbyCameraProvidersCoveringPoint(input.latitude, input.longitude)
@@ -75,63 +96,90 @@ export function nearbyCameraCoverageForPoint(input: {
   const queryableApi = [...publicApi, ...providerAuthApi]
   const providerAuthViewer = federated.filter(row => row.authModel === 'PROVIDER_AUTH' && row.endpointType === 'OFFICIAL_VIEWER')
   const commanderSessionMissing = Boolean(input.commanderAuthRequired ?? input.authRequired)
+  const coveringProviderIds = coveringProviders.map(row => row.id)
+
+  const finish = (
+    locationState: NearbyCameraLocationState,
+    truthState: NearbyProviderTruthState,
+    reason: string,
+  ) => ({ locationState, truthState, coveringProviders, coveringProviderIds, reason })
 
   if (!coveringProviders.length) {
-    return {
-      locationState: 'NO_COVERAGE',
-      coveringProviders,
-      reason: 'NO_COVERAGE — no wired public camera provider envelope contains this point. Global camera coverage remains REGIONAL / AGENCY_DEPENDENT.',
-    }
+    return finish(
+      'NO_COVERAGE',
+      'NO_COVERAGE',
+      'NO_COVERAGE — no wired public camera provider envelope contains this point. Global camera coverage remains REGIONAL / AGENCY_DEPENDENT.',
+    )
   }
   // Commander session is not a global camera classifier. PUBLIC and PROVIDER_AUTH API paths
   // must not become AUTH_REQUIRED merely because the Commander is signed out.
   if (commanderSessionMissing && commanderPrivate.length > 0 && queryableApi.length === 0 && input.nearbyCount === 0) {
-    return {
-      locationState: 'AUTH_REQUIRED',
-      coveringProviders,
-      reason: `AUTH_REQUIRED — ${commanderPrivate.map(row => row.region).join(', ')} camera sources are Commander-private. This is not provider-key absence, not PUBLIC retrieval, and not NO_COVERAGE.`,
-    }
+    return finish(
+      'AUTH_REQUIRED',
+      'AUTH_FAIL',
+      `AUTH_REQUIRED — ${commanderPrivate.map(row => row.region).join(', ')} camera sources are Commander-private. This is not provider-key absence, not PUBLIC retrieval, and not NO_COVERAGE.`,
+    )
+  }
+  if (input.providerAuthFailed && input.nearbyCount === 0) {
+    return finish(
+      'AUTH_FAIL',
+      'AUTH_FAIL',
+      `AUTH_FAIL — ${coveringProviders.map(row => row.agency).join(', ')} cover this region but credentials/auth failed. This is not NO_COVERAGE.`,
+    )
   }
   if (queryableApi.length === 0 && providerAuthViewer.length > 0 && input.nearbyCount === 0) {
-    return {
-      locationState: 'PROVIDER_AUTH_REQUIRED',
-      coveringProviders,
-      reason: `PROVIDER_AUTH_REQUIRED / PARTIAL — ${providerAuthViewer.map(row => row.region).join(', ')} API credential is not configured on the server. Official live view is available. This is not Commander AUTH_REQUIRED.`,
-    }
+    return finish(
+      'PROVIDER_AUTH_REQUIRED',
+      'AUTH_FAIL',
+      `PROVIDER_AUTH_REQUIRED / PARTIAL — ${providerAuthViewer.map(row => row.region).join(', ')} API credential is not configured on the server. Official live view is available. This is not Commander AUTH_REQUIRED.`,
+    )
   }
   if (input.retrievalFailed && input.nearbyCount === 0) {
-    return {
-      locationState: 'UNAVAILABLE',
-      coveringProviders,
-      reason: `UNAVAILABLE — ${coveringProviders.map(row => row.agency).join(', ')} cover this region but the provider request failed. This is not AUTH_REQUIRED.`,
-    }
+    return finish(
+      'UNAVAILABLE',
+      'OFFLINE',
+      `OFFLINE — ${coveringProviders.map(row => row.agency).join(', ')} cover this region but the provider request failed. This is not AUTH_REQUIRED and not NO_COVERAGE.`,
+    )
   }
   if (input.nearbyCount === 0 && input.indexLoaded === false) {
     const agencies = coveringProviders.map(row => row.agency).join(', ')
-    return {
-      locationState: 'COVERED',
-      coveringProviders,
-      reason: `COVERED — ${agencies} cover this active Terra location. Camera catalog follows the location, not the current zoom. Markers may hide at global LOD. This is not AUTH_REQUIRED.`,
-    }
+    return finish(
+      'COVERED',
+      'LOADING',
+      `LOADING — ${agencies} cover this active Terra location. Camera catalog follows the location, not the current zoom. Markers may hide at global LOD. This is not AUTH_REQUIRED and not NO_COVERAGE.`,
+    )
   }
   if (input.nearbyCount === 0) {
     const apiProviders = coveringProviders.filter(row => row.endpointType !== 'OFFICIAL_VIEWER')
     if (!apiProviders.length) {
-      return {
-        locationState: 'PARTIAL',
-        coveringProviders,
-        reason: `PARTIAL — no redistributable camera API for this point. Official viewer: ${coveringProviders.map(row => row.agency).join(', ')}.`,
-      }
+      return finish(
+        'PARTIAL',
+        'NO_DATA',
+        `PARTIAL — no redistributable camera API for this point. Official viewer: ${coveringProviders.map(row => row.agency).join(', ')}.`,
+      )
     }
-    return {
-      locationState: 'NONE_WITHIN_RADIUS',
-      coveringProviders,
-      reason: `NONE WITHIN ${radiusKm} KM — ${apiProviders.map(row => row.agency).join(', ')} cover this region, but none are inside the search radius. This is not NO_COVERAGE.`,
-    }
+    return finish(
+      'NONE_WITHIN_RADIUS',
+      'NO_DATA',
+      `NO_DATA / NONE WITHIN ${radiusKm} KM — ${apiProviders.map(row => row.agency).join(', ')} cover this region, but none are inside the search radius. This is not NO_COVERAGE.`,
+    )
   }
-  return {
-    locationState: 'COVERED',
-    coveringProviders,
-    reason: `COVERED — ${input.nearbyCount} public still camera${input.nearbyCount === 1 ? '' : 's'} within ${radiusKm} km.`,
+  if (input.stale) {
+    return finish(
+      'COVERED',
+      'STALE',
+      `STALE — ${input.nearbyCount} public still camera${input.nearbyCount === 1 ? '' : 's'} within ${radiusKm} km exceed freshness threshold.`,
+    )
   }
+  return finish(
+    'COVERED',
+    'LIVE',
+    `LIVE — ${input.nearbyCount} public still camera${input.nearbyCount === 1 ? '' : 's'} within ${radiusKm} km.`,
+  )
+}
+
+/** Registry-id match. `ohgo` matches `ohgo` and `ohgo_cameras`. Not city-specific. */
+export function coveringIncludesProvider(providers: readonly NearbyCameraProviderEnvelope[], providerId: string): boolean {
+  const needles = new Set([providerId, `${providerId}_cameras`, providerId.replace(/_cameras$/, '')])
+  return providers.some(row => needles.has(row.id) || needles.has(row.id.replace(/_cameras$/, '')))
 }

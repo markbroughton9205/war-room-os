@@ -2,8 +2,10 @@
  *   node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/terra/godsEye/nearbyCameraCoverage.validation.ts
  */
 import { pathToFileURL } from 'node:url'
-import { nearbyCameraCoverageForPoint, nearbyCameraProvidersCoveringPoint } from './nearbyCameraCoverage'
+import { nearbyCameraCoverageForPoint, nearbyCameraProvidersCoveringPoint, coveringIncludesProvider } from './nearbyCameraCoverage'
 import { cameraInspectFreshness } from './cameraInspectFreshness'
+import { TERRA_WORLDWIDE_FIXTURES } from '../worldwideCoverageFixtures'
+import { coverageProvidersForPoint } from '../coverageFederation'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 function check(name: string, pass: boolean, detail: string): CaseResult {
@@ -43,9 +45,81 @@ function run(): CaseResult[] {
   const zoomOutNoCatalog = nearbyCameraCoverageForPoint({ latitude: 41.0814, longitude: -81.519, nearbyCount: 0, authRequired: true, indexLoaded: false })
   results.push(check('akron_zoom_out_without_markers_is_not_auth', zoomOutNoCatalog.locationState !== 'AUTH_REQUIRED' && zoomOutNoCatalog.reason.includes('not AUTH_REQUIRED'), zoomOutNoCatalog.locationState))
   const failed = nearbyCameraCoverageForPoint({ latitude: 41.0814, longitude: -81.519, nearbyCount: 0, retrievalFailed: true })
-  results.push(check('akron_retrieval_failed_is_unavailable', failed.locationState === 'UNAVAILABLE', failed.locationState))
+  results.push(check('akron_retrieval_failed_is_unavailable', failed.locationState === 'UNAVAILABLE' && failed.truthState === 'OFFLINE', failed.locationState))
+  const akronAuthFail = nearbyCameraCoverageForPoint({ latitude: 41.1041339, longitude: -81.521585, nearbyCount: 0, indexLoaded: true, providerAuthFailed: true })
+  results.push(check('akron_missing_key_is_auth_fail_not_no_coverage', akronAuthFail.locationState === 'AUTH_FAIL' && akronAuthFail.truthState === 'AUTH_FAIL' && coveringIncludesProvider(akronAuthFail.coveringProviders, 'ohgo') && String(akronAuthFail.locationState) !== 'NO_COVERAGE', akronAuthFail.reason))
+  const akronZero = nearbyCameraCoverageForPoint({ latitude: 41.1041339, longitude: -81.521585, nearbyCount: 0, indexLoaded: true })
+  results.push(check('akron_zero_is_no_data_not_no_coverage', akronZero.truthState === 'NO_DATA' && akronZero.locationState === 'NONE_WITHIN_RADIUS' && coveringIncludesProvider(akronZero.coveringProviders, 'ohgo'), akronZero.reason))
+  const cincinnati = nearbyCameraCoverageForPoint({ latitude: 39.1031, longitude: -84.512, nearbyCount: 0, indexLoaded: true })
+  results.push(check('cincinnati_ohgo_covering', coveringIncludesProvider(cincinnati.coveringProviders, 'ohgo') && cincinnati.coveringProviders.some(row => row.id === 'ohgo_cameras'), cincinnati.reason))
+  const california = nearbyCameraCoverageForPoint({ latitude: 34.0522, longitude: -118.2437, nearbyCount: 0, indexLoaded: true })
+  results.push(check('california_ohgo_not_covering', coveringIncludesProvider(california.coveringProviders, 'ohgo') === false && california.coveringProviders.some(row => row.id === 'caltrans_cctv'), california.reason))
+  const newYork = nearbyCameraCoverageForPoint({ latitude: 40.7128, longitude: -74.006, nearbyCount: 0 })
+  results.push(check('new_york_ohgo_not_covering', coveringIncludesProvider(newYork.coveringProviders, 'ohgo') === false && newYork.coveringProviders.some(row => row.id === '511ny'), newYork.reason))
+  const spain = nearbyCameraCoverageForPoint({ latitude: 40.4168, longitude: -3.7038, nearbyCount: 0 })
+  results.push(check('spain_ohgo_not_covering', coveringIncludesProvider(spain.coveringProviders, 'ohgo') === false && spain.locationState === 'NO_COVERAGE', spain.locationState))
+  const catalonia = nearbyCameraCoverageForPoint({ latitude: 41.3874, longitude: 2.1686, nearbyCount: 0 })
+  results.push(check('catalonia_ohgo_not_covering', coveringIncludesProvider(catalonia.coveringProviders, 'ohgo') === false && catalonia.locationState === 'NO_COVERAGE', catalonia.locationState))
+  const singapore = nearbyCameraCoverageForPoint({ latitude: 1.3521, longitude: 103.8198, nearbyCount: 0 })
+  results.push(check('singapore_ohgo_not_covering', coveringIncludesProvider(singapore.coveringProviders, 'ohgo') === false && singapore.locationState === 'NO_COVERAGE', singapore.locationState))
   const ontario = nearbyCameraProvidersCoveringPoint(43.65, -79.38)
   results.push(check('toronto_has_ontario_envelope', ontario.some(row => row.id === 'ontario_511_cameras') && !ontario.some(row => row.id === '511ny'), ontario.map(row => row.id).join(',')))
+  const quebec = nearbyCameraProvidersCoveringPoint(45.5017, -73.5673)
+  results.push(check('montreal_has_quebec_not_ontario', quebec.some(row => row.id === 'quebec_511_cameras') && !quebec.some(row => row.id === 'ontario_511_cameras'), quebec.map(row => row.id).join(',')))
+  const finland = nearbyCameraCoverageForPoint({ latitude: 60.1699, longitude: 24.9384, nearbyCount: 0, indexLoaded: true })
+  results.push(check('helsinki_digitraffic_covering_not_ohgo', coveringIncludesProvider(finland.coveringProviders, 'digitraffic_road_cameras') && coveringIncludesProvider(finland.coveringProviders, 'ohgo') === false, finland.reason))
+  const hongKong = nearbyCameraCoverageForPoint({ latitude: 22.3193, longitude: 114.1694, nearbyCount: 0, indexLoaded: true })
+  results.push(check('hong_kong_td_covering_not_ohgo', coveringIncludesProvider(hongKong.coveringProviders, 'hong_kong_td_cameras') && coveringIncludesProvider(hongKong.coveringProviders, 'ohgo') === false, hongKong.reason))
+
+  for (const fixture of TERRA_WORLDWIDE_FIXTURES) {
+    const coverage = nearbyCameraCoverageForPoint({ latitude: fixture.latitude, longitude: fixture.longitude, nearbyCount: 0, indexLoaded: true })
+    const cameras = nearbyCameraProvidersCoveringPoint(fixture.latitude, fixture.longitude)
+    const allProviders = coverageProvidersForPoint(fixture.latitude, fixture.longitude)
+    for (const id of fixture.expectCameraIds) {
+      results.push(check(
+        `${fixture.id}_covers_${id}`,
+        coveringIncludesProvider(cameras, id) || allProviders.some(row => row.id === id),
+        cameras.map(row => row.id).join(',') || coverage.locationState,
+      ))
+    }
+    for (const id of fixture.rejectCameraIds) {
+      results.push(check(
+        `${fixture.id}_rejects_${id}`,
+        coveringIncludesProvider(cameras, id) === false && !cameras.some(row => row.id === id),
+        cameras.map(row => row.id).join(',') || 'none',
+      ))
+    }
+    const weather = coverageProvidersForPoint(fixture.latitude, fixture.longitude, 'weather')
+    results.push(check(
+      `${fixture.id}_global_weather_eligible`,
+      weather.some(row => row.coverage === 'GLOBAL' && (row.id === 'met_no' || row.id === 'open_meteo')),
+      weather.map(row => row.id).join(','),
+    ))
+    const poi = coverageProvidersForPoint(fixture.latitude, fixture.longitude, 'poi')
+    results.push(check(
+      `${fixture.id}_global_nominatim_eligible`,
+      poi.some(row => row.id === 'nominatim'),
+      poi.map(row => row.id).join(','),
+    ))
+    if (fixture.expectCameraIds.length === 0) {
+      results.push(check(
+        `${fixture.id}_camera_no_coverage_is_geographic`,
+        coverage.truthState === 'NO_COVERAGE' && coverage.locationState === 'NO_COVERAGE',
+        coverage.reason,
+      ))
+    } else {
+      results.push(check(
+        `${fixture.id}_empty_is_not_no_coverage`,
+        coverage.truthState !== 'NO_COVERAGE',
+        coverage.reason,
+      ))
+    }
+    results.push(check(
+      `${fixture.id}_overlapping_categories_can_coexist`,
+      allProviders.filter(row => row.category === 'weather').length > 0 && allProviders.filter(row => row.category === 'poi').length > 0,
+      allProviders.map(row => `${row.category}:${row.id}`).join(','),
+    ))
+  }
   const ohgoInspect = cameraInspectFreshness({
     provenance: { fromCache: false, retrievedAt: '2026-09-16T12:00:00Z' },
     properties: { freshnessState: 'UNAVAILABLE' },

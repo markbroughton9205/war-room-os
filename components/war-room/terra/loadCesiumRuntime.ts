@@ -7,6 +7,7 @@ declare global {
   interface Window {
     Cesium?: CesiumNamespace
     CESIUM_BASE_URL?: string
+    __terraCesiumViewer?: import('cesium').Viewer
   }
 }
 

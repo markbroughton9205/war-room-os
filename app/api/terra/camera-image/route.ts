@@ -3,6 +3,7 @@ import type { NextRequest } from 'next/server'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { fetchProxiedCameraImage, type TerraCameraImageProvider } from '@/lib/terra/cameraImageProxy'
 import { isPublicTerraLayer } from '@/lib/terra/publicLayers'
+import { cameraLicensePolicyForProvider } from '@/lib/terra/trafficCameraContract'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -30,6 +31,13 @@ export async function GET(request: NextRequest) {
   if (!id) {
     return NextResponse.json({ error: 'Missing required "id" query parameter.' }, { status: 400 })
   }
+  const deliveryPolicy = cameraLicensePolicyForProvider(provider)
+  if (!deliveryPolicy.proxyAllowed) {
+    return NextResponse.json({
+      error: 'LICENSE_RESTRICTED',
+      detail: 'This provider does not have an explicit Terra proxy grant. Use the official source link.',
+    }, { status: 451 })
+  }
 
   const result = await fetchProxiedCameraImage(provider as TerraCameraImageProvider, id)
   if (!result.ok) {
@@ -42,7 +50,9 @@ export async function GET(request: NextRequest) {
       'content-type': result.contentType,
       // Short — matches this codebase's "respect provider refresh cadence" requirement rather
       // than caching a camera still longer than the source itself refreshes it.
-      'cache-control': 'private, max-age=20',
+      'cache-control': deliveryPolicy.cacheAllowed
+        ? `private, max-age=${Math.min(deliveryPolicy.maxCacheAgeSeconds, 60)}`
+        : 'private, no-store',
       'x-terra-camera-source-url': result.sourceUrl,
       'x-terra-camera-attribution': result.attribution,
     },

@@ -46,9 +46,12 @@ export type PersistedCouncilMessage = {
   repairPacket?: CouncilRepairPacket
   projectOrchestrationPacket?: ProjectOrchestrationPacket
   analystOperationsPacket?: AnalystOperationsPacket
+  hvsProductionPacket?: import('@/lib/media-command/war-room-hvs-intent').HvsWarRoomPacket
   familyDeliberationTurn?: DeliberationTurn
   familyDeliberationEvidenceReferences?: DeliberationEvidenceReference[]
   shadowCouncilAssembly?: CouncilShadowSelectionReport
+  /** A live message carries the whole snapshot; one restored from a local transcript carries only part of it, so every field is optional to readers. */
+  evidenceBoardCouncil?: Partial<import('@/lib/council/evidence-board/types').EbcPublicSnapshot>
 }
 
 export type CouncilCooldownMap = Partial<Record<CouncilOrchestrationFamily, number>>

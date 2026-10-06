@@ -17,6 +17,7 @@ const STATE_COLOR: Record<TerraCoverageTruthState, string> = {
   LIVE: 'text-emerald-400',
   STALE: 'text-amber-400',
   OFFLINE: 'text-red-400',
+  AUTH_FAIL: 'text-amber-400',
   UNKNOWN: 'text-slate-400',
 }
 

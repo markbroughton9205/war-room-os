@@ -111,6 +111,7 @@ async function resolveViaOpenMeteo(queryUsed: string, sourceEntityId: string, re
         nativeName: row.name,
         englishName: row.name,
         sourceUrl: `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}`,
+        addressMatchQuality: 'PLACE' as const,
       }
     })
     .filter((row): row is NonNullable<typeof row> => row !== null)
@@ -153,6 +154,7 @@ async function resolveViaOpenMeteo(queryUsed: string, sourceEntityId: string, re
     boundingBox: null,
     nativeName: match.nativeName,
     englishName: match.englishName,
+    addressMatchQuality: 'PLACE',
   }
   cacheSet(cacheKey, resolution, FALLBACK_CACHE_TTL_MS)
   return resolution
@@ -212,6 +214,7 @@ async function resolveViaGeonames(queryUsed: string, sourceEntityId: string, ret
         nativeName: row.name ?? row.toponymName ?? null,
         englishName: row.name ?? row.toponymName ?? null,
         sourceUrl: row.geonameId ? `https://www.geonames.org/${row.geonameId}` : null,
+        addressMatchQuality: 'PLACE' as const,
       }
     })
     .filter((row): row is NonNullable<typeof row> => row !== null)
@@ -254,6 +257,7 @@ async function resolveViaGeonames(queryUsed: string, sourceEntityId: string, ret
     boundingBox: null,
     nativeName: match.nativeName,
     englishName: match.englishName,
+    addressMatchQuality: 'PLACE',
   }
   cacheSet(cacheKey, resolution, FALLBACK_CACHE_TTL_MS)
   return resolution

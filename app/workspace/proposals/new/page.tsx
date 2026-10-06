@@ -1,7 +1,10 @@
+import { WarRoomBackControl } from '@/components/war-room/WarRoomBackControl'
+
 export default function NewWorkspaceProposalPage() {
   return (
     <main className="min-h-screen bg-black px-6 py-8 text-white">
       <section className="mx-auto max-w-3xl">
+        <WarRoomBackControl />
         <p className="text-xs font-bold uppercase tracking-[0.3em] text-yellow-400">Workspace</p>
         <h1 className="mt-2 text-2xl font-bold">New Proposal</h1>
         <form className="mt-8 space-y-5 rounded border border-zinc-800 bg-zinc-950/70 p-5">

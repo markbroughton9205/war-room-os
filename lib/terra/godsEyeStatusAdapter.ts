@@ -1,13 +1,8 @@
 /**
- * Adapter boundary for the normalized RED/AMBER/GREEN/UNKNOWN God's Eye runtime status the Mac
- * lane is building. This file intentionally has nothing real to adapt yet -- it exists so the
- * Council UI has one stable, typed shape to consume today (always UNKNOWN) and Node01 can wire a
- * real producer into `resolveCouncilGodsEyeStatus` later without any UI change.
- *
- * Hard rule (mission doctrine, matches Terra's existing coverage-truth pattern in
- * lib/terra/maritimeCoverage.ts): "no events returned" is never GREEN, and nothing here may claim
- * SAFE/NORMAL/CLEAR without a real, source-backed field to point to. Until Node01 exposes that
- * field, every caller gets UNKNOWN_GODS_EYE_STATUS, unconditionally.
+ * Adapter boundary for God's Eye runtime status.
+ * No producer is wired in this runtime, so the public label is NOT CONFIGURED.
+ * UNKNOWN is reserved for a live producer that returned no classifiable severity,
+ * and that case must carry a reason. Absence of a producer is not GREEN.
  */
 
 export const COUNCIL_GODS_EYE_SEVERITIES = ['RED', 'AMBER', 'GREEN', 'UNKNOWN'] as const
@@ -46,4 +41,13 @@ export function resolveCouncilGodsEyeStatus(
     source: input.source === 'godseye_runtime' ? 'godseye_runtime' : 'not_yet_available',
     freshness: input.freshness ?? null,
   }
+}
+
+/** Visible strip label. Not-configured is not reported as a bare UNKNOWN. */
+export function godsEyePublicLabel(status: CouncilGodsEyeStatus = UNKNOWN_GODS_EYE_STATUS): string {
+  if (status.source !== 'godseye_runtime') return "GOD'S EYE NOT CONFIGURED"
+  if (status.severity === 'GREEN') return "GOD'S EYE READY"
+  if (status.severity === 'AMBER') return "GOD'S EYE DEGRADED"
+  if (status.severity === 'RED') return "GOD'S EYE OFFLINE"
+  return status.reason ? `GOD'S EYE UNKNOWN — ${status.reason}` : "GOD'S EYE UNKNOWN"
 }

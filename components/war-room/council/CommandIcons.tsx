@@ -170,6 +170,17 @@ export function IconIntegrate(props: IconProps) {
   )
 }
 
+/** Media — music note for War Room Media. */
+export function IconMusicNote(props: IconProps) {
+  return (
+    <Base {...props}>
+      <path d="M9 18a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+      <path d="M15 6v10.5" />
+      <path d="M15 6.5 20 5v4l-5 1.5" />
+    </Base>
+  )
+}
+
 /** Media — equalizer bars (playing indicator). */
 export function IconRadio(props: IconProps) {
   return (

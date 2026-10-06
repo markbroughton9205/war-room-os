@@ -1,10 +1,34 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 
-import { IconRadio } from '@/components/war-room/council/CommandIcons'
-import { mediaStreamStatusLabel } from '@/lib/media/playbackStatus'
+import { mediaStreamStatusLabel, railPlaybackStatusLabel } from '@/lib/media/playbackStatus'
+import { TERRA_MEDIA_COMPACT_SIZE, TERRA_MEDIA_DEFAULT_SIZE, TERRA_MEDIA_PANEL_ID } from '@/lib/terra/workspace/panelIds'
+import type { TerraWorkspaceSnapshot } from '@/components/war-room/terra/workspace/terraWorkspaceStore'
+import { useTerraWorkspaceLayoutApiOptional } from '@/components/war-room/terra/workspace/TerraWorkspaceLayoutProvider'
+import { useTerraMissionControlOptional } from '@/components/war-room/terra/mission-control/TerraMissionControlProvider'
 import { useMediaPlayback } from './MediaPlaybackProvider'
+
+function IconMusicNote({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" data-testid="war-room-media-note">
+      <path d="M9 18.5a2.5 2.5 0 1 1-1-1.9V6.4l10-2.2v10.4a2.5 2.5 0 1 1-1-1.9V6.8L10 8.6v9.9z" />
+    </svg>
+  )
+}
+
+/**
+ * Persistent War Room Media launcher.
+ * terra_media may be closed/minimized/compact/full — this control must still render.
+ * Presentation state only changes the label/pressed styling, never mount.
+ */
+const EMPTY_WORKSPACE_SNAPSHOT: TerraWorkspaceSnapshot = {
+  panels: {},
+  zOrder: [],
+  draggingId: null,
+  settings: { smartClick: true, smartOpen: false, missionControlChrome: true },
+  attention: {},
+}
 
 export function MediaLauncher({
   variant = 'header',
@@ -14,10 +38,24 @@ export function MediaLauncher({
   layout?: 'stack' | 'rail'
 }) {
   const { state, controller } = useMediaPlayback()
-  const open = state.presentation !== 'closed'
+  const workspace = useTerraWorkspaceLayoutApiOptional()
+  const mission = useTerraMissionControlOptional()
+  const workspaceSnapshot = useSyncExternalStore(
+    workspace?.store.subscribe ?? emptySubscribe,
+    workspace?.store.getSnapshot ?? emptyWorkspaceSnapshot,
+    workspace?.store.getSnapshot ?? emptyWorkspaceSnapshot,
+  )
+  const terraPanel = workspaceSnapshot.panels[TERRA_MEDIA_PANEL_ID]
+  const terraClosed = !terraPanel || Boolean(terraPanel.closed)
+  const terraMinimized = Boolean(terraPanel?.minimized)
+  const terraOpen = Boolean(terraPanel && !terraPanel.closed && !terraPanel.minimized)
+  const railControlsWorkspace = variant === 'dock' && layout === 'rail' && Boolean(workspace)
+
+  const floatingOpen = state.presentation !== 'closed'
   const windowOpen = state.presentation === 'window'
   const live = state.playbackState === 'playing'
-  const status = mediaStreamStatusLabel(state.playbackState)
+  const status = railControlsWorkspace ? railPlaybackStatusLabel(state.playbackState) : mediaStreamStatusLabel(state.playbackState)
+  const open = railControlsWorkspace ? terraOpen : floatingOpen
 
   useEffect(() => {
     if (variant !== 'header' && variant !== 'dock') return
@@ -25,8 +63,37 @@ export function MediaLauncher({
     return () => controller.setHeaderLauncherMounted(false)
   }, [controller, variant])
 
-  const label =
-    windowOpen ? 'Focus War Room Media' : state.presentation === 'compact' ? 'Restore War Room Media' : 'Open War Room Media'
+  const label = railControlsWorkspace
+    ? terraClosed
+      ? 'Open War Room Media'
+      : terraMinimized
+        ? 'Restore War Room Media'
+        : 'Focus War Room Media'
+    : windowOpen
+      ? 'Focus War Room Media'
+      : state.presentation === 'compact'
+        ? 'Restore War Room Media'
+        : 'Open War Room Media'
+
+  const launchWorkspacePanel = () => {
+    if (!workspace) return
+    const fallbackSize = terraPanel?.playerChrome === 'compact' ? TERRA_MEDIA_COMPACT_SIZE : TERRA_MEDIA_DEFAULT_SIZE
+    workspace.store.openOrFocus(
+      TERRA_MEDIA_PANEL_ID,
+      workspace.getViewport(),
+      workspace.getSizes()[TERRA_MEDIA_PANEL_ID] ?? fallbackSize,
+    )
+    if (mission?.chromeEnabled) mission.openDrawer('media', 'media')
+  }
+
+  const activate = () => {
+    if (workspace) {
+      launchWorkspacePanel()
+      controller.activateFromCommanderRail()
+      return
+    }
+    controller.launch()
+  }
 
   if (variant === 'dock' && layout === 'rail') {
     return (
@@ -34,6 +101,11 @@ export function MediaLauncher({
         type="button"
         data-testid="media-launcher-dock"
         data-media-launcher="dock"
+        data-terra-media-launcher="rail"
+        data-terra-media-launcher-persistent="true"
+        data-terra-media-panel={TERRA_MEDIA_PANEL_ID}
+        data-terra-media-panel-closed={terraClosed ? 'true' : 'false'}
+        data-rail-playback-status={status}
         aria-label={label}
         aria-pressed={open}
         title="War Room Media"
@@ -45,7 +117,7 @@ export function MediaLauncher({
             ? '0 0 18px rgba(52, 211, 153, 0.28)'
             : '0 0 14px rgba(34, 211, 238, 0.16)',
         }}
-        onClick={() => controller.launch()}
+        onClick={activate}
       >
         <span
           className="commander-agent-icon grid h-9 w-9 shrink-0 place-items-center rounded-lg border text-emerald-200"
@@ -56,14 +128,14 @@ export function MediaLauncher({
           }}
           data-state={live ? 'active' : open ? 'selected' : 'idle'}
         >
-          <IconRadio size={16} />
+          <IconMusicNote size={16} />
         </span>
         <span className="min-w-0">
           <span className="block text-[10px] font-black uppercase leading-tight tracking-[0.14em] text-cyan-100">
             War Room Media
           </span>
           <span className="mt-0.5 block text-[8px] uppercase tracking-widest text-slate-400">
-            {open ? status : 'Radio'}
+            {status}
           </span>
         </span>
       </button>
@@ -76,11 +148,13 @@ export function MediaLauncher({
         type="button"
         data-testid="media-launcher-dock"
         data-media-launcher="dock"
+        data-terra-media-launcher="stack"
+        data-terra-media-launcher-persistent="true"
         aria-label={label}
         aria-pressed={open}
         title="War Room Media"
         className="flex flex-col items-center gap-0.5"
-        onClick={() => controller.launch()}
+        onClick={activate}
       >
         <span
           className="commander-agent-icon grid h-9 w-9 place-items-center rounded-full border bg-slate-950/80 backdrop-blur-xl"
@@ -91,7 +165,7 @@ export function MediaLauncher({
           }}
           data-state={live ? 'active' : open ? 'selected' : 'idle'}
         >
-          <IconRadio size={15} />
+          <IconMusicNote size={15} />
         </span>
         <span className={`max-w-[4.5rem] text-center text-[6px] font-bold uppercase leading-tight tracking-[0.12em] ${open ? 'text-cyan-100' : 'text-slate-400'}`}>
           War Room Media
@@ -111,12 +185,22 @@ export function MediaLauncher({
       className={
         variant === 'header'
           ? 'inline-flex items-center gap-1.5 rounded-full border border-cyan-400/40 px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-cyan-100 hover:bg-cyan-950/40'
-          : 'pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-cyan-400/35 bg-black/75 px-3 py-1.5 text-[9px] font-bold uppercase tracking-widest text-cyan-100 shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md hover:border-cyan-200/60'
+          : 'pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-cyan-400/35 bg-black/75 px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-cyan-100 shadow-[0_8px_24px_rgba(0,0,0,0.45)] backdrop-blur-md hover:border-cyan-200/60'
       }
-      onClick={() => controller.launch()}
+      onClick={activate}
     >
-      <IconRadio size={12} />
-      War Room Media
+      <span data-testid="media-music-icon">
+        <IconMusicNote size={12} />
+      </span>
+      WAR ROOM MEDIA
     </button>
   )
+}
+
+function emptySubscribe(): () => void {
+  return () => undefined
+}
+
+function emptyWorkspaceSnapshot(): TerraWorkspaceSnapshot {
+  return EMPTY_WORKSPACE_SNAPSHOT
 }

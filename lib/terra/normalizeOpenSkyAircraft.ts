@@ -10,6 +10,7 @@
  */
 import type { ResearchDocument } from '@/lib/research-engine/core/types'
 import type { NormalizeResult } from './types'
+import { classifyAircraftIconType } from './vehicleIcons'
 
 function parseFiniteNumber(raw: string | undefined): number | null {
   if (raw === undefined) return null
@@ -36,6 +37,8 @@ export function normalizeOpenSkyAircraft(documents: ResearchDocument[]): Normali
     const verticalRateMps = parseFiniteNumber(doc.identifiers.verticalRateMps)
     const onGround = doc.identifiers.onGround === 'true' ? true : doc.identifiers.onGround === 'false' ? false : null
     const lastContactIso = doc.identifiers.lastContactIso ?? null
+    const emitterCategory = parseFiniteNumber(doc.identifiers.emitterCategory)
+    const aircraftIconType = classifyAircraftIconType({ emitterCategory })
 
     events.push({
       id: doc.providerRecordId ?? doc.id,
@@ -64,6 +67,8 @@ export function normalizeOpenSkyAircraft(documents: ResearchDocument[]): Normali
         velocityMps,
         verticalRateMps,
         onGround,
+        emitterCategory,
+        aircraftIconType,
       },
       provenance: {
         provider: doc.provenance.provider,

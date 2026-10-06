@@ -31,6 +31,10 @@ import { findUrbanBuildingAt, findUrbanRoadAt, findUrbanSignalAt, resolveTerraUr
 import { isTerraWorkspacePanelDragging } from './workspace/isolateTerraGlobeInputs'
 import type { TerraUrbanBuilding, TerraUrbanRoad, TerraUrbanSelection, TerraUrbanSignal } from '@/lib/terra/urbanDetail/types'
 import type { TerraClickPoint } from '@/lib/terra/types'
+import { applyTerraGlobeSunLighting } from '@/lib/terra/solarLighting'
+import { attachTerraGlobeMovementLod } from '@/lib/terra/stability/cameraMovementLod'
+import { attachTerraGlobeRenderGuard } from '@/lib/terra/stability/renderLoopGuard'
+import { registerTerraViewer, unregisterTerraViewer } from '@/lib/terra/stability/diagnostics'
 
 export type TerraImageryTier = 'nasa_gibs_with_osm_fallback'
 
@@ -204,6 +208,8 @@ export function TerraGlobe({
     let viewerHandle: { destroy: () => void } | null = null
     let clickHandler: { destroy: () => void } | null = null
     let resizeObserver: ResizeObserver | null = null
+    let detachMovementLod: (() => void) | null = null
+    let detachRenderGuard: (() => void) | null = null
 
     async function boot() {
       const container = containerRef.current
@@ -282,12 +288,10 @@ export function TerraGlobe({
         viewer.scene.globe.undergroundColor = Cesium.Color.BLACK
         viewer.scene.backgroundColor = Cesium.Color.BLACK
 
-        // Phase 6: real sun-relative lighting, computed by Cesium purely from viewer.clock's
-        // current time — no separate astronomy/rotation logic exists anywhere in Terra. This is
-        // the entire "real day/night terminator" implementation; components/war-room/terra/
-        // useTerraClock.ts only ever sets viewer.clock.currentTime, never touches lighting
-        // directly.
-        viewer.scene.globe.enableLighting = true
+        // Real sun-relative lighting from viewer.clock.currentTime. AUTO night-lights use
+        // ImageryLayer.nightAlpha so only the shadowed hemisphere receives city lights.
+        // MANUAL DAY/NIGHT in TerraNightLights may toggle enableLighting as a labeled preview.
+        applyTerraGlobeSunLighting(viewer.scene.globe, true)
         if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
         if (viewer.scene.skyBox) viewer.scene.skyBox.show = true
         if (viewer.scene.sun) viewer.scene.sun.show = true
@@ -300,6 +304,10 @@ export function TerraGlobe({
 
         viewer.camera.flyHome(0)
         viewer.resize()
+        detachMovementLod = attachTerraGlobeMovementLod(viewer)
+        detachRenderGuard = attachTerraGlobeRenderGuard(viewer)
+        registerTerraViewer(viewer)
+        window.__terraCesiumViewer = viewer
 
         if (cancelled) {
           viewer.destroy()
@@ -477,6 +485,12 @@ export function TerraGlobe({
       cancelled = true
       resizeObserver?.disconnect()
       clickHandler?.destroy()
+      detachMovementLod?.()
+      detachRenderGuard?.()
+      if (viewerHandle) unregisterTerraViewer(viewerHandle)
+      if (typeof window !== 'undefined' && window.__terraCesiumViewer === viewerHandle) {
+        delete window.__terraCesiumViewer
+      }
       viewerHandle?.destroy()
     }
   }, [])

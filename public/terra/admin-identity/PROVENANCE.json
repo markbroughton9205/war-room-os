@@ -1,0 +1,28 @@
+{
+  "generatedAt": "2026-09-18T18:12:00.000Z",
+  "sources": {
+    "natural_earth": {
+      "license": "Public Domain",
+      "homepage": "https://www.naturalearthdata.com/about/terms-of-use/",
+      "files": ["countries-110m.json", "admin1-50m.json", "places-110m.json"],
+      "version": "5.1.2",
+      "counts": { "countries": 177, "admin1": 294, "places": 240 }
+    },
+    "flag_icons": {
+      "license": "MIT",
+      "homepage": "https://github.com/lipis/flag-icons",
+      "version": "7.5.0",
+      "files": ["flags/countries/*.svg"],
+      "count": 271
+    },
+    "wikimedia_commons": {
+      "license": "Per-file (US state flags typically public domain)",
+      "homepage": "https://commons.wikimedia.org/",
+      "files": ["flags/states/*.svg"],
+      "downloaded": 29,
+      "includesTexas": true,
+      "missingRemainBoundaryAndNameOnly": true
+    }
+  },
+  "claims": "War Room does not make territorial claims. Disputed Natural Earth classifications are preserved on FEATURECLA/TYPE."
+}

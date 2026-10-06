@@ -1,9 +1,11 @@
 import Link from 'next/link'
+import { WarRoomBackControl } from '@/components/war-room/WarRoomBackControl'
 
 export default function WorkspacePage() {
   return (
     <main className="min-h-screen bg-black px-6 py-8 text-white">
       <section className="mx-auto max-w-5xl">
+        <WarRoomBackControl />
         <p className="text-xs font-bold uppercase tracking-[0.3em] text-yellow-400">War Room Workspace</p>
         <h1 className="mt-3 text-3xl font-bold">Contributor Workspace</h1>
         <p className="mt-3 max-w-2xl text-sm text-zinc-400">

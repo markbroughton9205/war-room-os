@@ -29,3 +29,12 @@ export function evaluateFullTeamSatisfied(
 export const FULL_TEAM_GATE_TIMEOUT_MS = 5000
 
 export const FULL_TEAM_UNSATISFIED_MESSAGE = 'Full-team condition not satisfied.'
+
+/** GI-ENG-01: SHORT_PATH / HANDOFF never force the six-seat full-team gate. */
+export function detectFullTeamRequiredForGiPath(
+  decreeText: string,
+  path?: import('@/lib/council/gi/types').CouncilPath,
+): boolean {
+  if (path === 'SHORT_PATH' || path === 'HANDOFF') return false
+  return detectFullTeamRequired(decreeText)
+}

@@ -15,7 +15,13 @@ export const EARTH_ASSETS = {
 } as const
 
 export const EARTH_VISUAL_LABEL = 'Earth visual · NASA Blue Marble'
-export const EARTH_STATUS_LABEL = 'Terra · Connected'
+/** Homepage globe runtime. Distinct from God's Eye and from the earth texture. */
+export const TERRA_RUNTIME_STATE_LABEL = 'TERRA CONNECTED'
+export const TERRA_RUNTIME_UNAVAILABLE_LABEL = 'TERRA UNAVAILABLE'
+export const GODSEYE_STATE_LABEL = "GOD'S EYE NOT CONFIGURED"
+export const EARTH_VISUAL_ACTIVE_LABEL = 'EARTH VISUAL ACTIVE'
+export const EARTH_VISUAL_UNAVAILABLE_LABEL = 'EARTH VISUAL UNAVAILABLE'
+export const EARTH_STATUS_LABEL = TERRA_RUNTIME_STATE_LABEL
 
 export const EARTH_ASSET_RECORDS = [
   {

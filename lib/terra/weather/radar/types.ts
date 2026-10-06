@@ -30,7 +30,7 @@ export const IEM_USCOMP_COVERAGE: TerraDegreeRectangle & { basis: string } = {
   basis: 'IEM n0q_0.wld + N0Q mosaic dimensions after 2014-08-08',
 }
 
-export const DEFAULT_RADAR_OPACITY = 0.45
+export const DEFAULT_RADAR_OPACITY = 0.40
 export const RADAR_HISTORY_MINUTES = 120
 export const RADAR_METADATA_CACHE_MS = 90_000
 /** Mosaic is 5-minute. IEM mosaics products within 15 minutes of runtime. */
@@ -75,4 +75,6 @@ export type RadarCatalog = {
   fromCache: boolean
   catalogState: Exclude<RadarCoverageState, 'NO_COVERAGE'>
   error: string | null
+  /** Provider-reported contributing/total radars for the mosaic, e.g. "144/147". */
+  radarQuorum: string | null
 }

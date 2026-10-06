@@ -14,11 +14,25 @@ export type RuntimeStatusGroundingInput = {
   extraFacts?: string[]
 }
 
+const LOCAL_STATUS_EXACT =
+  /^(?:what(?:'s| is) the status|status|war room status|how is war room doing|is everything running|what(?:'s| is) running right now|what is online|what is connected)[.!?]*$/i
+
+const LOCAL_STATUS_PHRASE =
+  /(?:status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary|fresh\s+council\s+round|(?:current\s+)?runtime\s+health)/i
+
+/**
+ * Local War Room runtime status. These prompts stay on telemetry.
+ * They are not web research, even when they contain "right now".
+ */
 export function isWarRoomRuntimeStatusDecree(text: string): boolean {
   const raw = text.trim()
   if (!raw) return false
-  return /(?:status\s+summary\s+of\s+(?:the\s+)?war\s*room|(?:war\s*room|runtime)\s+status|system\s+health|(?:give\s+me\s+(?:a\s+)?)?(?:short\s+)?status\s+summary)/i.test(raw)
-    && !/\b(panama|freight|broughton|business\s+plan|relocation)\b/i.test(raw)
+  if (/\b(panama|freight|broughton|business\s+plan|relocation|bitcoin|election)\b/i.test(raw) && !/\bwar\s*room\b/i.test(raw)) {
+    return false
+  }
+  if (/\bresearch\b/i.test(raw) && !/\bwar\s*room\b/i.test(raw)) return false
+  const normalized = raw.replace(/[.!?]+\s*$/g, '').trim()
+  return LOCAL_STATUS_EXACT.test(normalized) || LOCAL_STATUS_PHRASE.test(raw)
 }
 
 export function buildRuntimeStatusGroundingBlock(input: RuntimeStatusGroundingInput): string {

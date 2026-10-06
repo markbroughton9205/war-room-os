@@ -112,6 +112,10 @@ export type CouncilChatJson = {
   /** Present on HTTP 200 when the route degraded instead of failing the batch. */
   councilProviderHttpStatus?: 'timed_out' | 'failed'
   councilProviderHttpDetail?: string
+  /** Set when the stream ended before a final body. Not a seat failure. */
+  streamTerminalCode?: string
+  /** Safe typed conversational failure for Advanced / diagnostics. Never chain-of-thought. */
+  councilFailureCode?: 'MODEL_UNAVAILABLE' | 'AURORA_EMPTY' | 'ROUTING_FAILED' | 'CONTEXT_FAILED' | 'TIMEOUT' | 'STREAM_FINAL_MISSING' | null
   /** Server-detected continuation pressure without permission framing — requires UI approval before acting. */
   continuationRequest?: ContinuationRequest
   diagnosticMeta?: {
@@ -161,6 +165,10 @@ export type CouncilChatJson = {
   shadowCouncilAssembly?: CouncilShadowSelectionReport
   /** Nebula RoundHealth projection for this round (Inspector/diagnostics only). */
   roundHealth?: NebulaRoundHealth
+  /** Evidence Board snapshot when the round terminated through the existing EBC mission. */
+  evidenceBoardCouncil?: {
+    completion_state?: string
+  }
   /** Authoritative Nebula round state for this Commander turn. */
   councilRound?: import('@/lib/council/nebula/roundState').CouncilRound
 }

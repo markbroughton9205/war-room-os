@@ -1,0 +1,16 @@
+---
+description: Every War Room page/workspace must have a clear way back to home. Never trap the Commander.
+globs: app/**/page.tsx,components/war-room/**/*.tsx
+alwaysApply: false
+---
+
+# Always a way back
+
+Commander must never feel trapped on a page.
+
+When adding or editing a War Room page, view, or workspace:
+
+- Render `WarRoomBackControl` from `@/components/war-room/WarRoomBackControl`, **or** Foundry's `FoundryHomeNav` on Foundry surfaces.
+- Link to `WAR_ROOM_HOME_HREF` (`/`). Never `history.back()` or `router.back()` — those fail when the page is the first history entry, a desktop shell load, or a deep link.
+- Alt+H is the shared home shortcut (`matchesHomeShortcut` in `lib/native-builder/foundryNavigation.ts`).
+- Do not add a second back control on Foundry pages that already have `FoundryHomeNav`.

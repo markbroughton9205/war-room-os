@@ -19,7 +19,7 @@
  * only — never written to war_room_audit_logs or anywhere else. Camera movement and exploratory
  * clicks are transient UI state, not War Room events.
  */
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import dynamic from 'next/dynamic'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
@@ -37,15 +37,41 @@ import { composeTerraHazardCounters } from '@/lib/terra/hazardStatus'
 import { useTerraCameraScale } from './useTerraCameraScale'
 import { TerraTimeline } from './TerraTimeline'
 import { TerraEarthImagery } from './TerraEarthImagery'
+import { TerraNightLights } from './TerraNightLights'
+import { TerraLightingControl } from './TerraLightingControl'
 import { TerraRadarImagery } from './TerraRadarImagery'
 import { TerraRadarStatus } from './TerraRadarStatus'
 import { useTerraRadar } from './useTerraRadar'
+import { useTerraEarthPulse } from './useTerraEarthPulse'
+import { TerraCloudImagery } from './TerraCloudImagery'
+import { TerraWeatherAtmosphereControls } from './TerraWeatherAtmosphereControls'
+import { useTerraWeatherPrefs } from './useTerraWeatherPrefs'
+import { TerraAuroraLayer } from './TerraAuroraLayer'
+import { TerraLightningLayer } from './TerraLightningLayer'
+import { TerraEarthquakePulseLayer } from './TerraEarthquakePulseLayer'
+import { TerraEarthPulseStatus } from './TerraEarthPulseStatus'
+import { TerraLayerGovernorPanel } from './TerraLayerGovernorPanel'
+import { TerraAdminIdentityPanel } from './TerraAdminIdentityPanel'
+import { TerraAdminIdentityLayer } from './TerraAdminIdentityLayer'
+import { useTerraAdminIdentityPrefs } from './useTerraAdminIdentityPrefs'
+import { governorLayerPresent, useTerraLayerGovernor } from './useTerraLayerGovernor'
+import { classifyProviderHealth, geoColorAlphaThreshold, lightningCap, providerRetryAllowed, QUAKE_MAJOR_MIN_MAG, type LayerGovernorPlan } from '@/lib/terra/layerGovernor'
+import { buildAdminIdentityPresentation } from '@/lib/terra/adminIdentity'
+import {
+  cityLightsTuningForBand,
+  inferredUrbanIlluminationEnabled,
+  observedNightLightsMaxLevel,
+  observedNightLightsOpacityScale,
+} from '@/lib/terra/realisticEarth/cityLights'
+import { TerraAtmosphereDepth } from './TerraAtmosphereDepth'
+import { prefersTerraReducedMotion } from '@/lib/terra/earthPulse'
+import { pointInRadarCoverage } from '@/lib/terra/weather/radar'
 import { TERRA_LAYER_SUMMARIES, type TerraLayerSummary } from '@/lib/terra/layerCatalogSummary'
 import { isLocationBoundTerraLayer, terraLayerQueryOverride } from '@/lib/terra/activeLocationQueries'
 import { TERRA_LAYER_LIVE_STATUS_LABELS, type TerraLayerLiveStatus } from '@/lib/terra/layerLiveStatus'
 import { TERRA_TIME_WINDOW_PRESETS, filterTerraFeaturesByTime, shouldAutoRefreshTerraLayer, terraFeaturesShallowEqual } from '@/lib/terra/terraTime'
 import type { TerraClickPoint, TerraGeoFeature, TerraIntelligenceEventKind, TerraTimeMode, TerraTimeWindow } from '@/lib/terra/types'
-import type { TerraLocationTarget } from '@/lib/terra/locationCommand'
+import type { TerraLocationResolution, TerraLocationTarget } from '@/lib/terra/locationCommand'
 import type { TerraActiveLocation, TerraContextType, TerraReverseLocationResolution } from '@/lib/terra/activeLocation'
 import { enrichSearchWithReverse, promoteMeaningfulAdmin, selectedJurisdictionFromSearch } from '@/lib/terra/searchJurisdiction'
 import { TerraLocationCommandInput } from './TerraLocationCommandInput'
@@ -65,10 +91,22 @@ import { useTerraRelatedIntelligence } from './useTerraRelatedIntelligence'
 import { TerraRelatedIntelligencePanel } from './TerraRelatedIntelligencePanel'
 import { useTerraCameraViewRectangle } from './useTerraCameraViewRectangle'
 import { useTerraAircraftTrails } from './useTerraAircraftTrails'
+import { useTerraFlightIntelligence } from './useTerraFlightIntelligence'
+import { TerraFlightMonitor } from './TerraFlightMonitor'
+import { filterFlightMonitor, type FlightMonitorFilter, type WatchRule } from '@/lib/terra/flightIntelligence/monitor'
 import { useTerraVesselTrails } from './useTerraVesselTrails'
 import { buildTerraAircraftBoundingBoxQuery, type TerraDegreeRectangle } from '@/lib/terra/aircraftBoundingBox'
 import { terraCameraRectSignature } from '@/lib/terra/cameraRectSignature'
 import { summarizeTerraAircraftFeatures } from '@/lib/terra/aircraftRegionalSummary'
+import {
+  classifyAircraftIconType,
+  classifyVesselIconType,
+  filterVehicleFeatures,
+  OPENSKY_EMITTER_CATEGORY_LABELS,
+  vehicleObservationFreshness,
+  VEHICLE_LAYER_FILTERS,
+  type VehicleLayerFilter,
+} from '@/lib/terra/vehicleIcons'
 import { buildTerraLiveIntelBoundingBoxQuery, buildTerraMaritimeBoundingBoxQuery, terraCameraViewHasMaritimeCoverage } from '@/lib/terra/maritimeBoundingBox'
 import { summarizeTerraVesselFeatures } from '@/lib/terra/vesselRegionalSummary'
 import { resolveTerraMaritimeCoverageState, TERRA_MARITIME_COVERAGE_LABELS, type TerraMaritimeCoverageState } from '@/lib/terra/maritimeCoverage'
@@ -93,14 +131,19 @@ import { TerraWeatherAlertToast } from './TerraWeatherAlertToast'
 import { TerraWeatherDetailDrawer } from './TerraWeatherDetailDrawer'
 import { useTerraWeatherAlerts } from './useTerraWeatherAlerts'
 import { TerraNearbyCameras } from './TerraNearbyCameras'
+import { TerraTrafficCamPlayer, type TerraTrafficCamRadar } from './TerraTrafficCamPlayer'
 import { TerraNearbyGodsEye } from './TerraNearbyGodsEye'
 import { TerraAreaLiveControl } from './TerraAreaLiveControl'
 import { AreaLiveMediaViewer } from './AreaLiveMediaViewer'
 import { TerraWorkspaceLayoutProvider, type LayoutApi } from './workspace/TerraWorkspaceLayoutProvider'
+import { TerraMissionBar, TerraMissionControlChrome } from './mission-control/TerraMissionControlChrome'
+import { useTerraMissionControlOptional } from './mission-control/TerraMissionControlProvider'
 import { TerraWorkspacePanel } from './workspace/TerraWorkspacePanel'
-import type { TerraSmartClickInteractionKind } from '@/lib/terra/workspace/panelIds'
+import { TERRA_EMERGENCY_REPORT_DEFAULT_SIZE, TERRA_EMERGENCY_REPORT_PANEL_ID, TERRA_SMART_CLICK_ROUTES, type TerraSmartClickInteractionKind } from '@/lib/terra/workspace/panelIds'
 import { TerraWorkspaceResetButton } from './workspace/TerraWorkspaceResetButton'
 import { TerraWorkspaceControl } from './workspace/TerraWorkspaceControl'
+import { TerraMediaPanel } from './TerraMediaPanel'
+import { TerraEmergencyReportPanel } from './TerraEmergencyReportPanel'
 import { TerraCameraHoverWorkspace } from './workspace/TerraCameraHoverWorkspace'
 import { TerraCommanderSessionChip, commanderSessionNeedsAuth, useTerraCommanderSession } from './TerraCommanderSessionChip'
 import { TerraCameraDiscoveryControl, type TerraCameraDiscoveryUiState } from './TerraCameraDiscoveryControl'
@@ -116,9 +159,21 @@ import { inspectEnrichAppliesTo } from '@/lib/terra/godsEye/inspectRace'
 import { trafficCameraRuntimeEvidenceFromFeatures } from '@/lib/terra/godsEye/cameraHealth'
 import { godsEyeLodDensity } from '@/lib/terra/godsEye/lodRuntime'
 import { emptyTerraLodTelemetry, sampleBrowserMemoryMb, type TerraLodTelemetry } from '@/lib/terra/godsEye/lodTelemetry'
+import { terraWorkerPool } from '@/lib/terra/worker/pool'
 import type { NearbyCameraIndexFeature, NearbyPublicCamera } from '@/lib/terra/godsEye/nearbyCameras'
 import { nearbyPublicCameraCount, nearbyPublicCameras } from '@/lib/terra/godsEye/nearbyCameras'
-import { nearbyCameraCoverageForPoint } from '@/lib/terra/godsEye/nearbyCameraCoverage'
+import { nearbyCameraCoverageForPoint, nearbyCameraProvidersCoveringPoint } from '@/lib/terra/godsEye/nearbyCameraCoverage'
+import { resolveNearbyActivePoint } from '@/lib/terra/nearbyActivePoint'
+import {
+  DEFAULT_TERRA_LIGHTING_MODE,
+  persistTerraLightingMode,
+  readTerraLightingMode,
+  resolveNightLayerVisual,
+  resolveSolarLighting,
+  type TerraLightingMode,
+} from '@/lib/terra/solarLighting'
+import { matchQualityLabel } from '@/lib/terra/geocodeMatchQuality'
+import { decideRefinementFlight } from '@/lib/terra/placePrecision/twoStageFlight'
 import {
   buildAreaLiveCameraMedia,
   buildAreaLiveCouncilHandoff,
@@ -177,11 +232,17 @@ import {
 } from '@/lib/terra/streetView'
 import {
   NWS_WEATHER_LAYER_ID,
+  buildRadarActiveDetails,
   buildWeatherCouncilHandoff,
   resolveWeatherFlyPlan,
   weatherAlertFromFeature,
   type WeatherAlert,
 } from '@/lib/terra/weather'
+import {
+  CLOUD_HISTORICAL_MAX_SKEW_MS,
+  GEOCOLOR_TRANSLUCENCY_NOTE,
+  historicalWeatherAvailability,
+} from '@/lib/terra/weather/atmosphere'
 import {
   TERRA_HANDOFF_STORAGE_KEY,
   buildTerraCouncilHandoffFromIntelItem,
@@ -190,7 +251,13 @@ import {
   canSendTerraObjectToCouncil,
   type TerraCouncilHandoffPayload,
 } from '@/lib/terra/councilHandoff'
+import {
+  buildTrafficCameraCouncilHandoff,
+  normalizeTerraTrafficCamera,
+} from '@/lib/terra/trafficCameraContract'
+import { adjacentTrafficCamera } from '@/lib/terra/trafficCameraCycle'
 import { observedVesselFromSelection } from '@/lib/astra/observedVessel'
+import { getTerraMediaStore, isTerraMediaNwsPriority, resolveTerraMediaCandidate } from '@/lib/terra/terraMedia'
 import {
   compactLocalLabel,
   contextMovedMaterially,
@@ -216,6 +283,16 @@ const TerraGlobe = dynamic(() => import('./TerraGlobe').then(m => m.TerraGlobe),
 })
 
 const TerraFeatureLayer = dynamic(() => import('./TerraFeatureLayer').then(m => m.TerraFeatureLayer), { ssr: false })
+
+const TerraWorkerRuntimeMetric = memo(function TerraWorkerRuntimeMetric() {
+  const pool = terraWorkerPool()
+  const metrics = useSyncExternalStore(pool.subscribe, pool.getSnapshot, pool.getSnapshot)
+  return (
+    <li data-testid="terra-worker-runtime">
+      workers {metrics.workerCount} · queued {metrics.queuedJobs} · running {metrics.runningJobs} · integrate {metrics.integrationQueue} · pressure {metrics.backpressure} · frame p95 {metrics.p95FrameTimeMs?.toFixed(1) ?? 'UNAVAILABLE'}ms · orbit smooth {metrics.smoothMode ? 'ON' : 'OFF'}
+    </li>
+  )
+})
 
 type Selection =
   | { kind: 'none' }
@@ -417,11 +494,18 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           {typeof feature.properties.pointCount === 'number' && <Row label="Recent readings" value={String(feature.properties.pointCount)} />}
         </>
       )
-    case 'aircraft_state':
+    case 'aircraft_state': {
+      const iconType = classifyAircraftIconType(feature.properties)
+      const emitter = typeof feature.properties.emitterCategory === 'number' ? feature.properties.emitterCategory : null
+      const emitterLabel = emitter !== null ? (OPENSKY_EMITTER_CATEGORY_LABELS[emitter] ?? null) : null
+      const freshness = vehicleObservationFreshness('aircraft_state', feature.timestamp, new Date().toISOString())
       return (
         <>
-          <Row label="Coordinates" value={coords} mono />
           {typeof feature.properties.callsign === 'string' && <Row label="Callsign" value={feature.properties.callsign} />}
+          {typeof feature.properties.registration === 'string' && <Row label="Registration" value={feature.properties.registration} />}
+          <Row label="Aircraft type" value={iconType.replaceAll('_', ' ')} />
+          {emitterLabel && <Row label="ADS-B category" value={`${emitterLabel} (${emitter})`} />}
+          <Row label="Coordinates" value={coords} mono />
           {typeof feature.properties.icao24 === 'string' && <Row label="ICAO24" value={feature.properties.icao24} mono />}
           {typeof feature.properties.originCountry === 'string' && <Row label="Origin country" value={feature.properties.originCountry} />}
           <Row label="Altitude" value={feature.altitude !== null ? `${Math.round(feature.altitude).toLocaleString()} m` : 'not reported'} />
@@ -429,26 +513,38 @@ function FeatureDetailFields({ feature }: { feature: TerraGeoFeature }) {
           {typeof feature.properties.headingDeg === 'number' && <Row label="Heading" value={`${Math.round(feature.properties.headingDeg)}°`} />}
           {typeof feature.properties.verticalRateMps === 'number' && <Row label="Vertical rate" value={`${feature.properties.verticalRateMps.toFixed(1)} m/s`} />}
           <Row label="On ground" value={feature.properties.onGround === true ? 'Yes' : feature.properties.onGround === false ? 'No' : 'not reported'} />
-          {feature.timestamp && <Row label="Last contact" value={new Date(feature.timestamp).toLocaleString()} />}
+          {typeof feature.properties.origin === 'string' && <Row label="Origin" value={feature.properties.origin} />}
+          {typeof feature.properties.destination === 'string' && <Row label="Destination" value={feature.properties.destination} />}
+          <Row label="Source" value={feature.provenance.provider} />
+          {feature.timestamp && <Row label="Observed at" value={new Date(feature.timestamp).toLocaleString()} />}
+          <Row label="Freshness" value={freshness} />
         </>
       )
-    case 'vessel_position':
+    }
+    case 'vessel_position': {
+      const iconType = classifyVesselIconType(feature.properties)
+      const freshness = vehicleObservationFreshness('vessel_position', feature.timestamp, new Date().toISOString())
       return (
         <>
-          <Row label="Coordinates" value={coords} mono />
+          {typeof feature.properties.name === 'string' && <Row label="Name" value={feature.properties.name} />}
           {typeof feature.properties.mmsi === 'string' && <Row label="MMSI" value={feature.properties.mmsi} mono />}
           {typeof feature.properties.imo === 'string' && <Row label="IMO" value={feature.properties.imo} mono />}
           {typeof feature.properties.callSign === 'string' && <Row label="Callsign" value={feature.properties.callSign} />}
-          {typeof feature.properties.shipTypeLabel === 'string' && <Row label="Type" value={feature.properties.shipTypeLabel} />}
+          {typeof feature.properties.shipTypeLabel === 'string'
+            ? <Row label="Ship type" value={feature.properties.shipTypeLabel} />
+            : <Row label="Ship type" value={iconType.replaceAll('_', ' ')} />}
           {typeof feature.properties.speedKnots === 'number' && <Row label="Speed" value={`${feature.properties.speedKnots.toFixed(1)} kn`} />}
           {typeof feature.properties.courseDeg === 'number' && <Row label="Course" value={`${Math.round(feature.properties.courseDeg)}°`} />}
           {typeof feature.properties.headingDeg === 'number' && <Row label="Heading" value={`${Math.round(feature.properties.headingDeg)}°`} />}
           {typeof feature.properties.navStatLabel === 'string' && <Row label="Nav status" value={feature.properties.navStatLabel} />}
           {typeof feature.properties.destination === 'string' && <Row label="Destination" value={feature.properties.destination} />}
           {typeof feature.properties.draughtMeters === 'number' && <Row label="Draught" value={`${feature.properties.draughtMeters.toFixed(1)} m`} />}
-          {feature.timestamp && <Row label="Last observed" value={new Date(feature.timestamp).toLocaleString()} />}
+          <Row label="Source" value={feature.provenance.provider} />
+          {feature.timestamp && <Row label="Observed at" value={new Date(feature.timestamp).toLocaleString()} />}
+          <Row label="Freshness" value={freshness} />
         </>
       )
+    }
     case 'heritage_site':
       return (
         <>
@@ -668,6 +764,29 @@ function CoordinateOriginFields({ feature }: { feature: TerraGeoFeature }) {
   )
 }
 
+function presentationForCatalogLayer(layerId: string, plan: LayerGovernorPlan): {
+  cluster: boolean
+  maxFeatures?: number
+  minMagnitude?: number
+} {
+  if (layerId.includes('earthquake')) {
+    const d = plan.layers.earthquakes
+    return {
+      cluster: d.detailLevel === 'MAJOR_ONLY' || d.detailLevel === 'AGGREGATED' || d.entityDensity < 0.7,
+      maxFeatures: Math.max(6, Math.round(36 * d.entityDensity)),
+      minMagnitude: d.detailLevel === 'MAJOR_ONLY' ? QUAKE_MAJOR_MIN_MAG : undefined,
+    }
+  }
+  if (layerId.includes('nws') || layerId.includes('weather_alert')) {
+    const d = plan.layers.weather_hazards
+    return {
+      cluster: d.detailLevel === 'MAJOR_ONLY' || d.entityDensity < 0.7,
+      maxFeatures: Math.max(4, Math.round(24 * d.entityDensity)),
+    }
+  }
+  return { cluster: false }
+}
+
 function TerraLayerRow({
   layer,
   viewer,
@@ -677,6 +796,9 @@ function TerraLayerRow({
   selectedTime,
   timeWindow,
   hideControls = false,
+  cluster = false,
+  maxFeatures,
+  minMagnitude,
 }: {
   layer: TerraLayerSummary
   viewer: CesiumViewer | null
@@ -691,6 +813,9 @@ function TerraLayerRow({
    * useTerraLayer fetch or the TerraFeatureLayer render, so it's the same single layer
    * implementation in both presentations, not a second one. */
   hideControls?: boolean
+  cluster?: boolean
+  maxFeatures?: number
+  minMagnitude?: number
 }) {
   const { activeLocation } = useTerraActiveLocation()
   const queryOverride = terraLayerQueryOverride(layer.id, activeLocation)
@@ -717,6 +842,20 @@ function TerraLayerRow({
   // loaded" behavior exactly, so no existing layer's visible output changes unless a Commander
   // deliberately narrows the window or scrubs into the past.
   const visibleFeatures = useMemo(() => filterTerraFeaturesByTime(feed.features, selectedTime, timeWindow), [feed.features, selectedTime, timeWindow])
+  const displayedFeatures = useMemo(() => {
+    let next = visibleFeatures
+    if (typeof minMagnitude === 'number') {
+      next = next.filter(feature => typeof feature.properties.mag !== 'number' || feature.properties.mag >= minMagnitude)
+    }
+    if (typeof maxFeatures === 'number' && next.length > maxFeatures) {
+      next = [...next].sort((a, b) => {
+        const magA = typeof a.properties.mag === 'number' ? a.properties.mag : 0
+        const magB = typeof b.properties.mag === 'number' ? b.properties.mag : 0
+        return magB - magA
+      }).slice(0, maxFeatures)
+    }
+    return next
+  }, [visibleFeatures, maxFeatures, minMagnitude])
 
   useEffect(() => {
     onFeaturesChange(layer.id, visibleFeatures)
@@ -728,12 +867,12 @@ function TerraLayerRow({
   const selectedId = selection.kind === 'feature' && selection.layerId === layer.id ? selection.featureId : null
 
   if (hideControls) {
-    return <TerraFeatureLayer layerId={layer.id} viewer={viewer} enabled={enabled} features={visibleFeatures} selectedId={selectedId} />
+    return <TerraFeatureLayer layerId={layer.id} viewer={viewer} enabled={enabled} features={displayedFeatures} selectedId={selectedId} cluster={cluster} />
   }
 
   return (
     <div className="border-t border-white/10 pt-2 first:border-t-0 first:pt-0 first:mt-0 mt-2">
-      <TerraFeatureLayer layerId={layer.id} viewer={viewer} enabled={enabled} features={visibleFeatures} selectedId={selectedId} />
+      <TerraFeatureLayer layerId={layer.id} viewer={viewer} enabled={enabled} features={displayedFeatures} selectedId={selectedId} cluster={cluster} />
       <div className="flex items-center justify-between text-[11px]">
         <span className="text-slate-300">{layer.label}</span>
         <button
@@ -858,25 +997,32 @@ function attachTerraLodSampler(targetViewer: CesiumViewer, onSample: (sample: Te
   return () => remove()
 }
 
-function searchProvenance(source: TerraLocationTarget['source']): {
+function searchProvenance(target: TerraLocationTarget): {
   source: TerraActiveLocation['source']
   sourceLabel: TerraActiveLocation['sourceLabel']
   resolved: boolean
 } {
-  if (source === 'nominatim') return { source, sourceLabel: 'OpenStreetMap Nominatim', resolved: true }
-  if (source === 'open_meteo') return { source, sourceLabel: 'Open-Meteo Geocoding', resolved: true }
-  if (source === 'geonames') return { source, sourceLabel: 'GeoNames', resolved: true }
-  return { source: 'coordinates', sourceLabel: 'Commander-selected coordinates', resolved: false }
+  const precision = target.precisionSource?.trim()
+  if (target.source === 'nominatim') return { source: target.source, sourceLabel: precision || 'OpenStreetMap Nominatim', resolved: true }
+  if (target.source === 'open_meteo') return { source: target.source, sourceLabel: precision || 'Open-Meteo Geocoding', resolved: true }
+  if (target.source === 'geonames') return { source: target.source, sourceLabel: precision || 'GeoNames', resolved: true }
+  return { source: 'coordinates', sourceLabel: precision || 'Commander-selected coordinates', resolved: false }
 }
 
 function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'workspace' | 'command-center' }) {
   const [globeStatus, setGlobeStatus] = useState<TerraGlobeStatus>({ phase: 'loading' })
   const [viewer, setViewer] = useState<CesiumViewer | null>(null)
+  const workerPool = useMemo(() => terraWorkerPool(), [])
+  useEffect(() => {
+    workerPool.initialize()
+    return () => workerPool.suspend()
+  }, [workerPool])
   // Smart Click's escape hatch into the workspace layout store: TerraWorkspaceLayoutProvider is
   // rendered further down in this same component's JSX, so its context can't be consumed here —
   // onApiReady hands back the same store instance imperatively (see workspaceLayoutApiRef usage
   // below), never a second store/provider.
   const workspaceLayoutApiRef = useRef<LayoutApi | null>(null)
+  const mission = useTerraMissionControlOptional()
   const [selection, setSelection] = useState<Selection>({ kind: 'none' })
   const [layerFeatures, setLayerFeatures] = useState<Record<string, TerraGeoFeature[]>>({})
   const { activeLocation, setActiveLocation, selectedEvent, setSelectedEvent, setAircraftSummary, setMaritimeSummary } = useTerraActiveLocation()
@@ -889,6 +1035,9 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   const layerFeaturesRef = useRef(layerFeatures)
   layerFeaturesRef.current = layerFeatures
   const reverseRequestRef = useRef<{ sequence: number; controller: AbortController | null }>({ sequence: 0, controller: null })
+  const refineInterruptRef = useRef(false)
+  const refineSequenceRef = useRef(0)
+  const [locationRefineStatus, setLocationRefineStatus] = useState('')
   const gpsAppliedRef = useRef<{ lat: number; lon: number; at: number } | null>(null)
   const gpsCenteredRef = useRef(false)
   const investigationLockRef = useRef(false)
@@ -920,7 +1069,19 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   const cinematic = useTerraCinematicOrbit(viewer, clock.time.mode === 'live', cameraScale.level, {
     autoResumeLocked: !orbitMayAutoResume(navState),
   })
+  useEffect(() => {
+    const stop = () => cinematic.noteInteraction()
+    window.addEventListener('pointerdown', stop, true)
+    window.addEventListener('keydown', stop, true)
+    window.addEventListener('wheel', stop, { capture: true, passive: true })
+    return () => {
+      window.removeEventListener('pointerdown', stop, true)
+      window.removeEventListener('keydown', stop, true)
+      window.removeEventListener('wheel', stop, true)
+    }
+  }, [cinematic.noteInteraction])
   const handleManualFlightInterrupt = useCallback(() => {
+    refineInterruptRef.current = true
     cinematic.pause()
     applyNavAction('MANUAL_DRAG')
   }, [applyNavAction, cinematic])
@@ -956,17 +1117,40 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     applyNavAction('ORBIT_STARTED')
   }, [applyNavAction, cinematic.orbiting])
   const gps = useCommanderLocation()
-  const nearbyCameraOrigin = activeLocation
-    ? { latitude: activeLocation.latitude, longitude: activeLocation.longitude, label: activeLocation.label }
-    : gps.location
-      ? { latitude: gps.location.lat, longitude: gps.location.lon, label: 'Commander GPS (local only)' }
-      : null
+  const nearbyActivePoint = resolveNearbyActivePoint({
+    activeLocation,
+    gps: gps.location ? { lat: gps.location.lat, lon: gps.location.lon, tracking: gps.tracking } : null,
+  })
+  const [lightingMode, setLightingMode] = useState<TerraLightingMode>(DEFAULT_TERRA_LIGHTING_MODE)
+  useEffect(() => {
+    setLightingMode(readTerraLightingMode())
+  }, [])
+  const handleLightingMode = useCallback((mode: TerraLightingMode) => {
+    setLightingMode(mode)
+    persistTerraLightingMode(mode)
+  }, [])
+  const solarLighting = useMemo(
+    () => nearbyActivePoint
+      ? resolveSolarLighting(nearbyActivePoint.latitude, nearbyActivePoint.longitude, clock.time.currentTime)
+      : null,
+    [nearbyActivePoint, clock.time.currentTime],
+  )
+  const nightLayerVisual = useMemo(() => resolveNightLayerVisual(lightingMode), [lightingMode])
+  const nearbyCameraOrigin = nearbyActivePoint
+  const nearbyCoveringProviders = useMemo(
+    () => nearbyCameraOrigin
+      ? nearbyCameraProvidersCoveringPoint(nearbyCameraOrigin.latitude, nearbyCameraOrigin.longitude)
+      : [],
+    [nearbyCameraOrigin],
+  )
+  const nearbyCoveringLayerIds = useMemo(() => nearbyCoveringProviders.map(row => row.id), [nearbyCoveringProviders])
   const nearbyCameraOriginRef = useRef(nearbyCameraOrigin)
   nearbyCameraOriginRef.current = nearbyCameraOrigin
   const cameraContextOriginRef = useRef<{ key: string; latitude: number; longitude: number } | null>(null)
   const commanderSession = useTerraCommanderSession()
   const sessionAuthRequired = commanderSessionNeedsAuth(commanderSession)
   const [cameraLayerAuthById, setCameraLayerAuthById] = useState<Record<string, boolean>>({})
+  const [cameraLayerProviderFailById, setCameraLayerProviderFailById] = useState<Record<string, boolean>>({})
   const [cameraDiscovery, setCameraDiscovery] = useState<{
     active: boolean
     layerIds: string[]
@@ -982,6 +1166,8 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   const [areaLiveOpen, setAreaLiveOpen] = useState(false)
   const [areaLiveCategory, setAreaLiveCategory] = useState<AreaLiveCategory>('ALL')
   const [areaLiveMediaOpen, setAreaLiveMediaOpen] = useState(false)
+  const [trafficCamPlayerOpen, setTrafficCamPlayerOpen] = useState(false)
+  const [trafficCamCycleSet, setTrafficCamCycleSet] = useState<NearbyPublicCamera[]>([])
   const [areaLiveMediaExpanded, setAreaLiveMediaExpanded] = useState(false)
   const [areaLiveOfficialOpen, setAreaLiveOfficialOpen] = useState(false)
   const [areaLiveIntelId, setAreaLiveIntelId] = useState<string | null>(null)
@@ -999,8 +1185,13 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     if (required && isPublicTerraLayer(layerId)) return
     setCameraLayerAuthById(prev => (prev[layerId] === required ? prev : { ...prev, [layerId]: required }))
   }, [])
+  const handleCameraProviderAuthFail = useCallback((layerId: string, failed: boolean) => {
+    if (!DISCOVERY_CAMERA_LAYER_IDS.includes(layerId)) return
+    setCameraLayerProviderFailById(prev => (prev[layerId] === failed ? prev : { ...prev, [layerId]: failed }))
+  }, [])
   const cameraLayerAuthRequired = Object.values(cameraLayerAuthById).some(Boolean)
   const cameraAuthRequired = cameraLayerAuthRequired
+  const coveringProviderAuthFailed = nearbyCoveringLayerIds.some(id => cameraLayerProviderFailById[id])
   const [buildingsTileset, setBuildingsTileset] = useState<import('cesium').Cesium3DTileset | null>(null)
   const isLocalScale = cameraScale.level === 'local' || cameraScale.level === 'building'
 
@@ -1148,8 +1339,9 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       longitude: nearbyCameraOrigin.longitude,
       features: nearbyCameraIndex,
       maxKm: cameraSearchRadiusKm,
+      coveringLayerIds: nearbyCoveringLayerIds,
     })
-  }, [nearbyCameraOrigin, nearbyCameraIndex, cameraSearchRadiusKm])
+  }, [nearbyCameraOrigin, nearbyCameraIndex, cameraSearchRadiusKm, nearbyCoveringLayerIds])
   const areaLiveNearbyCameras = useMemo(() => {
     if (!nearbyCameraOrigin) return []
     return nearbyPublicCameras({
@@ -1158,8 +1350,9 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       features: nearbyCameraIndex,
       maxKm: cameraSearchRadiusKm,
       maxResults: 40,
+      coveringLayerIds: nearbyCoveringLayerIds,
     })
-  }, [nearbyCameraOrigin, nearbyCameraIndex, cameraSearchRadiusKm])
+  }, [nearbyCameraOrigin, nearbyCameraIndex, cameraSearchRadiusKm, nearbyCoveringLayerIds])
   const areaLiveCoverage = useMemo(() => {
     if (!nearbyCameraOrigin) return null
     return nearbyCameraCoverageForPoint({
@@ -1168,9 +1361,10 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       nearbyCount: areaLiveCameraCount,
       indexLoaded: cameraIndexLoaded,
       commanderAuthRequired: cameraAuthRequired,
+      providerAuthFailed: coveringProviderAuthFailed,
       radiusKm: cameraSearchRadiusKm,
     })
-  }, [nearbyCameraOrigin, areaLiveCameraCount, cameraIndexLoaded, cameraAuthRequired, cameraSearchRadiusKm])
+  }, [nearbyCameraOrigin, areaLiveCameraCount, cameraIndexLoaded, cameraAuthRequired, coveringProviderAuthFailed, cameraSearchRadiusKm])
   const areaLiveMedia = useMemo(() => {
     if (selectedFeature?.kind === 'traffic_camera' && selection.kind === 'feature') {
       return buildAreaLiveCameraMedia({
@@ -1186,6 +1380,10 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       origin: nearbyCameraOrigin,
     })
   }, [selectedFeature, selection, cameraStillNonce, areaLiveOfficialOpen, areaLiveCoverage, nearbyCameraOrigin, areaLiveIntelMedia])
+  const selectedTrafficCamera = useMemo(() => {
+    if (selection.kind !== 'feature' || selectedFeature?.kind !== 'traffic_camera') return null
+    return normalizeTerraTrafficCamera({ ...selectedFeature, layerId: selection.layerId })
+  }, [selection, selectedFeature])
   const openAreaLiveOfficialViewer = useCallback(() => {
     commandNav('AREA_LIVE_MEDIA')
     setAreaLiveOpen(true)
@@ -1370,17 +1568,22 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   }, [applyCameraDiscoveryPlan, nearbyCameraOrigin])
 
   useEffect(() => {
-    if (!areaLiveOpen && godsEyeViewMode !== 'AREA_LIVE') return
-    if (!nearbyCameraOrigin) return
-    const discovery = cameraDiscoveryRef.current
-    if (discovery.active && discovery.prompt !== 'NEED_LOCATION' && discovery.prompt !== 'IDLE') return
-    handleDiscoverCameras()
-  }, [areaLiveOpen, godsEyeViewMode, nearbyCameraOriginKey, handleDiscoverCameras, nearbyCameraOrigin])
+    if (!nearbyCameraOriginKey) return
+    const origin = nearbyCameraOriginRef.current
+    if (!origin) return
+    setCameraSearchRadiusKm(CAMERA_DISCOVERY_RADIUS_KM)
+    applyCameraDiscoveryPlan(origin, { radiusKm: CAMERA_DISCOVERY_RADIUS_KM })
+  }, [nearbyCameraOriginKey, applyCameraDiscoveryPlan])
 
   const handleGodsEyeViewModeChange = useCallback((mode: GodsEyeViewMode) => {
     setGodsEyeViewMode(mode)
     if (mode === 'AREA_LIVE') setAreaLiveOpen(true)
-  }, [])
+    if (mode === 'CAMERAS') mission?.openDrawer('intelligence', 'cameras')
+    else if (mode === 'AREA_LIVE') mission?.openDrawer('intelligence', 'area-live')
+    else if (mode === 'HAZARDS') mission?.openDrawer('intelligence', 'hazards')
+    else if (mode === 'INTEL') mission?.openDrawer('intelligence', 'live-intel')
+    else mission?.openDrawer('intelligence', 'gods-eye')
+  }, [mission])
 
   const handleAreaLiveToggle = useCallback(() => {
     setAreaLiveOpen(value => {
@@ -1403,8 +1606,9 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   }, [nearbyCameraOrigin])
 
   const focusNearbyCameras = useCallback(() => {
+    mission?.openDrawer('intelligence', 'nearby')
     document.querySelector('[data-testid="terra-nearby-cameras"]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-  }, [])
+  }, [mission])
 
   useEffect(() => {
     if (!cameraDiscovery.active) return
@@ -1462,6 +1666,24 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   // nearbyLandmarksQuery's point+radius above.
   const cameraViewRectangle = useTerraCameraViewRectangle(viewer)
   useEffect(() => {
+    if (!viewer || viewer.isDestroyed()) return
+    workerPool.nextGeneration()
+    const removeStart = viewer.camera.moveStart.addEventListener(() => {
+      workerPool.setSmoothMode(true)
+    })
+    const removeEnd = viewer.camera.moveEnd.addEventListener(() => {
+      workerPool.setSmoothMode(false)
+      workerPool.nextGeneration()
+    })
+    return () => {
+      removeStart()
+      removeEnd()
+    }
+  }, [viewer, workerPool])
+  useEffect(() => {
+    workerPool.setSmoothMode(cinematic.orbiting || cinematicFlight.flying)
+  }, [cinematic.orbiting, cinematicFlight.flying, workerPool])
+  useEffect(() => {
     cameraMetaRef.current = {
       zoom: godsEyeZoomRungForTerraScale(cameraScale.level),
       bbox: cameraViewRectangle.rectangle,
@@ -1501,7 +1723,8 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   // command center specifically, since that surface has no Data Layers toggle UI at all and the
   // mission requires real aircraft visible there without a manual step (mirrors why
   // usgs_earthquake_feed alone is grandfathered into DEFAULT_ENABLED_LAYER_IDS).
-  const [aircraftEnabled, setAircraftEnabled] = useState(() => presentation === 'command-center')
+  const [aircraftEnabled, setAircraftEnabled] = useState(true)
+  const [vehicleFilters, setVehicleFilters] = useState<VehicleLayerFilter[]>([])
   // Gated off entirely at global camera scale (never a world-sized bbox query — mission section
   // 5/16) and null while the layer is off, matching every other layer's "null query = don't fetch"
   // convention. lib/terra/aircraftBoundingBox.ts applies its own span/validity backstop on top of
@@ -1515,13 +1738,25 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   // 60s — matched to (never faster than) the Research Engine's own live-feed cache TTL for
   // opensky and this repo's no-layer-faster-than-60s floor; see layerCatalog.ts's opensky entry.
   const aircraft = useTerraLayer('opensky', aircraftBoundingBoxQuery !== null, 60_000, aircraftAutoRefreshAllowed, aircraftBoundingBoxQuery)
+  const [flightFilter, setFlightFilter] = useState<FlightMonitorFilter>('ALL')
+  const [flightWatchRules, setFlightWatchRules] = useState<WatchRule[]>([])
+  const [flightFollowKey, setFlightFollowKey] = useState<string | null>(null)
+  const flight = useTerraFlightIntelligence(aircraft.features, aircraftBoundingBoxQuery, flightWatchRules, clock.time.currentTime)
+  const flightFeatures = flight.features.length > 0 ? flight.features : aircraft.features
   useEffect(() => {
-    const timeout = setTimeout(() => handleFeaturesChange('opensky', aircraft.features), 0)
+    const timeout = setTimeout(() => handleFeaturesChange('opensky', flightFeatures), 0)
     return () => clearTimeout(timeout)
-  }, [aircraft.features, handleFeaturesChange])
+  }, [flightFeatures, handleFeaturesChange])
   const aircraftSelectedId = selection.kind === 'feature' && selection.layerId === 'opensky' ? selection.featureId : null
-  // Session-only trail, never a provider historical track — see lib/terra/aircraftTrail.ts.
-  const aircraftTrails = useTerraAircraftTrails(aircraft.features, aircraftBoundingBoxQuery !== null)
+  const aircraftTrails = useTerraAircraftTrails(flightFeatures, aircraftBoundingBoxQuery !== null)
+  const displayedAircraft = useMemo(
+    () => filterVehicleFeatures(flightFeatures, vehicleFilters),
+    [flightFeatures, vehicleFilters],
+  )
+  const monitoredAircraft = useMemo(
+    () => filterFlightMonitor(flight.truth, flightFilter),
+    [flight.truth, flightFilter],
+  )
   // Bounded, honest Observed Data summary — never the raw feed itself — handed to the existing
   // Council semantic-context extension point below.
   const aircraftRegionalSummary = useMemo(
@@ -1555,6 +1790,10 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   // digitraffic_marine and this repo's no-layer-faster-than-60s floor; see layerCatalog.ts's
   // digitraffic_marine entry.
   const maritime = useTerraLayer('digitraffic_marine', maritimeBoundingBoxQuery !== null, 60_000, maritimeAutoRefreshAllowed, maritimeBoundingBoxQuery)
+  const displayedVessels = useMemo(
+    () => filterVehicleFeatures(maritime.features, vehicleFilters),
+    [maritime.features, vehicleFilters],
+  )
   useEffect(() => {
     const timeout = setTimeout(() => handleFeaturesChange('digitraffic_marine', maritime.features), 0)
     return () => clearTimeout(timeout)
@@ -1713,11 +1952,223 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     intelItems: weatherIntelItems,
     nowIso: clock.time.currentTime,
   })
+  const radarFetchAllowedRef = useRef(true)
+  const radarAnimateAllowedRef = useRef(true)
+  const cloudFetchAllowedRef = useRef(true)
   const radar = useTerraRadar({
     view: cameraViewRectangle.rectangle,
     nowIso: clock.time.currentTime,
-    scaleLevel: cameraScale.level,
+    timeMode: clock.time.mode,
+    fetchAllowedRef: radarFetchAllowedRef,
+    animateAllowedRef: radarAnimateAllowedRef,
   })
+  const trafficCamRadar = useMemo<TerraTrafficCamRadar>(() => buildRadarActiveDetails({
+    catalog: radar.catalog,
+    viewState: radar.viewState.state,
+    frame: radar.selected,
+    ageLabel: radar.frameAge,
+    view: cameraViewRectangle.rectangle,
+    nowIso: clock.time.currentTime,
+    echoFraction: radar.echoFraction,
+  }), [
+    radar.catalog,
+    radar.viewState.state,
+    radar.selected,
+    radar.frameAge,
+    radar.echoFraction,
+    cameraViewRectangle.rectangle,
+    clock.time.currentTime,
+  ])
+  const weatherPrefs = useTerraWeatherPrefs()
+  const cloudAdvanceRef = useRef(true)
+  const lightningFetchAllowedRef = useRef(true)
+  const auroraFetchAllowedRef = useRef(true)
+  const earthPulse = useTerraEarthPulse({
+    terraTime: clock.time.currentTime,
+    timeMode: clock.time.mode,
+    advanceAllowedRef: cloudAdvanceRef,
+    cloudFetchAllowedRef,
+    lightningFetchAllowedRef,
+    auroraFetchAllowedRef,
+  })
+  const cloudHistoricalOk = historicalWeatherAvailability({
+    timeMode: clock.time.mode,
+    terraTime: clock.time.currentTime,
+    frames: earthPulse.clouds.frames,
+    maxSkewMs: CLOUD_HISTORICAL_MAX_SKEW_MS,
+  }) === 'ok'
+  const governorInput = useMemo(() => ({
+    scale: cameraScale.level,
+    viewBand: cameraScale.viewBand,
+    heightMeters: cameraScale.heightMeters,
+    timeMode: clock.time.mode,
+    solarState: solarLighting?.lightingState ?? null,
+    lightingMode,
+    orbiting: cinematic.orbiting,
+    flying: cinematicFlight.flying,
+    idle: cinematic.orbiting && !cinematicFlight.flying,
+    reducedMotion: prefersTerraReducedMotion(),
+    selectionKind: selection.kind,
+    selectionLayerId: selection.kind === 'feature' ? selection.layerId : null,
+    mediaOpen: areaLiveMediaOpen || trafficCamPlayerOpen || godsEyeViewMode === 'AREA_LIVE',
+    godsEyeMode: godsEyeViewMode,
+    hasActiveLocation: Boolean(nearbyActivePoint),
+    latitude: nearbyActivePoint?.latitude ?? null,
+    longitude: nearbyActivePoint?.longitude ?? null,
+    coveringProviders: nearbyCoveringProviders.map(row => row.id),
+    cloudsTruth: earthPulse.engine?.domains.clouds.truthState ?? earthPulse.clouds.truthState,
+    cloudFrames: earthPulse.clouds.frames.filter(frame => frame.satellite === 'GOES-East').length,
+    radarState: radar.historicalUnavailable ? 'UNAVAILABLE FOR SELECTED TIME' : radar.viewState.state,
+    radarHasFrame: Boolean(radar.selected),
+    radarCoverage: nearbyActivePoint
+      ? pointInRadarCoverage(nearbyActivePoint.latitude, nearbyActivePoint.longitude)
+      : radar.viewState.state !== 'NO_COVERAGE',
+    lightningTruth: earthPulse.lightningState,
+    lightningCount: earthPulse.lightning.length,
+    auroraTruth: earthPulse.auroraState,
+    auroraMax: earthPulse.auroraMax,
+    earthquakeCount: (layerFeatures.usgs_earthquake_feed ?? []).length,
+    firesAvailable: (earthPulse.engine?.domains.fires.truthState ?? 'UNAVAILABLE') !== 'UNAVAILABLE'
+      && (earthPulse.engine?.domains.fires.truthState ?? 'UNAVAILABLE') !== 'NO_COVERAGE',
+    firesTruth: earthPulse.engine?.domains.fires.truthState ?? 'UNAVAILABLE',
+    weatherAlertCount: weatherAlerts.alerts.length,
+    weatherSelected: selection.kind === 'feature' && selection.layerId === NWS_WEATHER_LAYER_ID,
+    earthquakeSelected: selection.kind === 'feature' && selection.layerId === 'usgs_earthquake_feed',
+    fps: lodTelemetry.fps,
+    entityCount: lodTelemetry.entityCount,
+    flightKey: cinematicFlight.flying ? (cinematicFlight.label || 'flight') : null,
+    nowMs: Date.now(),
+    radarRetryAllowed: providerRetryAllowed({
+      health: classifyProviderHealth({ state: radar.historicalUnavailable ? 'UNAVAILABLE FOR SELECTED TIME' : radar.viewState.state }),
+      consecutiveFailures: radar.consecutiveFailures,
+      lastAttemptMs: radar.lastAttemptMs,
+      nowMs: Date.now(),
+    }),
+    cloudRetryAllowed: providerRetryAllowed({
+      health: classifyProviderHealth({ state: earthPulse.engine?.domains.clouds.truthState ?? earthPulse.clouds.truthState }),
+      consecutiveFailures: earthPulse.cloudConsecutiveFailures,
+      lastAttemptMs: earthPulse.cloudLastAttemptMs,
+      nowMs: Date.now(),
+    }),
+  }), [
+    cameraScale.level, cameraScale.viewBand, cameraScale.heightMeters, clock.time.mode, solarLighting?.lightingState, lightingMode,
+    cinematic.orbiting, cinematicFlight.flying, cinematicFlight.label, selection,
+    areaLiveMediaOpen, trafficCamPlayerOpen, godsEyeViewMode, nearbyActivePoint, nearbyCoveringProviders,
+    earthPulse.engine, earthPulse.clouds.truthState, earthPulse.clouds.frames,
+    earthPulse.lightningState, earthPulse.lightning.length, earthPulse.auroraState, earthPulse.auroraMax,
+    earthPulse.cloudConsecutiveFailures, earthPulse.cloudLastAttemptMs,
+    radar.historicalUnavailable, radar.viewState.state, radar.selected, radar.consecutiveFailures, radar.lastAttemptMs,
+    layerFeatures.usgs_earthquake_feed,
+    weatherAlerts.alerts.length, lodTelemetry.fps, lodTelemetry.entityCount, clock.time.currentTime,
+  ])
+  const governor = useTerraLayerGovernor(governorInput)
+  const cameraMetadataPrefetchKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    const prefetch = governor.plan.prefetch
+    if (!cinematicFlight.flying || prefetch.cancelled || prefetch.providers.length === 0 || !nearbyCameraOrigin) return
+    if (governor.plan.viewBand === 'SPACE' || governor.plan.viewBand === 'GLOBAL' || governor.plan.viewBand === 'CONTINENTAL') return
+    const key = `${prefetch.key}:${nearbyCameraOrigin.latitude.toFixed(3)},${nearbyCameraOrigin.longitude.toFixed(3)}`
+    if (cameraMetadataPrefetchKeyRef.current === key) return
+    cameraMetadataPrefetchKeyRef.current = key
+    const timeout = window.setTimeout(() => {
+      // Metadata/catalog only. TerraTrafficLayer does not fetch image bytes until one camera is selected.
+      applyCameraDiscoveryPlan(nearbyCameraOrigin, { radiusKm: CAMERA_DISCOVERY_RADIUS_KM })
+    }, 120)
+    return () => window.clearTimeout(timeout)
+  }, [applyCameraDiscoveryPlan, cinematicFlight.flying, governor.plan.prefetch, governor.plan.viewBand, nearbyCameraOrigin])
+  const adminPrefs = useTerraAdminIdentityPrefs()
+  const adminPresentation = useMemo(() => buildAdminIdentityPresentation({
+    viewBand: governor.plan.viewBand,
+    heightMeters: cameraScale.heightMeters,
+    activeLocation,
+    currentTask: governor.plan.inferred.context,
+    masterHidden: governor.plan.layers.admin_identity.mode === 'OFF' || governor.plan.layers.admin_identity.effective === 'HIDDEN' || governor.plan.layers.admin_identity.effective === 'UNLOADED',
+    subModes: adminPrefs.prefs.subModes,
+    flagOpacityOverride: adminPrefs.prefs.flagOpacityOverride,
+    browseMode: activeLocation?.contextType === 'VIEWPORT',
+  }), [
+    governor.plan.viewBand,
+    governor.plan.inferred.context,
+    governor.plan.layers.admin_identity.mode,
+    governor.plan.layers.admin_identity.effective,
+    cameraScale.heightMeters,
+    activeLocation,
+    nearbyActivePoint,
+    adminPrefs.prefs,
+  ])
+  useEffect(() => {
+    setAircraftEnabled(governor.plan.layers.aircraft.mode !== 'OFF' && governor.plan.layers.aircraft.fetchAllowed)
+  }, [governor.plan.layers.aircraft.mode, governor.plan.layers.aircraft.fetchAllowed])
+  useEffect(() => {
+    setMaritimeEnabled(governor.plan.layers.vessels.mode !== 'OFF' && governor.plan.layers.vessels.fetchAllowed)
+  }, [governor.plan.layers.vessels.mode, governor.plan.layers.vessels.fetchAllowed])
+  useEffect(() => {
+    cloudAdvanceRef.current = governor.plan.layers.clouds.animate
+    cloudFetchAllowedRef.current = governor.plan.layers.clouds.fetchAllowed
+    radarFetchAllowedRef.current = governor.plan.layers.radar.fetchAllowed
+    radarAnimateAllowedRef.current = governor.plan.layers.radar.animate
+    lightningFetchAllowedRef.current = governor.plan.layers.lightning.fetchAllowed
+    auroraFetchAllowedRef.current = governor.plan.layers.aurora.fetchAllowed
+  }, [
+    governor.plan.layers.clouds.animate,
+    governor.plan.layers.clouds.fetchAllowed,
+    governor.plan.layers.radar.fetchAllowed,
+    governor.plan.layers.radar.animate,
+    governor.plan.layers.lightning.fetchAllowed,
+    governor.plan.layers.aurora.fetchAllowed,
+  ])
+  useEffect(() => {
+    const prefetch = governor.plan.prefetch
+    if (!prefetch.key || prefetch.cancelled) return
+    const controller = new AbortController()
+    const dest = cinematicFlight.lastPlan?.destination
+    const lat = dest && dest.kind === 'point' ? dest.latitude : nearbyActivePoint?.latitude
+    const lon = dest && dest.kind === 'point' ? dest.longitude : nearbyActivePoint?.longitude
+    const heightMeters = dest && dest.kind === 'point' ? dest.heightMeters : Number.POSITIVE_INFINITY
+    const jobs: Promise<unknown>[] = []
+    if (prefetch.weatherMetadata) {
+      jobs.push(fetch('/api/terra/weather/radar?mode=live', { signal: controller.signal, cache: 'no-store' }).catch(() => null))
+      jobs.push(fetch(`/api/terra/earth-pulse/clouds?mode=live&time=${encodeURIComponent(clock.time.currentTime)}`, { signal: controller.signal, cache: 'no-store' }).catch(() => null))
+    }
+    if (prefetch.roadsLikely && lat != null && lon != null && heightMeters <= 25_000) {
+      const span = 0.02
+      const params = new URLSearchParams({
+        lod: 'city',
+        west: String(lon - span),
+        south: String(lat - span),
+        east: String(lon + span),
+        north: String(lat + span),
+      })
+      jobs.push(fetch(`/api/terra/urban-tiles?${params}`, { signal: controller.signal, cache: 'no-store' }).catch(() => null))
+    }
+    void Promise.all(jobs)
+    return () => controller.abort()
+  }, [
+    governor.plan.prefetch.key,
+    governor.plan.prefetch.cancelled,
+    governor.plan.prefetch.weatherMetadata,
+    governor.plan.prefetch.roadsLikely,
+    cinematicFlight.lastPlan,
+    nearbyActivePoint,
+    clock.time.currentTime,
+  ])
+  const cloudsPresent = governorLayerPresent(governor.plan.layers.clouds.effective)
+  const radarPresent = governorLayerPresent(governor.plan.layers.radar.effective)
+  const nightPresent = governorLayerPresent(governor.plan.layers.night_lights.effective)
+  const cityLightTuning = cityLightsTuningForBand(governor.plan.viewBand)
+  const inferredUrbanGlow = inferredUrbanIlluminationEnabled({
+    band: governor.plan.viewBand,
+    solar: solarLighting?.lightingState ?? null,
+    lightingMode,
+  })
+  const governedNightVisual = {
+    ...nightLayerVisual,
+    alpha: nightPresent
+      ? nightLayerVisual.alpha * governor.plan.layers.night_lights.opacity * observedNightLightsOpacityScale(governor.plan.viewBand)
+      : 0,
+    nightLightsVisible: nightPresent && nightLayerVisual.nightLightsVisible,
+    enableLighting: nightLayerVisual.enableLighting,
+  }
   const areaLiveWorkspace = useMemo(() => {
     const items = liveIntelPanel?.sections.flatMap(section => section.items) ?? []
     const mediaItems = items.filter(isAreaLiveLocalIntelItem).map(item => ({
@@ -1785,13 +2236,14 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       cameraFeatures: nearbyCameraIndex,
       cameraIndexLoaded,
       cameraAuthRequired,
+      cameraProviderAuthFailed: coveringProviderAuthFailed,
       radiusKm: cameraSearchRadiusKm,
       features: Object.values(layerFeatures).flat(),
       localNewsCount: local?.count,
       localNewsState: local?.coverageState,
       landmarkCount: nearbyLandmarks.features.length,
     })
-  }, [cameraDiscovery.prompt, cameraAuthRequired, cameraIndexLoaded, cameraSearchRadiusKm, layerFeatures, liveIntelPanel, nearbyCameraIndex, nearbyCameraOrigin, nearbyLandmarks.features.length])
+  }, [cameraDiscovery.prompt, cameraAuthRequired, coveringProviderAuthFailed, cameraIndexLoaded, cameraSearchRadiusKm, layerFeatures, liveIntelPanel, nearbyCameraIndex, nearbyCameraOrigin, nearbyLandmarks.features.length])
   const hazardSummary = useMemo(() => composeTerraHazardCounters({
     providers: liveIntelSnapshot.providers,
     fetchedAt: liveIntelSnapshot.fetchedAt,
@@ -1808,7 +2260,9 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         now: clock.time.currentTime,
       })
   }, [selectedFeature, liveIntelSnapshot.objects, clock.time.currentTime])
-  const canSendSelectedToCouncil = areaLiveMedia && areaLiveMediaOpen
+  const canSendSelectedToCouncil = selectedTrafficCamera && trafficCamPlayerOpen
+    ? true
+    : areaLiveMedia && areaLiveMediaOpen
     ? canSendAreaLiveToCouncil(areaLiveMedia)
     : inspectedIntelItem
       ? canSendTerraIntelItemToCouncil(inspectedIntelItem)
@@ -1905,7 +2359,18 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     }
   }, [applyAstraMissionPayload, astraMission?.id, canRunAstraMission])
   const sendSelectedObjectToCouncil = useCallback(() => {
-    const payload = areaLiveMedia && areaLiveMediaOpen
+    const payload = selectedTrafficCamera && trafficCamPlayerOpen
+      ? buildTrafficCameraCouncilHandoff({
+        camera: selectedTrafficCamera,
+        radarAt: trafficCamRadar.frameAt,
+        radarProvider: trafficCamRadar.status === 'OUT_OF_COVERAGE'
+          ? null
+          : `${trafficCamRadar.provider} · ${trafficCamRadar.product}`,
+        radarStatus: trafficCamRadar.status,
+        radarEchoState: trafficCamRadar.echoState,
+        commanderPrompt: commanderQuestion,
+      })
+      : areaLiveMedia && areaLiveMediaOpen
       ? buildAreaLiveCouncilHandoff(areaLiveMedia, commanderQuestion)
       : inspectedIntelItem
         ? buildTerraCouncilHandoffFromIntelItem({
@@ -1927,7 +2392,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       return
     }
     window.location.href = '/?terraAnalyze=1'
-  }, [areaLiveMedia, areaLiveMediaOpen, inspectedIntelItem, selectedLiveObject, selectedFeature, commanderQuestion, liveIntelPanel?.scope.label])
+  }, [selectedTrafficCamera, trafficCamPlayerOpen, trafficCamRadar, areaLiveMedia, areaLiveMediaOpen, inspectedIntelItem, selectedLiveObject, selectedFeature, commanderQuestion, liveIntelPanel?.scope.label])
   const sendAreaLiveRowToCouncil = useCallback((row: AreaLiveNearbyRow) => {
     if (!row.media) return
     const payload = buildAreaLiveCouncilHandoff(row.media, commanderQuestion)
@@ -2005,6 +2470,8 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     setAreaLiveOfficialOpen(false)
     setAreaLiveIntelMedia(null)
     setAreaLiveIntelId(null)
+    setTrafficCamPlayerOpen(false)
+    setTrafficCamCycleSet([])
     if (isCameraSelection) setSelection({ kind: 'none' })
     if (selectedEventRef.current?.kind === 'traffic_camera') setSelectedEvent(null)
   }, [setSelectedEvent])
@@ -2396,15 +2863,22 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         }
       }
       if (feature.kind === 'traffic_camera') {
+        setTrafficCamCycleSet(current => (
+          !trafficCamPlayerOpen || !current.some(camera => camera.id === feature.id && camera.layerId === layerId)
+            ? areaLiveNearbyCameras
+            : current
+        ))
         setInspectPinned(true)
         setAreaLiveOpen(true)
         setGodsEyeViewMode('AREA_LIVE')
         setAreaLiveCategory('CAMERAS')
         setAreaLiveOfficialOpen(false)
         setAreaLiveMediaOpen(false)
+        setTrafficCamPlayerOpen(true)
         setAreaLiveIntelMedia(null)
         setAreaLiveIntelId(null)
       } else if (areaLiveOpen || godsEyeViewMode === 'AREA_LIVE') {
+        setTrafficCamPlayerOpen(false)
         const item = findPanelItem(liveIntelPanel, feature.id)
         if (item) {
           setAreaLiveIntelId(item.id)
@@ -2421,7 +2895,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         setAreaLiveOfficialOpen(false)
       }
     }
-  }, [activateCoordinate, areaLiveOpen, commandNav, godsEyeViewMode, layerFeatures, liveIntelPanel, setSelectedEvent, flyToEventFeature])
+  }, [activateCoordinate, areaLiveNearbyCameras, areaLiveOpen, commandNav, godsEyeViewMode, layerFeatures, liveIntelPanel, setSelectedEvent, flyToEventFeature, trafficCamPlayerOpen])
   const viewAreaLiveRow = useCallback((row: AreaLiveNearbyRow) => {
     setAreaLiveHoverRowId(null)
     setAreaLiveMediaExpanded(true)
@@ -2492,6 +2966,20 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   const selectFederatedCamera = useCallback((row: { id: string; layerId: string }) => {
     handleEntityClick(`${row.layerId}:${row.id}`)
   }, [handleEntityClick])
+  const selectedTrafficLayerId = selection.kind === 'feature' ? selection.layerId : null
+  const trafficCamPlayerIndex = selectedTrafficCamera
+    ? trafficCamCycleSet.findIndex(camera => camera.id === selectedTrafficCamera.id && camera.layerId === selectedTrafficLayerId)
+    : -1
+  const cycleTrafficCamera = useCallback((offset: -1 | 1) => {
+    const current = selectionRef.current
+    if (current.kind !== 'feature') return
+    const target = adjacentTrafficCamera(
+      trafficCamCycleSet,
+      { id: current.featureId, layerId: current.layerId },
+      offset,
+    )
+    if (target) handleEntityClick(`${target.layerId}:${target.id}`)
+  }, [handleEntityClick, trafficCamCycleSet])
 
   const handleUrbanBuildingClick = useCallback((building: Parameters<typeof urbanBuildingToSelection>[0]) => {
     commandNav('BUILDING_INSPECT')
@@ -2522,8 +3010,12 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   }, [activateCoordinate, commandNav, setSelectedEvent])
 
   const handleResolvedLocation = useCallback((target: TerraLocationTarget) => {
+    governor.noteInteraction()
     reverseRequestRef.current.controller?.abort()
     reverseRequestRef.current = { sequence: reverseRequestRef.current.sequence + 1, controller: null }
+    refineInterruptRef.current = false
+    const refineSequence = refineSequenceRef.current + 1
+    refineSequenceRef.current = refineSequence
     clearCameraInspect()
     const selectedAt = new Date().toISOString()
     const selected = selectedJurisdictionFromSearch({
@@ -2534,29 +3026,29 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       nativeName: target.nativeName,
       englishName: target.englishName,
     })
-    const provenance = searchProvenance(target.source)
+    const provenance = searchProvenance(target)
     investigationLockRef.current = true
     gps.setFollowCamera(false)
-    const searchLocation: TerraActiveLocation = {
-      latitude: target.latitude,
-      longitude: target.longitude,
+    const searchLocationFrom = (next: TerraLocationTarget, selectedAtStamp: string): TerraActiveLocation => ({
+      latitude: next.latitude,
+      longitude: next.longitude,
       height: null,
       hasTerrainHeight: false,
-      label: target.label,
-      place: provenance.resolved ? target.label : null,
-      address: provenance.resolved ? target.label : null,
+      label: next.label,
+      place: provenance.resolved ? next.label : null,
+      address: provenance.resolved ? next.label : null,
       region: null,
       source: provenance.source,
-      sourceLabel: provenance.sourceLabel,
-      sourceUrl: target.sourceUrl,
-      nativePlaceName: target.nativeName,
-      englishPlaceName: target.englishName,
+      sourceLabel: next.precisionSource || provenance.sourceLabel,
+      sourceUrl: next.sourceUrl,
+      nativePlaceName: next.nativeName,
+      englishPlaceName: next.englishName,
       status: provenance.resolved ? 'resolved' : 'coordinate_only',
       confidence: provenance.resolved ? 'provider_supported' : 'coordinate_only',
       detail: provenance.resolved
         ? 'Commander-selected jurisdiction is the LOCAL query context. Live GPS continues privately if FOLLOW ME is on.'
         : 'Exact typed coordinates; reverse place context was not requested.',
-      selectedAt,
+      selectedAt: selectedAtStamp,
       contextType: 'SEARCH',
       city: selected.city,
       county: selected.county,
@@ -2565,33 +3057,47 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
       countryCode: selected.countryCode,
       searchQuery: selected.searchQuery,
       jurisdictionType: selected.jurisdictionType,
-      bbox: target.boundingBox
-        ? { west: target.boundingBox.west, south: target.boundingBox.south, east: target.boundingBox.east, north: target.boundingBox.north }
+      bbox: next.boundingBox
+        ? { west: next.boundingBox.west, south: next.boundingBox.south, east: next.boundingBox.east, north: next.boundingBox.north }
         : null,
-    }
-    setActiveLocation(searchLocation)
+      matchQuality: next.matchQuality ?? (next.source === 'coordinates' ? 'COORDINATE' : null),
+      houseNumber: next.houseNumber ?? null,
+      road: next.road ?? null,
+      postcode: next.postcode ?? null,
+      precisionSource: next.precisionSource ?? null,
+      enrichmentState: next.enrichmentState ?? null,
+      geometryType: next.geometryType ?? 'point',
+    })
+    setActiveLocation(searchLocationFrom(target, selectedAt))
+    setLocationRefineStatus(target.enrichmentEligible ? 'REFINING PROPERTY LOCATION…' : '')
     commandNav(target.instantRequested ? 'JUMP' : 'SEARCH_GO')
-    cinematicFlight.flyTo({
-      longitude: target.longitude,
-      latitude: target.latitude,
-      boundingBox: target.boundingBox,
-      placeType: target.placeType,
-      instantRequested: target.instantRequested,
-    }, {
-      purpose: target.instantRequested ? 'jump' : 'search',
-      label: target.label,
-      onComplete: () => {
+    const flyTarget = (next: TerraLocationTarget, onComplete?: () => void) => {
+      cinematicFlight.flyTo({
+        longitude: next.longitude,
+        latitude: next.latitude,
+        boundingBox: next.boundingBox,
+        placeType: next.placeType,
+        instantRequested: next.instantRequested,
+        matchClass: next.matchQuality ?? null,
+        ring: next.ring ?? null,
+      }, {
+        purpose: next.instantRequested ? 'jump' : 'search',
+        label: next.label,
+        onComplete,
+      })
+    }
+    const afterFinal = (finalTarget: TerraLocationTarget) => {
       commandNav('FLIGHT_COMPLETE')
       flyCompleteAtRef.current = Date.now()
       lastViewportContextRef.current = {
-        lat: target.latitude,
-        lon: target.longitude,
+        lat: finalTarget.latitude,
+        lon: finalTarget.longitude,
         zoomLevel: godsEyeZoomRungForTerraScale(cameraScale.level),
       }
       if (!viewer || viewer.isDestroyed()) return
       const enrichController = new AbortController()
       reverseRequestRef.current = { sequence: reverseRequestRef.current.sequence + 1, controller: enrichController }
-      const params = new URLSearchParams({ lat: String(target.latitude), lon: String(target.longitude) })
+      const params = new URLSearchParams({ lat: String(finalTarget.latitude), lon: String(finalTarget.longitude) })
       void fetch(`/api/terra/resolve-location?${params}`, { cache: 'no-store', credentials: 'include', signal: enrichController.signal })
         .then(async response => {
           if (!response.ok) throw new Error(`Resolver returned HTTP ${response.status}.`)
@@ -2605,7 +3111,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         .catch(() => undefined)
       void loadCesium().then(Cesium => {
         if (viewer.isDestroyed()) return
-        const carto = Cesium.Cartographic.fromDegrees(target.longitude, target.latitude)
+        const carto = Cesium.Cartographic.fromDegrees(finalTarget.longitude, finalTarget.latitude)
         const sampled = viewer.scene.globe.getHeight(carto)
         if (typeof sampled !== 'number' || !Number.isFinite(sampled)) return
         const current = activeLocationRef.current
@@ -2613,9 +3119,72 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           setActiveLocation({ ...current, height: sampled, hasTerrainHeight: true })
         }
       })
-      },
+    }
+
+    const startStage1 = (stage1: TerraLocationTarget) => {
+      flyTarget(stage1, () => {
+        if (refineSequenceRef.current !== refineSequence) return
+        if (!stage1.enrichmentEligible) afterFinal(stage1)
+      })
+    }
+
+    startStage1(target)
+
+    if (!target.enrichmentEligible) {
+      setLocationRefineStatus('')
+      return
+    }
+
+    void fetch('/api/terra/enrich-location', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: target.query || target.label, seed: target }),
     })
-  }, [cameraScale.level, cinematicFlight, clearCameraInspect, commandNav, gps, setActiveLocation, viewer])
+      .then(async response => response.json() as Promise<TerraLocationResolution>)
+      .then(result => {
+        if (refineSequenceRef.current !== refineSequence) return
+        if (result.status === 'ambiguous') {
+          setLocationRefineStatus('AMBIGUOUS — SELECT LOCATION')
+          return
+        }
+        if (result.status !== 'resolved') {
+          setLocationRefineStatus('PRECISION ENRICHMENT UNAVAILABLE')
+          return
+        }
+        const decision = decideRefinementFlight({
+          interrupted: refineInterruptRef.current,
+          stage1Class: target.matchQuality,
+          stage2Class: result.target.matchQuality,
+          enrichmentState: result.target.enrichmentState,
+        })
+        if (decision.action === 'skip_stage2_interrupt') {
+          setLocationRefineStatus('REFINE CANCELLED — CAMERA HELD')
+          return
+        }
+        if (decision.action !== 'fly_stage2') {
+          setLocationRefineStatus(result.target.enrichmentState === 'refined' ? '' : 'PRECISION ENRICHMENT UNAVAILABLE')
+          if (result.target.enrichmentState !== 'refined') {
+            const current = activeLocationRef.current
+            if (current && current.selectedAt === selectedAt) {
+              setActiveLocation({ ...current, enrichmentState: 'unavailable' })
+            }
+          }
+          afterFinal(target)
+          return
+        }
+        const refined = { ...result.target, instantRequested: target.instantRequested }
+        setActiveLocation(searchLocationFrom(refined, selectedAt))
+        setLocationRefineStatus('')
+        flyTarget(refined, () => afterFinal(refined))
+      })
+      .catch(() => {
+        if (refineSequenceRef.current !== refineSequence) return
+        setLocationRefineStatus('PRECISION ENRICHMENT UNAVAILABLE')
+        afterFinal(target)
+      })
+  }, [cameraScale.level, cinematicFlight, clearCameraInspect, commandNav, governor.noteInteraction, gps, setActiveLocation, viewer])
 
   useEffect(() => {
     if (gps.tracking === 'OFF' && !gps.location) {
@@ -2763,7 +3332,8 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     }
     if (!kind) return
     api.store.notifyInteraction(kind, api.getViewport(), api.getSizes())
-  }, [commandCenter, selection, selectedFeature])
+    if (mission?.chromeEnabled) mission.openForPanel(TERRA_SMART_CLICK_ROUTES[kind].primary)
+  }, [commandCenter, mission, selection, selectedFeature])
 
   useEffect(() => {
     if (commandCenter) return
@@ -2771,7 +3341,40 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
     const api = workspaceLayoutApiRef.current
     if (!api) return
     api.store.notifyInteraction('street_view_point', api.getViewport(), api.getSizes())
-  }, [commandCenter, streetViewOpen, streetViewOrigin])
+    if (mission?.chromeEnabled) mission.openForPanel(TERRA_SMART_CLICK_ROUTES.street_view_point.primary)
+  }, [commandCenter, mission, streetViewOpen, streetViewOrigin])
+
+  useEffect(() => {
+    if (commandCenter) return
+    const weatherAlert = weatherDrawerAlert
+      ?? weatherAlerts.toast?.alert
+      ?? weatherAlerts.alerts.find(entry => isTerraMediaNwsPriority(entry.severity))
+      ?? null
+    const focusedIntel = inspectedIntelItem
+      ?? (weatherAlert
+        ? findPanelItem(liveIntelPanel, weatherAlert.liveIntelId) ?? findPanelItem(liveIntelPanel, weatherAlert.id)
+        : null)
+      ?? (selectedFeature ? findPanelItem(liveIntelPanel, selectedFeature.id) : null)
+    const focusedLive = !weatherAlert && areaLiveMediaOpen ? areaLiveMedia : null
+    const intelFeed = (!weatherAlert && !focusedIntel && !selectedFeature && !focusedLive)
+      ? (liveIntelPanel?.sections.flatMap(section => section.items) ?? [])
+      : null
+    const candidate = resolveTerraMediaCandidate({
+      weatherAlert,
+      intelItem: focusedIntel,
+      feature: weatherAlert ? null : selectedFeature,
+      areaLive: focusedLive,
+      intelFeed,
+      nowIso: weatherAlert?.sent ?? inspectedIntelItem?.retrievedAt ?? selectedFeature?.timestamp ?? undefined,
+    })
+    if (!candidate) return
+    if (!getTerraMediaStore().queue(candidate)) return
+    const api = workspaceLayoutApiRef.current
+    if (!api) return
+    api.store.openOrFocus(TERRA_EMERGENCY_REPORT_PANEL_ID, api.getViewport(), TERRA_EMERGENCY_REPORT_DEFAULT_SIZE)
+    api.store.notifyInteraction('emergency_media', api.getViewport(), api.getSizes())
+    if (mission?.chromeEnabled) mission.openForPanel(TERRA_SMART_CLICK_ROUTES.emergency_media.primary)
+  }, [areaLiveMedia, areaLiveMediaOpen, commandCenter, inspectedIntelItem, liveIntelPanel, mission, selectedFeature, weatherAlerts.alerts, weatherAlerts.toast, weatherDrawerAlert])
   const viewingDetached = Boolean(
     gps.location
     && activeLocation
@@ -2801,8 +3404,26 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
   )
 
   return (
-    <div className={`overflow-hidden bg-black text-white ${commandCenter ? 'relative h-full min-h-0' : 'flex h-screen w-full flex-col'}`}>
-      {!commandCenter ? (
+    <div
+      className={`overflow-hidden bg-black text-white ${commandCenter ? 'relative h-full min-h-0' : 'flex h-screen w-full flex-col'}`}
+      data-terra-mission-control={!commandCenter && mission?.chromeEnabled ? 'true' : 'false'}
+    >
+      {!commandCenter && mission?.chromeEnabled ? (
+        <TerraMissionBar
+          orbiting={cinematic.orbiting}
+          aerialFallback={highResAerialUnavailable ? (
+            <button
+              type="button"
+              onClick={() => setMapDetailMode(v => !v)}
+              className="flex items-center gap-1.5 rounded border border-amber-500/40 bg-amber-950/40 px-2 py-1 text-[9px] font-bold uppercase tracking-widest text-amber-300 hover:bg-amber-900/50"
+              title="NASA GIBS is a real daily photograph capped at city-scale resolution; no ion-backed aerial asset is available at this zoom. OSM map-detail is already the visible fallback. Toggle still forces OSM at any altitude."
+            >
+              {TERRA_HIGH_RES_AERIAL_UNAVAILABLE_MESSAGE}
+              <span className="text-cyan-300">{mapDetailMode ? TERRA_CLOSE_MAP_DETAIL_LABEL : TERRA_OPEN_MAP_DETAIL_LABEL}</span>
+            </button>
+          ) : null}
+        />
+      ) : !commandCenter ? (
         <header
           data-testid="terra-workspace-header"
           className="relative isolate z-[80] flex shrink-0 items-center gap-3 border-b border-emerald-500/40 bg-black px-3 py-2"
@@ -2811,7 +3432,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           <div className="flex min-w-0 items-center gap-2">
             <span className="terra-live-dot h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
             <h1 className="text-[12px] font-bold uppercase tracking-[0.22em] text-emerald-300">WAR ROOM · TERRA</h1>
-            {cinematic.orbiting ? <span className="text-[8px] uppercase tracking-widest text-cyan-300/80">live orbit</span> : null}
+            {cinematic.orbiting ? <span className="text-[8px] uppercase tracking-widest text-cyan-300/80" data-testid="terra-living-orbit-badge">Living Orbit · presentation</span> : null}
           </div>
           {highResAerialUnavailable && (
             <button
@@ -2836,22 +3457,76 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         mapDetailMode={mapDetailMode}
         onAerialImageryAvailabilityChange={setAerialImageryAvailable}
       />
+      <TerraNightLights
+        viewer={viewer}
+        visual={governedNightVisual}
+        catalog={earthPulse.night}
+        saturation={governor.plan.layers.night_lights.saturation * cityLightTuning.saturation}
+        brightness={cityLightTuning.brightness}
+        gamma={cityLightTuning.gamma}
+        contrast={cityLightTuning.contrast}
+        maximumLevel={observedNightLightsMaxLevel(governor.plan.viewBand, earthPulse.night?.maximumLevel ?? 8)}
+      />
       <TerraRadarImagery
         viewer={viewer}
-        enabled={radar.viewState.showLayer}
+        enabled={radar.viewState.showLayer && radarPresent}
         urlTemplate={radar.selected?.tileUrlTemplate ?? null}
-        opacity={radar.opacity}
+        commanderOpacity={radar.commanderOpacity * governor.plan.layers.radar.opacity}
+        depthAuto={weatherPrefs.weatherDepthAuto}
+      />
+      <TerraCloudImagery
+        viewer={viewer}
+        enabled={weatherPrefs.cloudsEnabled && cloudsPresent && cloudHistoricalOk && (clock.time.mode === 'live' || earthPulse.clouds.frames.length > 0)}
+        eastFrame={earthPulse.clouds.frames.filter(frame => frame.satellite === 'GOES-East')[earthPulse.cloudFrameIndex] ?? earthPulse.clouds.latestBySatellite['GOES-East'] ?? null}
+        westFrame={earthPulse.clouds.frames.find(frame => frame.satellite === 'GOES-West' && frame.timestampIso === (earthPulse.clouds.frames.filter(item => item.satellite === 'GOES-East')[earthPulse.cloudFrameIndex]?.timestampIso)) ?? earthPulse.clouds.latestBySatellite['GOES-West'] ?? null}
+        commanderOpacity={weatherPrefs.cloudOpacity * governor.plan.layers.clouds.opacity}
+        depthAuto={weatherPrefs.weatherDepthAuto}
+        saturation={governor.plan.layers.clouds.saturation}
+        colorToAlphaThreshold={geoColorAlphaThreshold(governor.plan.viewBand)}
+      />
+      <TerraAtmosphereDepth viewer={viewer} viewBand={governor.plan.viewBand} enabled={weatherPrefs.weatherDepthAuto} />
+      <TerraAuroraLayer
+        viewer={viewer}
+        enabled={clock.time.mode === 'live' && governorLayerPresent(governor.plan.layers.aurora.effective)}
+        cells={earthPulse.aurora}
+        globalLod={governor.plan.viewBand === 'SPACE' || governor.plan.viewBand === 'GLOBAL' || governor.plan.viewBand === 'CONTINENTAL'}
+        opacity={governor.plan.layers.aurora.opacity}
+      />
+      <TerraLightningLayer
+        viewer={viewer}
+        enabled={clock.time.mode === 'live' && governorLayerPresent(governor.plan.layers.lightning.effective)}
+        flashes={earthPulse.lightning}
+        globalLod={governor.plan.viewBand === 'SPACE' || governor.plan.viewBand === 'GLOBAL' || governor.plan.viewBand === 'CONTINENTAL'}
+        cap={lightningCap(governor.plan.viewBand)}
+      />
+      <TerraEarthquakePulseLayer
+        viewer={viewer}
+        enabled={governorLayerPresent(governor.plan.layers.earthquakes.effective)}
+        terraTime={clock.time.currentTime}
+        features={layerFeatures.usgs_earthquake_feed ?? []}
+        minMagnitude={governor.plan.layers.earthquakes.detailLevel === 'MAJOR_ONLY' ? QUAKE_MAJOR_MIN_MAG : 0}
+      />
+      <TerraAdminIdentityLayer
+        viewer={viewer}
+        enabled={governorLayerPresent(governor.plan.layers.admin_identity.effective) || governor.plan.layers.admin_identity.mode === 'ON'}
+        presentation={adminPresentation}
+        activeLatitude={activeLocation && activeLocation.contextType !== 'VIEWPORT' ? activeLocation.latitude : null}
+        activeLongitude={activeLocation && activeLocation.contextType !== 'VIEWPORT' ? activeLocation.longitude : null}
       />
       <TerraUrbanDetail
         viewer={viewer}
         scaleLevel={cameraScale.level}
         rectangle={cameraViewRectangle.rectangle}
-        enabled={urbanDetailEnabled}
+        enabled={urbanDetailEnabled && governorLayerPresent(governor.plan.layers.roads.effective)}
         extrudeBuildings={buildingExtrusionEnabled}
         hasWorldTerrain={globeStatus.phase === 'ready' && globeStatus.hasRealTerrain}
         onStatusChange={setUrbanStatus}
       />
-      <TerraCesiumOsmBuildings viewer={viewer} enabled={ionBuildingsFallbackActive} />
+      <TerraCesiumOsmBuildings
+        viewer={viewer}
+        enabled={ionBuildingsFallbackActive && governorLayerPresent(governor.plan.layers.buildings.effective)}
+        presentationGlow={inferredUrbanGlow}
+      />
       <TerraReEarthBuildings viewer={viewer} enabled={reEarthBuildingsEnabled} scaleLevel={cameraScale.level} onStatusChange={setReEarthBuildingsRuntime} />
       <TerraReEarthTerrain viewer={viewer} enabled={reEarthTerrainEnabled} onStatusChange={setReEarthTerrainRuntime} />
       <TerraFeatureLayer layerId="nearby_landmarks" viewer={viewer} enabled={nearbyLandmarksQuery !== null} features={nearbyLandmarks.features} selectedId={nearbySelectedId} cluster />
@@ -2859,12 +3534,12 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           requires event click/selection to work on both the front-page God's Eye and the full
           /terra workspace) — `cluster` so a dense region simplifies at broad zoom instead of
           becoming an overlapping-marker mess (mission section 3/14). */}
-      <TerraFeatureLayer layerId="opensky" viewer={viewer} enabled={aircraftBoundingBoxQuery !== null} features={aircraft.features} selectedId={aircraftSelectedId} cluster trails={aircraftTrails} />
+      <TerraFeatureLayer layerId="opensky" viewer={viewer} enabled={aircraftBoundingBoxQuery !== null && governorLayerPresent(governor.plan.layers.aircraft.effective)} features={displayedAircraft} selectedId={aircraftSelectedId} followId={flightFollowKey} cluster viewBand={governor.plan.viewBand} trails={aircraftTrails} />
       {/* Terra Phase 3 — Maritime Source Federation: same bespoke camera-bbox-driven pattern as
           aircraft above, rendered unconditionally in both presentations for the same reason. */}
-      <TerraFeatureLayer layerId="digitraffic_marine" viewer={viewer} enabled={maritimeBoundingBoxQuery !== null} features={maritime.features} selectedId={maritimeSelectedId} cluster trails={maritimeTrails} />
-      <TerraFeatureLayer layerId="live_intel_overlay" viewer={viewer} enabled={liveIntelOverlayFeatures.length > 0} features={liveIntelOverlayFeatures} selectedId={liveIntelOverlaySelectedId} cluster={cameraScale.level === 'global' || cameraScale.level === 'regional'} />
-      <TerraFeatureLayer layerId="weather_alert_overlay" viewer={viewer} enabled={weatherOverlayFeatures.length > 0} features={weatherOverlayFeatures} selectedId={weatherOverlayAlert?.id ?? null} />
+      <TerraFeatureLayer layerId="digitraffic_marine" viewer={viewer} enabled={maritimeBoundingBoxQuery !== null && governorLayerPresent(governor.plan.layers.vessels.effective)} features={displayedVessels} selectedId={maritimeSelectedId} cluster viewBand={governor.plan.viewBand} trails={maritimeTrails} />
+      <TerraFeatureLayer layerId="live_intel_overlay" viewer={viewer} enabled={liveIntelOverlayFeatures.length > 0 && governorLayerPresent(governor.plan.layers.live_intel.effective)} features={liveIntelOverlayFeatures} selectedId={liveIntelOverlaySelectedId} cluster={cameraScale.level === 'global' || cameraScale.level === 'regional'} />
+      <TerraFeatureLayer layerId="weather_alert_overlay" viewer={viewer} enabled={weatherOverlayFeatures.length > 0 && governorLayerPresent(governor.plan.layers.weather_hazards.effective)} features={weatherOverlayFeatures} selectedId={weatherOverlayAlert?.id ?? null} />
       {/* God's Eye Traffic phases 1–3: all 13 bounded-coverage traffic layers render through the
           one generic TerraTrafficLayer (terraTrafficLayerDefs.ts). In the full workspace the
           toggle/status rows live in the Data Layers rail below (the {!commandCenter} mount);
@@ -2891,12 +3566,15 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           defaultEnabled
           hideControls
           forceEnabled={(cameraDiscovery.active && cameraDiscovery.layerIds.includes(def.layerId)) || (camerasMode && def.unitNoun === 'camera' && cameraLodPolicy.fetchCatalog)}
+          externallyEnabled={def.unitNoun !== 'camera' || (governor.plan.layers.nearby_cameras.fetchAllowed && governor.plan.layers.nearby_cameras.mode !== 'OFF')}
           skipScaleGate={(cameraDiscovery.active && cameraDiscovery.layerIds.includes(def.layerId)) || (camerasMode && def.unitNoun === 'camera' && cameraLodPolicy.fetchCatalog)}
           clusterOverride={camerasMode && def.unitNoun === 'camera' ? cameraLodPolicy.clusterPins : undefined}
           onAuthRequired={handleCameraLayerAuth}
+          onProviderAuthFail={handleCameraProviderAuthFail}
         />
       ))}
       <TerraWorkspaceLayoutProvider viewer={viewer} onApiReady={api => { workspaceLayoutApiRef.current = api }}>
+        {!commandCenter ? <TerraMissionControlChrome /> : null}
         {hoveredCameraFeature && cameraHover && (
           <TerraCameraHoverWorkspace
             key={hoveredCameraFeature.id}
@@ -2939,12 +3617,36 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
                 : undefined}
               onSendToCouncil={sendSelectedObjectToCouncil}
               canSendToCouncil={canSendSelectedToCouncil}
-              hidePreview={areaLiveMediaOpen}
+              hidePreview={areaLiveMediaOpen || trafficCamPlayerOpen}
               onRefresh={inspectCardForUi.featureClass === 'street_camera' ? () => setCameraStillNonce(value => value + 1) : undefined}
               onOpenSource={inspectCardForUi.featureClass === 'street_camera' ? () => {
                 const url = selectedFeature?.rawReference.canonicalUrl ?? selectedFeature?.provenance.sourceUrl
                 if (typeof url === 'string' && url) window.open(url, '_blank', 'noopener,noreferrer')
               } : undefined}
+            />
+          </TerraWorkspacePanel>
+        ) : null}
+        {!commandCenter ? (
+          <TerraWorkspacePanel id="flight_monitor" title="Flight Monitor">
+            <TerraFlightMonitor
+              aircraft={monitoredAircraft}
+              providers={flight.providers}
+              coverage={flight.coverage}
+              filter={flightFilter}
+              onFilter={setFlightFilter}
+              selectedKey={aircraftSelectedId}
+              onSelect={key => handleEntityClick(`opensky:${key}`)}
+              onFocus={key => {
+                const feature = flightFeatures.find(item => item.id === key)
+                if (feature) flyToEventFeature(feature)
+              }}
+              onFollow={key => {
+                if (flightFollowKey !== key) cinematic.pause()
+                setFlightFollowKey(current => current === key ? null : key)
+              }}
+              following={flightFollowKey !== null}
+              onGodsEye={key => handleEntityClick(`opensky:${key}`)}
+              onWatch={key => setFlightWatchRules(current => current.some(rule => rule.kind === 'icao' && rule.hex === key) ? current : [...current, { kind: 'icao', hex: key }])}
             />
           </TerraWorkspacePanel>
         ) : null}
@@ -2957,9 +3659,15 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
                 latitude={nearbyCameraOrigin?.latitude ?? null}
                 longitude={nearbyCameraOrigin?.longitude ?? null}
                 originLabel={nearbyCameraOrigin?.label ?? 'no Terra location'}
+                originSource={nearbyActivePoint?.source ?? null}
+                matchQuality={activeLocation?.matchQuality ?? null}
                 features={nearbyCameraIndex}
                 indexLoaded={cameraIndexLoaded}
                 authRequired={cameraAuthRequired}
+                providerAuthFailed={coveringProviderAuthFailed}
+                coveringLayerIds={nearbyCoveringLayerIds}
+                coveringProviderIds={areaLiveCoverage?.coveringProviderIds ?? []}
+                truthState={areaLiveCoverage?.truthState ?? null}
                 radiusKm={cameraSearchRadiusKm}
                 selectedId={selection.kind === 'feature' ? `${selection.layerId}:${selection.featureId}` : null}
                 onSelect={(camera: NearbyPublicCamera) => handleEntityClick(`${camera.layerId}:${camera.id}`)}
@@ -3048,7 +3756,29 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         </TerraWorkspacePanel>
       ) : null}
 
-      {!commandCenter && areaLiveMediaOpen && areaLiveMedia ? (
+      {!commandCenter && trafficCamPlayerOpen && selectedTrafficCamera ? (
+        <TerraWorkspacePanel id="area_live_viewer" title="Traffic Camera">
+          <TerraTrafficCamPlayer
+            camera={selectedTrafficCamera}
+            radar={trafficCamRadar}
+            hasPrevious={trafficCamPlayerIndex > 0}
+            hasNext={trafficCamPlayerIndex >= 0 && trafficCamPlayerIndex < trafficCamCycleSet.length - 1}
+            onPrevious={() => cycleTrafficCamera(-1)}
+            onNext={() => cycleTrafficCamera(1)}
+            onSelect={() => selectedFeature && flyToEventFeature(selectedFeature)}
+            onSource={() => {
+              if (selectedTrafficCamera.sourceUrl) window.open(selectedTrafficCamera.sourceUrl, '_blank', 'noopener,noreferrer')
+            }}
+            onSendToCouncil={sendSelectedObjectToCouncil}
+            onClose={() => {
+              setTrafficCamPlayerOpen(false)
+              setTrafficCamCycleSet([])
+            }}
+          />
+        </TerraWorkspacePanel>
+      ) : null}
+
+      {!commandCenter && !trafficCamPlayerOpen && areaLiveMediaOpen && areaLiveMedia ? (
         <TerraWorkspacePanel id="area_live_viewer" title="Area Live">
           <AreaLiveMediaViewer
             media={areaLiveMedia}
@@ -3105,6 +3835,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           selectedTime={clock.time.currentTime}
           timeWindow={selectedWindow}
           hideControls
+          {...presentationForCatalogLayer(layer.id, governor.plan)}
         />
       ))}
 
@@ -3119,6 +3850,23 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             <p className="text-[11px] leading-snug text-slate-400">
               <StatusLine status={globeStatus} aerialImageryActive={aerialImageryAvailable} osmBuildingsVisible={ionBuildingsFallbackActive} />
             </p>
+            <TerraLightingControl mode={lightingMode} solar={solarLighting} onMode={handleLightingMode} />
+            <TerraEarthPulseStatus
+              engine={earthPulse.engine}
+              clouds={earthPulse.clouds}
+              cloudPlaying={earthPulse.cloudPlaying}
+              cloudFrameIndex={earthPulse.cloudFrameIndex}
+              lightningState={earthPulse.lightningState}
+              lightningCount={earthPulse.lightning.length}
+              auroraState={earthPulse.auroraState}
+              auroraMax={earthPulse.auroraMax}
+              night={earthPulse.night}
+              orbiting={cinematic.orbiting}
+              radarState={radar.historicalUnavailable ? 'UNAVAILABLE FOR SELECTED TIME' : radar.viewState.state}
+              radarAge={radar.frameAge}
+              onCloudPlay={earthPulse.setCloudPlaying}
+              onCloudFrame={earthPulse.selectCloudFrame}
+            />
           </TerraInspectDetails>
         </TerraWorkspacePanel>
       </>
@@ -3132,12 +3880,21 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           <span className="sr-only" data-testid="terra-flight-outcome">{cinematicFlight.outcome}</span>
           <span className="sr-only" data-testid="terra-flight-label">{cinematicFlight.label}</span>
           <span className="sr-only" data-testid="terra-flight-dest-kind">{cinematicFlight.lastPlan?.destination.kind ?? ''}</span>
-          <span className="sr-only" data-testid="terra-flight-dest-height">{cinematicFlight.lastPlan?.destination.kind === 'point' ? String(cinematicFlight.lastPlan.destination.heightMeters) : ''}</span>
+          <span className="sr-only" data-testid="terra-flight-dest-height">{cinematicFlight.lastPlan?.destination.kind === 'point' ? String(cinematicFlight.lastPlan.destination.heightMeters) : cinematicFlight.lastPlan?.destination.kind === 'boundingSphere' ? String(cinematicFlight.lastPlan.destination.rangeMeters) : ''}</span>
+          <span className="sr-only" data-testid="terra-match-quality">{activeLocation?.matchQuality ? matchQualityLabel(activeLocation.matchQuality) : ''}</span>
+          <span className="sr-only" data-testid="terra-precision-source">{activeLocation?.precisionSource || activeLocation?.sourceLabel || ''}</span>
+          <span className="sr-only" data-testid="terra-enrichment-state">{locationRefineStatus || activeLocation?.enrichmentState || ''}</span>
+          <span className="sr-only" data-testid="terra-active-location-source">{nearbyActivePoint?.source ?? ''}</span>
+          <span className="sr-only" data-testid="terra-active-location-coords">{nearbyCameraOrigin ? `${nearbyCameraOrigin.latitude.toFixed(7)},${nearbyCameraOrigin.longitude.toFixed(7)}` : ''}</span>
+          <span className="sr-only" data-testid="terra-nearby-covering-state">{areaLiveCoverage ? `${areaLiveCoverage.coveringProviderIds.join(',') || 'none'}:${areaLiveCoverage.truthState}` : ''}</span>
           <TerraLocationCommandInput
             onResolvedLocation={handleResolvedLocation}
             flightOutcome={cinematicFlight.outcome}
             flightPurpose={cinematicFlight.purpose}
             flightLabel={cinematicFlight.label}
+            refineStatus={locationRefineStatus}
+            precisionSource={activeLocation?.precisionSource || activeLocation?.sourceLabel || ''}
+            matchQuality={activeLocation?.matchQuality ?? null}
             streetViewState={streetViewState}
             streetViewDisabled={!resolveStreetViewOrigin()}
             onStreetView={() => openStreetView()}
@@ -3195,6 +3952,22 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         <TerraAgentEngineeringDetails />
         <TerraGodsEyeCoverageMatrix zoomRung={zoomRung} cameraRuntime={cameraHealthRuntime} />
         <TerraInspectDetails title="Layer controls" badge={<span className="font-mono uppercase text-emerald-400/80">{zoomRung}</span>}>
+          <TerraLayerGovernorPanel
+            plan={governor.plan}
+            masterAuto={governor.masterAuto}
+            onMasterAuto={governor.setMasterAuto}
+            onCycleLayer={governor.cycleLayer}
+            onResetLearned={governor.resetLearned}
+            vehicleFilters={vehicleFilters}
+            onToggleVehicleFilter={(id) => {
+              setVehicleFilters(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id])
+            }}
+          />
+          <TerraAdminIdentityPanel
+            presentation={adminPresentation}
+            masterMode={governor.plan.layers.admin_identity.mode}
+            onCycleMaster={() => governor.cycleLayer('admin_identity')}
+          />
           <div className="mb-1 pointer-events-auto">
             <TerraCommanderSessionChip />
           </div>
@@ -3204,7 +3977,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           <ul className="space-y-1 text-[11px] text-slate-400">
             <li className="flex items-center justify-between">
               <span>Camera scale</span>
-              <span className="font-mono uppercase text-emerald-400">{cameraScale.level}</span>
+              <span className="font-mono uppercase text-emerald-400">{governor.plan.viewBand} · {cameraScale.level}</span>
             </li>
             <li className="flex items-center justify-between">
               <span>God's Eye ladder</span>
@@ -3213,6 +3986,42 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
             <li className="flex items-center justify-between">
               <span>Base imagery + clouds</span>
               <span className="text-emerald-400">NASA GIBS True Color · daily</span>
+            </li>
+            <li className="flex items-center justify-between">
+              <span>Moving clouds</span>
+              <span className="text-cyan-300">GOES GeoColor · 10 min · translucent</span>
+            </li>
+            <li className="pt-1">
+              <TerraWeatherAtmosphereControls
+                cloudsEnabled={weatherPrefs.cloudsEnabled}
+                cloudOpacity={weatherPrefs.cloudOpacity}
+                cloudPlaying={earthPulse.cloudPlaying}
+                cloudCanAnimate={clock.time.mode === 'live' && earthPulse.clouds.frames.filter(frame => frame.satellite === 'GOES-East').length > 1}
+                radarEnabled={radar.enabled}
+                radarOpacity={radar.commanderOpacity}
+                radarPlaying={radar.playing}
+                radarCanAnimate={radar.canAnimate}
+                weatherDepthAuto={weatherPrefs.weatherDepthAuto}
+                onCloudsEnabled={weatherPrefs.setCloudsEnabled}
+                onCloudOpacity={(value) => {
+                  weatherPrefs.setCloudOpacity(value)
+                  if (cameraScale.level === 'local' || cameraScale.level === 'building') governor.learnStreetCloudOpacity(value)
+                }}
+                onCloudPlay={earthPulse.setCloudPlaying}
+                onRadarEnabled={radar.setEnabled}
+                onRadarOpacity={(value) => {
+                  radar.setCommanderOpacity(value)
+                  if (cameraScale.level === 'city') governor.learnCityRadarOpacity(value)
+                }}
+                onRadarPlay={radar.setPlaying}
+                onRadarLatest={radar.selectLatest}
+                onWeatherDepthAuto={weatherPrefs.setWeatherDepthAuto}
+              />
+              <p className="mt-1 text-[8px] leading-snug text-slate-600">{GEOCOLOR_TRANSLUCENCY_NOTE}</p>
+            </li>
+            <li className="flex items-center justify-between">
+              <span>Night lights</span>
+              <span className="text-cyan-300">{earthPulse.night?.mode === 'DAILY' ? `DAILY · ${earthPulse.night.productDate}` : 'ARCHIVE · 2016'}</span>
             </li>
             <li className={`flex items-center justify-between ${aerialImageryAvailable ? '' : 'opacity-40'}`}>
               <span>Aerial (ion World Imagery)</span>
@@ -3273,6 +4082,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
                 <li>lod {urbanStatus.lod ?? 'off'} · ladder {zoomRung}</li>
                 <li data-testid="gods-eye-lod-density">density fetch {String(lodDensity.fetchUrban)} · buildings {String(lodDensity.buildings)} · signals {String(lodDensity.signals)} · names {lodDensity.streetNames} · houses {String(lodDensity.houseNumbers)}</li>
                 <li data-testid="gods-eye-lod-runtime">fps {lodTelemetry.fps ?? 'UNAVAILABLE'} · primitives {lodTelemetry.primitiveCount ?? 'UNAVAILABLE'} · entities {lodTelemetry.entityCount ?? 'UNAVAILABLE'} · heap {lodTelemetry.memoryMb != null ? `${lodTelemetry.memoryMb} MB` : 'UNAVAILABLE'} · gpu UNAVAILABLE</li>
+                <TerraWorkerRuntimeMetric />
                 <li>network fetches {urbanStatus.networkFetches}</li>
                 {urbanStatus.source ? <li>source {urbanStatus.source}</li> : null}
                 {urbanStatus.loadMs !== null ? <li>load {urbanStatus.loadMs}ms</li> : null}
@@ -3321,6 +4131,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
                     timeMode={clock.time.mode}
                     selectedTime={clock.time.currentTime}
                     timeWindow={selectedWindow}
+                    {...presentationForCatalogLayer(layer.id, governor.plan)}
                   />
                 ))}
               </div>
@@ -3331,19 +4142,20 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
               camera view (lib/terra/aircraftBoundingBox.ts), not a fixed defaultQueryText, so a
               generic on/off-against-one-default-query row doesn't fit this layer. */}
           <div className="mt-2 border-t border-white/10 pt-2">
-            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">Aviation</p>
+            <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500">Live movement</p>
             <div className="mt-1 border-t border-white/10 pt-2 first:border-t-0 first:pt-0">
               <div className="flex items-center justify-between text-[11px]">
                 <span className="text-slate-300">Aircraft (OpenSky)</span>
                 <button
                   type="button"
-                  onClick={() => setAircraftEnabled(prev => !prev)}
+                  onClick={() => governor.cycleLayer('aircraft')}
                   className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
-                    aircraftEnabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
+                    governor.plan.layers.aircraft.mode === 'OFF' ? 'border-white/20 text-slate-500' : 'border-emerald-400/60 text-emerald-400'
                   }`}
-                  aria-pressed={aircraftEnabled}
+                  aria-pressed={governor.plan.layers.aircraft.mode !== 'OFF'}
+                  data-testid="terra-aircraft-mode"
                 >
-                  {aircraftEnabled ? 'On' : 'Off'}
+                  {governor.plan.layers.aircraft.mode}
                 </button>
               </div>
               {aircraftEnabled && (
@@ -3395,13 +4207,14 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
                 <span className="text-slate-300">Vessels (Digitraffic — Finnish Waters)</span>
                 <button
                   type="button"
-                  onClick={() => setMaritimeEnabled(prev => !prev)}
+                  onClick={() => governor.cycleLayer('vessels')}
                   className={`rounded border px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
-                    maritimeEnabled ? 'border-emerald-400/60 text-emerald-400' : 'border-white/20 text-slate-500'
+                    governor.plan.layers.vessels.mode === 'OFF' ? 'border-white/20 text-slate-500' : 'border-emerald-400/60 text-emerald-400'
                   }`}
-                  aria-pressed={maritimeEnabled}
+                  aria-pressed={governor.plan.layers.vessels.mode !== 'OFF'}
+                  data-testid="terra-vessels-mode"
                 >
-                  {maritimeEnabled ? 'On' : 'Off'}
+                  {governor.plan.layers.vessels.mode}
                 </button>
               </div>
               {maritimeEnabled && (
@@ -3458,9 +4271,11 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
                   : cameraViewRectangle.rectangle}
                 defaultEnabled={def.unitNoun === 'camera'}
                 forceEnabled={(cameraDiscovery.active && cameraDiscovery.layerIds.includes(def.layerId)) || (camerasMode && def.unitNoun === 'camera' && cameraLodPolicy.fetchCatalog)}
+                externallyEnabled={def.unitNoun !== 'camera' || (governor.plan.layers.nearby_cameras.fetchAllowed && governor.plan.layers.nearby_cameras.mode !== 'OFF')}
                 skipScaleGate={(cameraDiscovery.active && cameraDiscovery.layerIds.includes(def.layerId)) || (camerasMode && def.unitNoun === 'camera' && cameraLodPolicy.fetchCatalog)}
                 clusterOverride={camerasMode && def.unitNoun === 'camera' ? cameraLodPolicy.clusterPins : undefined}
                 onAuthRequired={handleCameraLayerAuth}
+          onProviderAuthFail={handleCameraProviderAuthFail}
               />
             ))}
           </div>
@@ -3476,6 +4291,27 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
         </TerraInspectDetails>
       </div>
       </TerraWorkspacePanel>
+      )}
+
+      {!commandCenter && (
+        <TerraWorkspacePanel id="terra_media" title="War Room Media" closable>
+          <TerraMediaPanel
+            commanderQuestion={commanderQuestion}
+            locationHint={{
+              city: activeLocation?.city ?? null,
+              state: activeLocation?.state ?? null,
+              country: activeLocation?.country ?? null,
+              region: activeLocation?.region ?? null,
+              label: activeLocation?.label ?? viewingLabel ?? null,
+            }}
+          />
+        </TerraWorkspacePanel>
+      )}
+
+      {!commandCenter && (
+        <TerraWorkspacePanel id="terra_emergency_report" title="Emergency Report" closable>
+          <TerraEmergencyReportPanel commanderQuestion={commanderQuestion} />
+        </TerraWorkspacePanel>
       )}
 
       {!commandCenter && (
@@ -3551,6 +4387,7 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           state={radar.viewState.state}
           frame={radar.selected}
           frameAge={radar.frameAge}
+          details={trafficCamRadar}
           enabled={radar.enabled}
           playing={radar.playing}
           canAnimate={radar.canAnimate}
@@ -3558,6 +4395,8 @@ function TerraShellComponent({ presentation = 'workspace' }: { presentation?: 'w
           onSelectFrame={radar.selectFrame}
           onLatest={radar.selectLatest}
           onPlay={radar.setPlaying}
+          opacity={radar.commanderOpacity}
+          onOpacity={radar.setCommanderOpacity}
         />
       </TerraWorkspacePanel>
       )}

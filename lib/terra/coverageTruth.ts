@@ -18,7 +18,7 @@
  */
 import type { TerraLayerFeedState } from '@/components/war-room/terra/useTerraLayer'
 
-export const TERRA_COVERAGE_TRUTH_STATES = ['NO_COVERAGE', 'NO_DATA', 'LOADING', 'LIVE', 'STALE', 'OFFLINE', 'UNKNOWN'] as const
+export const TERRA_COVERAGE_TRUTH_STATES = ['NO_COVERAGE', 'NO_DATA', 'LOADING', 'LIVE', 'STALE', 'OFFLINE', 'AUTH_FAIL', 'UNKNOWN'] as const
 export type TerraCoverageTruthState = (typeof TERRA_COVERAGE_TRUTH_STATES)[number]
 
 export const TERRA_COVERAGE_TRUTH_LABELS: Record<TerraCoverageTruthState, string> = {
@@ -28,6 +28,7 @@ export const TERRA_COVERAGE_TRUTH_LABELS: Record<TerraCoverageTruthState, string
   LIVE: 'LIVE',
   STALE: 'STALE',
   OFFLINE: 'OFFLINE',
+  AUTH_FAIL: 'AUTH FAIL',
   UNKNOWN: 'UNKNOWN',
 }
 
@@ -50,9 +51,13 @@ export function resolveTerraCoverageTruth(params: {
 }): TerraCoverageTruthState {
   const { hasKnownCoverage, boundingBoxQuery, feedState, lastErrorMessage, allFeaturesHistoricalOrStale } = params
 
-  if (!hasKnownCoverage || boundingBoxQuery === null) return 'NO_COVERAGE'
+  if (!hasKnownCoverage) return 'NO_COVERAGE'
+  if (boundingBoxQuery === null) return 'NO_COVERAGE'
   if (feedState === 'loading') return 'LOADING'
   if (feedState === 'error') {
+    if (lastErrorMessage && /API_KEY|not configured|PROVIDER_AUTH|Invalid Key|\b401\b|\b403\b/i.test(lastErrorMessage)) {
+      return 'AUTH_FAIL'
+    }
     // A definite upstream failure is OFFLINE; an ambiguous error with no HTTP-status evidence is
     // honestly UNKNOWN rather than assumed OFFLINE.
     if (lastErrorMessage && /\b(4\d{2}|5\d{2})\b/.test(lastErrorMessage)) return 'OFFLINE'

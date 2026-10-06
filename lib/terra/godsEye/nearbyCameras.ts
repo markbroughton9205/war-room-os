@@ -64,13 +64,16 @@ export function nearbyPublicCameras(input: {
   features: readonly NearbyCameraIndexFeature[]
   maxResults?: number
   maxKm?: number
+  coveringLayerIds?: readonly string[] | null
 }): NearbyPublicCamera[] {
   if (!Number.isFinite(input.latitude) || !Number.isFinite(input.longitude)) return []
   const maxResults = input.maxResults ?? 16
   const maxKm = input.maxKm ?? 40
+  const covering = input.coveringLayerIds ? new Set(input.coveringLayerIds) : null
   const ranked: NearbyPublicCamera[] = []
   for (const feature of input.features) {
     if (feature.kind !== 'traffic_camera') continue
+    if (covering && (covering.size === 0 || (!covering.has(feature.layerId) && !covering.has(feature.providerId ?? '')))) continue
     if (!Number.isFinite(feature.latitude) || !Number.isFinite(feature.longitude)) continue
     const distanceKm = haversineKm(input.latitude, input.longitude, feature.latitude, feature.longitude)
     if (distanceKm > maxKm) continue
@@ -104,6 +107,7 @@ export function nearbyPublicCameraCount(input: {
   longitude: number
   features: readonly NearbyCameraIndexFeature[]
   maxKm?: number
+  coveringLayerIds?: readonly string[] | null
 }): number {
   return nearbyPublicCameras({ ...input, maxResults: Number.POSITIVE_INFINITY }).length
 }

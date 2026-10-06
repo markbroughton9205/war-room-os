@@ -24,6 +24,7 @@ function run(): CaseResult[] {
   results.push(check('stale_feed_state_is_stale', resolveTerraCoverageTruth({ ...base, feedState: 'stale' }) === 'STALE', 'stale'))
   results.push(check('all_historical_features_is_stale_never_live', resolveTerraCoverageTruth({ ...base, allFeaturesHistoricalOrStale: true }) === 'STALE', 'webtris case'))
   results.push(check('empty_is_no_data_not_no_coverage', resolveTerraCoverageTruth({ ...base, feedState: 'empty' }) === 'NO_DATA', 'covered but nothing returned'))
+  results.push(check('missing_key_is_auth_fail_not_no_coverage', resolveTerraCoverageTruth({ ...base, feedState: 'error', lastErrorMessage: 'OHGO_API_KEY is not configured.' }) === 'AUTH_FAIL', 'auth fail'))
   results.push(check('healthy_nonempty_is_live', resolveTerraCoverageTruth(base) === 'LIVE', 'ok + features'))
   results.push(check('no_coverage_never_rendered_as_no_data', resolveTerraCoverageTruth({ ...base, hasKnownCoverage: false, feedState: 'empty' }) === 'NO_COVERAGE', 'invariant'))
 

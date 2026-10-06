@@ -8,6 +8,7 @@ import {
   subscribeMatrixStatus,
   type MatrixChannel,
 } from '@/lib/ui/matrixStatusBus'
+import { useApplicationActivity } from '@/lib/ui/applicationActivity'
 
 const CHARSET = 'ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿ0123456789ABCDEF'
 const GREEN = '0, 255, 102'
@@ -31,7 +32,7 @@ function pickChar() {
 function makeStreams(width: number, height: number, mobile: boolean): Stream[] {
   const fontSize = mobile ? 11 : 13
   const columnWidth = fontSize * 1.8
-  const columnCount = Math.min(mobile ? 18 : 42, Math.ceil(width / columnWidth))
+  const columnCount = Math.min(mobile ? 16 : 28, Math.ceil(width / columnWidth))
 
   return Array.from({ length: columnCount }, (_, index) => ({
     x: index * columnWidth + Math.random() * fontSize,
@@ -185,12 +186,14 @@ function MatrixStatusCaption({ message, channel }: { message: string; channel: M
 export const MatrixRain = memo(function MatrixRain() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef = useRef<number | null>(null)
+  const timeoutRef = useRef<number | null>(null)
   const streamsRef = useRef<Stream[]>([])
   const lastTimeRef = useRef(0)
   const channelRef = useRef<MatrixChannel>('green')
   const emittedAtRef = useRef(0)
   const [reducedMotion, setReducedMotion] = useState(false)
   const [mobile, setMobile] = useState(false)
+  const activity = useApplicationActivity()
 
   const statusSnap = useSyncExternalStore(
     subscribeMatrixStatus,
@@ -220,13 +223,14 @@ export const MatrixRain = memo(function MatrixRain() {
   }, [])
 
   useEffect(() => {
-    if (reducedMotion) return
+    if (reducedMotion || !activity.visible || activity.animationFps <= 0) return
     const canvas = canvasRef.current
     if (!canvas) return
     const context = canvas.getContext('2d', { alpha: true })
     if (!context) return
 
-    const maxDpr = mobile ? 1 : 1.25
+    const maxDpr = 1
+    const frameIntervalMs = 1000 / activity.animationFps
 
     const resize = () => {
       const width = window.innerWidth
@@ -240,13 +244,14 @@ export const MatrixRain = memo(function MatrixRain() {
       streamsRef.current = makeStreams(width, height, mobile)
     }
 
-    const draw = (time: number) => {
-      if (document.visibilityState !== 'visible') {
-        lastTimeRef.current = time
+    const scheduleNext = () => {
+      timeoutRef.current = window.setTimeout(() => {
+        timeoutRef.current = null
         rafRef.current = window.requestAnimationFrame(draw)
-        return
-      }
+      }, frameIntervalMs)
+    }
 
+    const draw = (time: number) => {
       const width = window.innerWidth
       const height = window.innerHeight
       const delta = Math.min(64, time - (lastTimeRef.current || time))
@@ -284,7 +289,7 @@ export const MatrixRain = memo(function MatrixRain() {
         }
       }
 
-      rafRef.current = window.requestAnimationFrame(draw)
+      scheduleNext()
     }
 
     resize()
@@ -294,8 +299,9 @@ export const MatrixRain = memo(function MatrixRain() {
     return () => {
       window.removeEventListener('resize', resize)
       if (rafRef.current !== null) window.cancelAnimationFrame(rafRef.current)
+      if (timeoutRef.current !== null) window.clearTimeout(timeoutRef.current)
     }
-  }, [mobile, reducedMotion])
+  }, [mobile, reducedMotion, activity.visible, activity.animationFps])
 
   if (reducedMotion) {
     const channel = statusSnap.channel

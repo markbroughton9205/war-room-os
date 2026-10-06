@@ -1,0 +1,103 @@
+{
+  "id": "WRIM_GENESIS_GOVERNANCE_v1",
+  "canonical": "STEP_400",
+  "canonical_hash": "f82f4364b16842ca3d43427251299f1ad38d5104f24013251f2ebc6af6607af8",
+  "parent": "WRIM1-UH1-AC2-EA1-000010/step-25",
+  "parent_hash": "8e6505954602961d7b432362b67633aa1cc798f7a7b4262624edb3ed213323fb",
+  "architecture_id": "WRIM-G-20M-v1-option-A-UH1-AC2-EA1-RA1",
+  "max_active_wrim_trainers": 1,
+  "stage3_floor": 5,
+  "stage3_prefer": 6,
+  "strategy_ceiling": 3,
+  "master_lm_token_ceiling_recommended": 2048000,
+  "school_budgets": {
+    "SCHOOL_04_RESPONSE_MODE_ROUTING": {
+      "kind": "classification",
+      "lm_tokens": 0,
+      "examples": 4096
+    },
+    "SCHOOL_04B_ROUTER_DATA_REMEDIATION": {
+      "kind": "classification",
+      "lm_tokens": 0,
+      "examples": 4096
+    },
+    "SCHOOL_05_NATURAL_ENTRY": {
+      "kind": "lm",
+      "lm_tokens": 204800,
+      "extend_once_to": 204800
+    },
+    "SCHOOL_06_NATURAL_CONTINUATION": {
+      "kind": "lm",
+      "lm_tokens": 409600
+    },
+    "SCHOOL_07_NATURAL_GENERALIZATION": {
+      "kind": "lm",
+      "lm_tokens": 409600
+    },
+    "SCHOOL_08_MULTI_TURN_CONVERSATION": {
+      "kind": "lm",
+      "lm_tokens": 204800
+    },
+    "SCHOOL_09_INSTRUCTION_FOLLOWING": {
+      "kind": "lm",
+      "lm_tokens": 204800
+    },
+    "SCHOOL_10_GENERAL_LANGUAGE": {
+      "kind": "lm",
+      "lm_tokens": 204800
+    },
+    "SCHOOL_11_REASONING_FOUNDATION": {
+      "kind": "lm",
+      "lm_tokens": 204800
+    },
+    "SCHOOL_12_STRUCTURED_OUTPUT": {
+      "kind": "lm",
+      "lm_tokens": 102400
+    },
+    "SCHOOL_13_TOOL_USE_READINESS": {
+      "kind": "none",
+      "lm_tokens": 0
+    },
+    "SCHOOL_14_SELF_EVALUATION": {
+      "kind": "none",
+      "lm_tokens": 0
+    },
+    "SCHOOL_15_FOUNDATION_GRADUATION": {
+      "kind": "none",
+      "lm_tokens": 0
+    }
+  },
+  "prohibited_always": [
+    "autonomous_commit",
+    "push",
+    "production_deploy",
+    "canonical_promotion",
+    "financial_action",
+    "network_credential_changes",
+    "destructive_repository_cleanup",
+    "secret_export",
+    "body_unfreeze",
+    "lm_head_training",
+    "tokenizer_replacement",
+    "transformer_depth_width_change",
+    "large_lora",
+    "new_base_model",
+    "full_sparse_moe",
+    "stage3b",
+    "rael_training",
+    "install_rmr1_in_runtime",
+    "rerun_mod02a_by_default"
+  ],
+  "na1_in_route_table": false,
+  "rmr1_production_ready": false,
+  "ne1_auto_create": false,
+  "self_promote": false,
+  "commit": false,
+  "push": false,
+  "deploy": false,
+  "stage3b": false,
+  "rael_training": false,
+  "training_authorization_default": "OFF",
+  "router_not_installed_in_runtime": true,
+  "mod_02a_do_not_rerun": true
+}

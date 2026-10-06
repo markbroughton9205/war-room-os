@@ -20,23 +20,29 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
 import type { TerraScaleLevel } from './useTerraCameraScale'
+import { LIVING_ORBIT_IDLE_DELAY_CLOSE_MS, LIVING_ORBIT_IDLE_DELAY_GLOBAL_MS } from '@/lib/terra/earthPulse'
+import { terraCameraHasActiveFlight } from '@/lib/terra/stability/renderLoopGuard'
 
 // Subtle cinematic at close range; zoomed-out Earth should still read as live and spinning.
 const ORBIT_RADIANS_PER_MS = 0.008 / 1000
 const GLOBAL_ORBIT_RADIANS_PER_MS = 0.055 / 1000
-const IDLE_RESUME_DELAY_MS = 20_000
-const GLOBAL_IDLE_RESUME_DELAY_MS = 1_800
+const IDLE_RESUME_DELAY_MS = LIVING_ORBIT_IDLE_DELAY_CLOSE_MS
+const GLOBAL_IDLE_RESUME_DELAY_MS = LIVING_ORBIT_IDLE_DELAY_GLOBAL_MS
+const ORBIT_RENDER_FPS = 30
+const ORBIT_FRAME_INTERVAL_MS = 1000 / ORBIT_RENDER_FPS
+
+function setViewerTargetFrameRate(viewer: CesiumViewer, frameRate: number): void {
+  viewer.targetFrameRate = frameRate
+}
 
 export type TerraCinematicOrbitResult = {
   orbiting: boolean
-  /** True once the OS/browser prefers-reduced-motion setting has suppressed the feature
-   * entirely — surfaced so the UI can explain why the control has no visible effect rather than
-   * silently doing nothing. */
   suppressedByReducedMotion: boolean
   pause: () => void
   resume: () => void
   toggle: () => void
   lockAutoResume: (locked: boolean) => void
+  noteInteraction: () => void
 }
 
 export function useTerraCinematicOrbit(
@@ -142,6 +148,15 @@ export function useTerraCinematicOrbit(
   }, [])
 
   useEffect(() => {
+    if (!viewer || viewer.isDestroyed()) return
+    const previous = viewer.targetFrameRate
+    setViewerTargetFrameRate(viewer, orbiting ? ORBIT_RENDER_FPS : previous)
+    return () => {
+      if (!viewer.isDestroyed()) setViewerTargetFrameRate(viewer, previous)
+    }
+  }, [viewer, orbiting])
+
+  useEffect(() => {
     if (!viewer || !enabled || suppressedByReducedMotion) {
       const timeout = setTimeout(() => {
         if (!orbitingRef.current) return
@@ -186,14 +201,19 @@ export function useTerraCinematicOrbit(
           lastFrameAt = null
           return
         }
+        if (terraCameraHasActiveFlight(viewer.camera)) {
+          lastFrameAt = null
+          return
+        }
         if (lastFrameAt === null) {
           lastFrameAt = now
           return
         }
         const elapsedMs = now - lastFrameAt
+        if (elapsedMs < ORBIT_FRAME_INTERVAL_MS) return
         lastFrameAt = now
         const rate = zoomedOut ? GLOBAL_ORBIT_RADIANS_PER_MS : ORBIT_RADIANS_PER_MS
-        viewer.camera.rotate(CesiumModule!.Cartesian3.UNIT_Z, -rate * elapsedMs)
+        viewer.camera.rotate(CesiumModule!.Cartesian3.UNIT_Z, -rate * Math.min(elapsedMs, 100))
       }
       frameHandle = requestAnimationFrame(frame)
     }
@@ -205,5 +225,5 @@ export function useTerraCinematicOrbit(
     }
   }, [viewer, enabled, suppressedByReducedMotion])
 
-  return { orbiting, suppressedByReducedMotion, pause, resume, toggle, lockAutoResume }
+  return { orbiting, suppressedByReducedMotion, pause, resume, toggle, lockAutoResume, noteInteraction }
 }

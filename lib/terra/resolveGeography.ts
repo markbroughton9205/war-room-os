@@ -34,10 +34,18 @@ import 'server-only'
  */
 import { executeResearch } from '@/lib/research-engine/core/execute'
 import type { ResearchDocument, ResearchProviderId } from '@/lib/research-engine/core/types'
-import type { TerraResolvedGeography } from '@/lib/terra/types'
+import type { TerraResolvedGeography, TerraResolvedGeographyMatch } from '@/lib/terra/types'
 import type { TerraActiveLocation, TerraReverseLocationResolution } from '@/lib/terra/activeLocation'
 import { reverseNominatimCoordinates } from '@/lib/research-engine/providers/nominatim'
 import { isNominatimPostalType, looksLikePostalCode } from '@/lib/terra/locationCommand'
+import {
+  encodeNominatimStructuredSearch,
+  parseUsStyleAddress,
+  structuredSearchFromParsedAddress,
+  type ParsedUsAddress,
+} from '@/lib/terra/addressParse'
+import { classifyAddressMatchQuality } from '@/lib/terra/geocodeMatchQuality'
+import { selectGeocodeCandidates, type GeocodeCandidateLike } from '@/lib/terra/geocodeCandidateSelect'
 
 const RESOLVER_PROVIDER_ID: ResearchProviderId = 'nominatim'
 
@@ -53,7 +61,7 @@ function isFiniteNumber(value: unknown): value is number {
 /** Parses the four bbox_* identifier strings nominatim.ts attaches onto a search document (see
  * that file's `search()`) back into a real bounding box — undefined/malformed input honestly
  * yields `null`, never a guessed or zero-sized box. */
-type NominatimSearchCandidate = { lat: number; lon: number; doc: ResearchDocument }
+type NominatimSearchCandidate = { lat: number; lon: number; doc: ResearchDocument } & GeocodeCandidateLike
 
 export function selectNominatimSearchCandidate(
   queryUsed: string,
@@ -88,17 +96,124 @@ function bboxFromIdentifierStrings(south?: string, north?: string, west?: string
   return parsed
 }
 
-function nominatimCandidateMatch(candidate: NominatimSearchCandidate) {
+function nominatimCandidateMatch(candidate: NominatimSearchCandidate): TerraResolvedGeographyMatch {
   const { class: placeClass, type: placeTypeValue, bbox_south, bbox_north, bbox_west, bbox_east } = candidate.doc.identifiers
+  const houseNumber = candidate.doc.identifiers.house_number ?? candidate.houseNumber ?? null
+  const road = candidate.doc.identifiers.road ?? candidate.road ?? null
+  const placeType = placeClass && placeTypeValue ? `${placeClass}/${placeTypeValue}` : null
   return {
     latitude: candidate.lat,
     longitude: candidate.lon,
     label: candidate.doc.title,
-    placeType: placeClass && placeTypeValue ? `${placeClass}/${placeTypeValue}` : null,
+    placeType,
     boundingBox: bboxFromIdentifierStrings(bbox_south, bbox_north, bbox_west, bbox_east),
     nativeName: candidate.doc.identifiers.name_native ?? null,
     englishName: candidate.doc.identifiers.name_en ?? null,
     sourceUrl: candidate.doc.canonicalUrl,
+    houseNumber,
+    road,
+    city: candidate.doc.identifiers.city ?? candidate.city ?? null,
+    state: candidate.doc.identifiers.state ?? candidate.state ?? null,
+    postcode: candidate.doc.identifiers.postcode ?? candidate.postcode ?? null,
+    addressMatchQuality: classifyAddressMatchQuality({
+      placeClass,
+      placeType: placeTypeValue,
+      osmType: candidate.doc.identifiers.osm_type ?? candidate.osmType,
+      houseNumber,
+      road,
+      requestedHouseNumber: null,
+    }),
+    streetMismatch: false,
+  }
+}
+
+function hydrateCandidate(candidate: { lat: number; lon: number; doc: ResearchDocument }): NominatimSearchCandidate {
+  const ids = candidate.doc.identifiers
+  const classAndType = ids.class && ids.type ? `${ids.class}/${ids.type}` : null
+  return {
+    ...candidate,
+    label: candidate.doc.title,
+    placeClass: ids.class ?? null,
+    placeType: ids.type ?? classAndType,
+    osmType: ids.osm_type ?? null,
+    houseNumber: ids.house_number ?? null,
+    road: ids.road ?? null,
+    city: ids.city ?? null,
+    state: ids.state ?? null,
+    postcode: ids.postcode ?? null,
+  }
+}
+
+async function nominatimSearchDocuments(queryUsed: string, maxResults: number, retrievedAt: string) {
+  const { summary } = await executeResearch({
+    text: queryUsed,
+    intent: null,
+    providers: [RESOLVER_PROVIDER_ID],
+    maxResults,
+    dateFrom: null,
+    dateTo: null,
+    requireCurrent: false,
+    requestedBy: 'terra-geo-resolution',
+    requestedAt: retrievedAt,
+  })
+  return summary.providerResponses.find(r => r.provider === RESOLVER_PROVIDER_ID) ?? null
+}
+
+function candidatesFromResponse(response: { documents: ResearchDocument[] }): NominatimSearchCandidate[] {
+  return response.documents
+    .map(doc => {
+      const match = doc.geography ? GEOGRAPHY_LAT_LON_PATTERN.exec(doc.geography) : null
+      if (!match) return null
+      const lat = Number(match[1])
+      const lon = Number(match[2])
+      if (!isFiniteNumber(lat) || lat < -90 || lat > 90 || !isFiniteNumber(lon) || lon < -180 || lon > 180) return null
+      return hydrateCandidate({ lat, lon, doc })
+    })
+    .filter((candidate): candidate is NominatimSearchCandidate => candidate !== null)
+}
+
+function finishResolved(input: {
+  sourceEntityId: string
+  queryUsed: string
+  retrievedAt: string
+  match: TerraResolvedGeographyMatch
+  requestedHouseNumber?: string | null
+  structuredQuery?: boolean
+}): TerraResolvedGeography {
+  const addressMatchQuality = classifyAddressMatchQuality({
+    placeClass: input.match.placeType?.split('/')[0],
+    placeType: input.match.placeType?.split('/')[1],
+    osmType: null,
+    houseNumber: input.match.houseNumber,
+    road: input.match.road,
+    requestedHouseNumber: input.requestedHouseNumber,
+    streetConflict: input.match.streetMismatch,
+    candidateCount: 1,
+  })
+  return {
+    quality: 'strong',
+    longitude: input.match.longitude,
+    latitude: input.match.latitude,
+    altitude: null,
+    resolutionMethod: 'place_name_lookup',
+    resolverProviderId: RESOLVER_PROVIDER_ID,
+    sourceEntityId: input.sourceEntityId,
+    queryUsed: input.queryUsed,
+    matchTitle: input.match.label,
+    sourceUrl: input.match.sourceUrl,
+    retrievedAt: input.retrievedAt,
+    placeType: input.match.placeType,
+    boundingBox: input.match.boundingBox,
+    nativeName: input.match.nativeName,
+    englishName: input.match.englishName,
+    addressMatchQuality: input.match.addressMatchQuality ?? addressMatchQuality,
+    houseNumber: input.match.houseNumber ?? null,
+    road: input.match.road ?? null,
+    city: input.match.city ?? null,
+    state: input.match.state ?? null,
+    postcode: input.match.postcode ?? null,
+    streetMismatch: false,
+    structuredQuery: input.structuredQuery ?? false,
   }
 }
 
@@ -110,22 +225,24 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
     return { quality: 'unresolved', resolverProviderId: RESOLVER_PROVIDER_ID, sourceEntityId, queryUsed: placeName, retrievedAt, reason: 'Empty place name — nothing to resolve.' }
   }
 
+  const parsed: ParsedUsAddress | null = parseUsStyleAddress(queryUsed)
+  const structured = parsed ? structuredSearchFromParsedAddress(parsed) : null
   const postalQuery = looksLikePostalCode(queryUsed)
-  const { summary } = await executeResearch({
-    text: queryUsed,
-    intent: null,
-    providers: [RESOLVER_PROVIDER_ID],
-    // Postal queries get a slightly wider window so a unique `postcode` hit can be distinguished
-    // from nearby roads/cities. Still never a browse UI, and never auto-selects among 2+ postcodes.
-    maxResults: postalQuery ? 8 : 3,
-    dateFrom: null,
-    dateTo: null,
-    requireCurrent: false,
-    requestedBy: 'terra-geo-resolution',
-    requestedAt: retrievedAt,
-  })
+  const maxResults = postalQuery || parsed?.street ? 8 : 3
 
-  const response = summary.providerResponses.find(r => r.provider === RESOLVER_PROVIDER_ID) ?? null
+  const encodedStructured = structured ? encodeNominatimStructuredSearch(structured) : null
+  const encodedUnstructured = parsed?.countrycodes
+    ? encodeNominatimStructuredSearch({ q: queryUsed, countrycodes: parsed.countrycodes })
+    : queryUsed
+
+  let response = await nominatimSearchDocuments(encodedStructured ?? encodedUnstructured, maxResults, retrievedAt)
+  if (encodedStructured && response?.ok) {
+    const structuredHits = candidatesFromResponse(response)
+    if (structuredHits.length === 0) {
+      response = await nominatimSearchDocuments(encodedUnstructured, maxResults, retrievedAt)
+    }
+  }
+
   if (!response || !response.ok) {
     return {
       quality: 'unresolved',
@@ -137,16 +254,7 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
     }
   }
 
-  const candidates = response.documents
-    .map(doc => {
-      const match = doc.geography ? GEOGRAPHY_LAT_LON_PATTERN.exec(doc.geography) : null
-      if (!match) return null
-      const lat = Number(match[1])
-      const lon = Number(match[2])
-      if (!isFiniteNumber(lat) || lat < -90 || lat > 90 || !isFiniteNumber(lon) || lon < -180 || lon > 180) return null
-      return { lat, lon, doc }
-    })
-    .filter((candidate): candidate is { lat: number; lon: number; doc: (typeof response.documents)[number] } => candidate !== null)
+  const candidates = candidatesFromResponse(response)
 
   if (candidates.length === 0) {
     return {
@@ -155,8 +263,60 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
       sourceEntityId,
       queryUsed,
       retrievedAt,
+      structuredQuery: Boolean(encodedStructured),
       reason: 'Resolver returned no candidate with real, range-valid coordinates.',
     }
+  }
+
+  if (parsed?.street || parsed?.houseNumber) {
+    const selected = selectGeocodeCandidates({
+      requestedStreet: parsed.street,
+      requestedHouseNumber: parsed.houseNumber,
+      candidates,
+      uniquePostalFallback: postalQuery
+        ? rows => {
+          const postcodes = rows.filter(row => isNominatimPostalType(row.doc.identifiers.class, row.doc.identifiers.type))
+          return postcodes.length === 1 ? postcodes[0] : null
+        }
+        : undefined,
+    })
+    if (selected.quality === 'ambiguous') {
+      return {
+        quality: 'ambiguous',
+        resolverProviderId: RESOLVER_PROVIDER_ID,
+        sourceEntityId,
+        queryUsed,
+        retrievedAt,
+        reason: selected.reason,
+        structuredQuery: Boolean(encodedStructured),
+        matches: selected.candidates.map(row => ({
+          ...nominatimCandidateMatch(row),
+          addressMatchQuality: 'AMBIGUOUS' as const,
+          streetMismatch: /conflicts|Street ≠ Drive/.test(selected.reason),
+        })),
+      }
+    }
+    const match = nominatimCandidateMatch(selected.candidate)
+    match.addressMatchQuality = selected.addressMatchQuality
+    match.streetMismatch = false
+    if (parsed.houseNumber && selected.addressMatchQuality !== 'ROOFTOP' && selected.addressMatchQuality !== 'INTERPOLATED') {
+      match.addressMatchQuality = classifyAddressMatchQuality({
+        placeClass: selected.candidate.placeClass,
+        placeType: selected.candidate.placeType,
+        osmType: selected.candidate.osmType,
+        houseNumber: selected.candidate.houseNumber,
+        road: selected.candidate.road,
+        requestedHouseNumber: parsed.houseNumber,
+      })
+    }
+    return finishResolved({
+      sourceEntityId,
+      queryUsed,
+      retrievedAt,
+      match,
+      requestedHouseNumber: parsed.houseNumber,
+      structuredQuery: Boolean(encodedStructured),
+    })
   }
 
   const selected = selectNominatimSearchCandidate(queryUsed, candidates)
@@ -171,28 +331,18 @@ export async function resolvePlaceNameViaNominatim(placeName: string, sourceEnti
       queryUsed,
       retrievedAt,
       reason: selected.reason,
-      matches: listed.map(nominatimCandidateMatch),
+      structuredQuery: Boolean(encodedStructured),
+      matches: listed.map(row => nominatimCandidateMatch(row)),
     }
   }
 
-  const match = nominatimCandidateMatch(selected.candidate)
-  return {
-    quality: 'strong',
-    longitude: match.longitude,
-    latitude: match.latitude,
-    altitude: null,
-    resolutionMethod: 'place_name_lookup',
-    resolverProviderId: RESOLVER_PROVIDER_ID,
+  return finishResolved({
     sourceEntityId,
     queryUsed,
-    matchTitle: match.label,
-    sourceUrl: match.sourceUrl,
     retrievedAt,
-    placeType: match.placeType,
-    boundingBox: match.boundingBox,
-    nativeName: match.nativeName,
-    englishName: match.englishName,
-  }
+    match: nominatimCandidateMatch(selected.candidate),
+    structuredQuery: Boolean(encodedStructured),
+  })
 }
 
 export async function reverseResolveCoordinatesViaNominatim(input: {

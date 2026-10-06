@@ -5,6 +5,7 @@ import Link from 'next/link'
 
 import { LogoutButton } from '@/components/auth/LogoutButton'
 import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
+import { HvsEntryLink } from '@/components/war-room/higher-vision-studios/HvsEntryLink'
 import { CommanderStatusCluster } from './CommanderStatusCluster'
 import type { CommanderStatusPill } from '@/lib/council/live-orchestration/rosterHealth'
 
@@ -72,6 +73,12 @@ export const WarRoomOsHeader = memo(function WarRoomOsHeader(props: WarRoomOsHea
             >
               Foundry
             </FoundryEntryLink>
+            <HvsEntryLink
+              testId="nav-higher-vision-studios-header"
+              className="rounded-full border border-amber-400/40 px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-amber-100"
+            >
+              Higher Vision Studios
+            </HvsEntryLink>
             <Link
               href="/search"
               className="rounded-full border border-white/10 px-3 py-1 text-[9px] font-bold uppercase tracking-widest text-slate-300"

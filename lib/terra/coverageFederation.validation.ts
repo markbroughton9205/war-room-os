@@ -4,6 +4,7 @@
 import { pathToFileURL } from 'node:url'
 import { coverageProvidersForPoint, coverageQueryResult } from './coverageFederation'
 import { PUBLIC_TERRA_LAYER_IDS } from './publicLayers'
+import { TERRA_WORLDWIDE_FIXTURES } from './worldwideCoverageFixtures'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 function check(name: string, pass: boolean, detail: string): CaseResult {
@@ -52,6 +53,28 @@ function run(): CaseResult[] {
     const weather = coverageProvidersForPoint(region.lat, region.lon, 'weather')
     results.push(check(`${region.name}_has_public_weather`, weather.some(row => row.id === 'met_no' || row.id === 'open_meteo'), weather.map(row => row.id).join(',')))
   }
+
+  for (const fixture of TERRA_WORLDWIDE_FIXTURES) {
+    const poi = coverageProvidersForPoint(fixture.latitude, fixture.longitude, 'poi')
+    results.push(check(
+      `fixture_${fixture.id}_nominatim_global`,
+      poi.some(row => row.id === 'nominatim' && row.coverage === 'GLOBAL'),
+      poi.map(row => row.id).join(','),
+    ))
+  }
+
+  const akronAll = coverageProvidersForPoint(41.0814, -81.519)
+  results.push(check(
+    'akron_cameras_and_global_weather_overlap',
+    akronAll.some(row => row.id === 'ohgo') && akronAll.some(row => row.id === 'met_no'),
+    akronAll.map(row => `${row.category}:${row.id}`).join(','),
+  ))
+  const helsinkiAll = coverageProvidersForPoint(60.1699, 24.9384)
+  results.push(check(
+    'helsinki_digitraffic_and_global_weather_overlap',
+    helsinkiAll.some(row => row.id === 'digitraffic_road_cameras') && helsinkiAll.some(row => row.id === 'met_no'),
+    helsinkiAll.map(row => `${row.category}:${row.id}`).join(','),
+  ))
   return results
 }
 

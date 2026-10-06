@@ -1,0 +1,30 @@
+{
+  "id": "WRIM_GENESIS_RETURN_BOUNDARIES_v1",
+  "return_to_commander": [
+    "FOUNDATION_READY_FOR_GRADUATION_REVIEW",
+    "CANONICAL_PROMOTION_DECISION_REQUIRED",
+    "ARCHITECTURE_CHANGE_REQUIRED",
+    "SCIENTIFIC_LANE_EXHAUSTED",
+    "DATA_BOUNDARY_REQUIRES_NEW_CORPUS_SOURCE",
+    "CAPACITY_BOUNDARY_REQUIRES_MODEL_SCALE_CHANGE",
+    "TOKEN_BUDGET_EXPANSION_BEYOND_MASTER_CEILING",
+    "FROZEN_HASH_VIOLATION",
+    "TRAINER_GOVERNANCE_FAILURE",
+    "GRADIENT_HARD_STOP_UNRESOLVED",
+    "EVALUATION_SUITE_CONTAMINATION",
+    "SECURITY_GOVERNANCE_VIOLATION",
+    "MODEL_PROMOTION",
+    "STAGE3B_START",
+    "RAEL_POST_FOUNDATION_EXECUTION_AUTHORIZATION"
+  ],
+  "do_not_return_for": [
+    "ordinary_test_failures",
+    "syntax_errors",
+    "checkpoint_path_errors",
+    "evaluation_script_bugs",
+    "one_failed_lr",
+    "one_rejected_checkpoint",
+    "one_interrupted_run",
+    "recoverable_process_crash"
+  ]
+}

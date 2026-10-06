@@ -4,6 +4,7 @@ import { memo } from 'react'
 import Link from 'next/link'
 
 import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
+import { HvsEntryLink } from '@/components/war-room/higher-vision-studios/HvsEntryLink'
 import type { CouncilFlowMode } from '@/lib/council/councilMode'
 import { COUNCIL_FLOW_MODE_LABELS } from '@/lib/council/councilMode'
 import type { DockPanelId } from './FeatureDock'
@@ -94,6 +95,12 @@ export const LiveRoomNavPanel = memo(function LiveRoomNavPanel({
         >
           Foundry
         </FoundryEntryLink>
+        <HvsEntryLink
+          testId="nav-higher-vision-studios"
+          className="mt-2 block w-full rounded border border-amber-500/50 px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-widest text-amber-200 transition hover:bg-amber-950/20"
+        >
+          Higher Vision Studios
+        </HvsEntryLink>
       </nav>
 
       <section

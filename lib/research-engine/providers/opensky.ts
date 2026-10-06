@@ -16,7 +16,7 @@ const BBOX_PATTERN = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?),(-?
 type StateVector = [
   string, string | null, string, number | null, number | null, number | null, number | null,
   number | null, boolean, number | null, number | null, number | null, unknown, number | null,
-  string | null, boolean, number,
+  string | null, boolean, number, number?,
 ]
 type StatesResponse = { time?: number; states?: StateVector[] | null }
 
@@ -64,6 +64,7 @@ async function search(query: ResearchQuery) {
       const trueTrack = s[10]
       const verticalRate = s[11]
       const geoAltitude = s[13]
+      const emitterCategory = typeof s[17] === 'number' && Number.isFinite(s[17]) ? s[17] : null
       // baro_altitude is the more commonly populated of the two real OpenSky altitude fields;
       // geo_altitude is used only when it's null, never both averaged or guessed between.
       const altitudeMeters = baroAltitude ?? geoAltitude
@@ -102,6 +103,7 @@ async function search(query: ResearchQuery) {
           ...(verticalRate != null ? { verticalRateMps: String(verticalRate) } : {}),
           onGround: String(onGround),
           ...(lastContact != null ? { lastContactIso: new Date(lastContact * 1000).toISOString() } : {}),
+          ...(emitterCategory !== null ? { emitterCategory: String(emitterCategory) } : {}),
         },
         subjects: [],
         license: null,

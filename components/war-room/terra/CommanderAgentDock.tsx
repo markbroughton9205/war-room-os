@@ -182,6 +182,7 @@ export function CommanderAgentDock({
           : 'pointer-events-auto flex w-full min-w-0 flex-col items-stretch gap-2'
       }
       data-testid="commander-agent-dock"
+      data-terra-media-launcher-host="commander-rail"
     >
       <div className={`pointer-events-auto flex ${overlay ? 'flex-row-reverse items-start gap-2' : 'flex-col gap-2'}`}>
         <div
@@ -222,6 +223,7 @@ export function CommanderAgentDock({
           })}
           {overlay ? <MediaLauncher variant="dock" layout="stack" /> : null}
         </div>
+        {/* Launcher is independent of terra_media presentation. Never gate this on panel closed. */}
         {!overlay ? <MediaLauncher variant="dock" layout="rail" /> : null}
 
         {open ? (

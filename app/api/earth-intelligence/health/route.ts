@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getGibsServerConfigStatus } from '@/lib/earth-intelligence/gibsServerConfig'
-import { PUBLIC_GIBS_WMTS_BASE_URL } from '@/lib/earth-intelligence/gibsTileUrl'
+import { PUBLIC_GIBS_WMTS_BASE_URL } from '@/lib/earth-intelligence/gibsPublicBase'
 
 export const dynamic = 'force-dynamic'
 

@@ -11,6 +11,8 @@ export type CouncilWorkspaceProps = {
   thread: ReactNode
   composer?: ReactNode
   inlineBelowThread?: ReactNode
+  activeSessionId?: string | null
+  transcriptOwnerId?: string | null
 }
 
 export function CouncilWorkspace({
@@ -21,6 +23,8 @@ export function CouncilWorkspace({
   thread,
   composer,
   inlineBelowThread,
+  activeSessionId,
+  transcriptOwnerId,
 }: CouncilWorkspaceProps) {
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col px-2 py-1 sm:px-3 sm:py-2" data-testid="council-workspace">
@@ -32,6 +36,8 @@ export function CouncilWorkspace({
         thread={thread}
         composer={composer}
         inlineBelowThread={inlineBelowThread}
+        activeSessionId={activeSessionId}
+        transcriptOwnerId={transcriptOwnerId}
       />
     </div>
   )

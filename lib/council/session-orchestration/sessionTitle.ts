@@ -1,3 +1,5 @@
+import { isWarRoomRuntimeStatusDecree } from '@/lib/council/nebula/runtimeStatus'
+
 /**
  * Command framing that carries no topical content of its own -- stripped from the front of the
  * Commander's message before word extraction so the generated title leads with the actual subject
@@ -21,6 +23,9 @@ export function generateNeutralSessionTitle(commanderText: string): string {
   const t = commanderText.replace(/\s+/g, ' ').trim()
   if (!t) return 'New Council Session'
   const lower = t.toLowerCase()
+  if (isWarRoomRuntimeStatusDecree(t)) return 'War Room Status'
+  if (/\bresearch\b/.test(lower) && /\bsparse\b/.test(lower) && /\bexperts?\b/.test(lower)) return 'Sparse Expert Research'
+  if (/\bfix\b/.test(lower) && /\bbrowser\b/.test(lower) && /\bscreenshots?\b/.test(lower)) return 'Browser Screenshot Repair'
   if (
     /\bworld\b/.test(lower)
     && /\btoday\b/.test(lower)

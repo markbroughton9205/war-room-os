@@ -27,7 +27,7 @@ export function CouncilLiveRoundBanner({
         Nebula Council · {status.replaceAll('_', ' ')}
       </div>
       <div className="mt-1 text-[10px] uppercase tracking-widest" style={{ color: '#94A3B8' }}>
-        {streamingAgent ? `${streamingAgent} working` : 'ASTRA coordinating'}
+        {streamingAgent ? `${streamingAgent} working` : 'Council coordinating'}
         {agents.length ? ` · ${agents.join(' · ')}` : ''}
       </div>
       {streamingText ? (
@@ -36,7 +36,7 @@ export function CouncilLiveRoundBanner({
           <span className="ml-0.5 animate-pulse" aria-hidden>▍</span>
         </p>
       ) : (
-        <p className="mt-2 text-sm text-slate-400" data-testid="council-live-round-text">ASTRA coordinating…</p>
+        <p className="mt-2 text-sm text-slate-400" data-testid="council-live-round-text">Council coordinating…</p>
       )}
     </div>
   )

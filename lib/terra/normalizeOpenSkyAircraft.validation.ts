@@ -117,6 +117,19 @@ function run(): CaseResult[] {
     const props = events[0]?.properties as Record<string, unknown>
     const noFabrication = !('operator' in props) && !('registration' in props) && !('origin' in props) && !('destination' in props) && !('aircraftModel' in props) && !('militaryClassification' in props)
     results.push(check('never_synthesizes_operator_registration_origin_destination_model_or_military_fields', noFabrication, JSON.stringify(Object.keys(props))))
+    results.push(check('missing_emitter_category_is_unknown_aircraft', props.aircraftIconType === 'UNKNOWN_AIRCRAFT' && props.emitterCategory === null, JSON.stringify({ aircraftIconType: props.aircraftIconType, emitterCategory: props.emitterCategory })))
+  }
+
+  {
+    const identifiers = { ...makeDoc().identifiers, emitterCategory: '8' }
+    const { events } = normalizeOpenSkyAircraft([makeDoc({ identifiers })])
+    results.push(check('sourced_rotorcraft_category_is_helicopter', events[0]?.properties.aircraftIconType === 'HELICOPTER' && events[0]?.properties.emitterCategory === 8, JSON.stringify(events[0]?.properties)))
+  }
+
+  {
+    const identifiers = { ...makeDoc().identifiers, emitterCategory: '6' }
+    const { events } = normalizeOpenSkyAircraft([makeDoc({ identifiers })])
+    results.push(check('sourced_heavy_category_stays_unknown_not_airliner', events[0]?.properties.aircraftIconType === 'UNKNOWN_AIRCRAFT', JSON.stringify(events[0]?.properties.aircraftIconType)))
   }
 
   return results

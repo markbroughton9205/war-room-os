@@ -22,7 +22,7 @@ const CACHE_KEY = 'terra-weather-radar-iem-catalog'
 const LAST_GOOD_KEY = 'terra-weather-radar-iem-last-good'
 const USER_AGENT = 'WarRoomOS-Terra/1.0 (weather-radar@warroom.internal; +https://mesonet.agron.iastate.edu/ogc/)'
 
-type N0qMeta = { meta?: { product?: string; site?: string; valid?: string } }
+type N0qMeta = { meta?: { product?: string; site?: string; valid?: string; radar_quorum?: string | null } }
 type RadarList = { scans?: Array<{ ts?: string }>; generated_at?: string }
 
 async function fetchJson<T>(url: string, timeoutMs: number): Promise<{ ok: true; status: number; value: T } | { ok: false; status: number; message: string }> {
@@ -65,10 +65,12 @@ function historyWindow(now: Date): { start: string; end: string } {
 }
 
 export async function loadIemRadarCatalog(now = new Date()): Promise<RadarCatalog> {
-  const cached = cacheGet<RadarCatalog>(CACHE_KEY)
-  if (cached) return { ...cached, fromCache: true }
-
   const window = historyWindow(now)
+  const liveWindow = historyWindow(new Date())
+  const isLiveWindow = window.start === liveWindow.start && window.end === liveWindow.end
+  const cacheKey = isLiveWindow ? CACHE_KEY : `${CACHE_KEY}:${window.start}`
+  const cached = cacheGet<RadarCatalog>(cacheKey)
+  if (cached) return { ...cached, fromCache: true }
   const listUrl = `${IEM_JSON_RADAR}?operation=list&radar=${encodeURIComponent(RADAR_SITE)}&product=${encodeURIComponent(RADAR_PRODUCT.split('-')[1] ?? 'N0Q')}&start=${encodeURIComponent(window.start)}&end=${encodeURIComponent(window.end)}`
 
   const [metaResult, listResult] = await Promise.all([
@@ -81,7 +83,7 @@ export async function loadIemRadarCatalog(now = new Date()): Promise<RadarCatalo
 
   if (!metaResult.ok && !listResult.ok) {
     const rateLimited = metaResult.status === 429 || listResult.status === 429
-    if (lastGood?.latest) {
+    if (isLiveWindow && lastGood?.latest) {
       return {
         ...lastGood,
         fromCache: true,
@@ -107,13 +109,14 @@ export async function loadIemRadarCatalog(now = new Date()): Promise<RadarCatalo
       fromCache: false,
       catalogState: rateLimited ? 'RATE_LIMITED' : 'ERROR_UPSTREAM',
       error: rateLimited ? 'IEM rate limited this metadata request.' : `${metaResult.message}; ${listResult.message}`,
+      radarQuorum: null,
     }
   }
 
   const scans = listResult.ok
     ? (listResult.value.scans ?? []).map(item => item.ts).filter((item): item is string => typeof item === 'string')
     : []
-  const metaValid = metaResult.ok && typeof metaResult.value.meta?.valid === 'string'
+  const metaValid = isLiveWindow && metaResult.ok && typeof metaResult.value.meta?.valid === 'string'
     ? metaResult.value.meta.valid
     : null
   const frames = mergeRadarFrames({ metaValid, scans })
@@ -134,9 +137,12 @@ export async function loadIemRadarCatalog(now = new Date()): Promise<RadarCatalo
     generatedAt: listResult.ok && typeof listResult.value.generated_at === 'string' ? listResult.value.generated_at : null,
     fromCache: false,
     catalogState: latest ? 'AVAILABLE' : 'UNAVAILABLE',
+    radarQuorum: metaResult.ok && typeof metaResult.value.meta?.radar_quorum === 'string'
+      ? metaResult.value.meta.radar_quorum
+      : null,
     error: metaResult.ok && listResult.ok ? null : [!metaResult.ok ? metaResult.message : null, !listResult.ok ? listResult.message : null].filter(Boolean).join('; ') || null,
   }
-  cacheSet(CACHE_KEY, catalog, RADAR_METADATA_CACHE_MS)
-  if (latest) cacheSet(LAST_GOOD_KEY, catalog, 30 * 60_000)
+  cacheSet(cacheKey, catalog, isLiveWindow ? RADAR_METADATA_CACHE_MS : RADAR_METADATA_CACHE_MS)
+  if (latest && isLiveWindow) cacheSet(LAST_GOOD_KEY, catalog, 30 * 60_000)
   return catalog
 }

@@ -5,6 +5,9 @@ import type { Viewer as CesiumViewer } from 'cesium'
 import { loadCesium } from './loadCesiumRuntime'
 import { buildGibsTileUrlTemplate } from '@/lib/earth-intelligence/gibsTileUrl'
 import { resolveTerraImageryAlphas, TERRA_IMAGERY_PROVIDER_FAIL_STREAK } from '@/lib/terra/aerialImagery'
+import { applyTerraDaytimeLayerNightAlpha } from '@/lib/terra/solarLighting'
+import { releaseImageryLayerAfterRender } from './cesiumImageryLifecycle'
+import { ensureWeatherRenderOrder } from './terraWeatherLayerStack'
 
 const CROSSFADE_MS = 900
 
@@ -116,6 +119,7 @@ export function TerraEarthImagery({ viewer, selectedTime, hasIonToken, mapDetail
 
       trueColorLayer = targetViewer.imageryLayers.addImageryProvider(trueColor)
       trueColorLayer.alpha = 0
+      ensureWeatherRenderOrder(targetViewer)
 
       let aerialAvailable = worldImageryLayer !== null
       let photographicFailed = false
@@ -132,9 +136,16 @@ export function TerraEarthImagery({ viewer, selectedTime, hasIonToken, mapDetail
           heightMeters: height,
           fade: fadeInProgress,
         })
-        if (osmBaseLayer) osmBaseLayer.alpha = alphas.osm
+        if (osmBaseLayer) {
+          osmBaseLayer.alpha = alphas.osm
+          applyTerraDaytimeLayerNightAlpha(osmBaseLayer)
+        }
         trueColorLayer.alpha = alphas.gibs
-        if (worldImageryLayer) worldImageryLayer.alpha = alphas.world
+        applyTerraDaytimeLayerNightAlpha(trueColorLayer)
+        if (worldImageryLayer) {
+          worldImageryLayer.alpha = alphas.world
+          applyTerraDaytimeLayerNightAlpha(worldImageryLayer)
+        }
       }
 
       const markWorldImageryFailed = () => {
@@ -186,8 +197,8 @@ export function TerraEarthImagery({ viewer, selectedTime, hasIonToken, mapDetail
       if (animationFrame !== null) cancelAnimationFrame(animationFrame)
       removeCameraChanged?.()
       if (!targetViewer.isDestroyed()) {
-        if (trueColorLayer) targetViewer.imageryLayers.remove(trueColorLayer, true)
-        if (worldImageryLayer) targetViewer.imageryLayers.remove(worldImageryLayer, true)
+        if (trueColorLayer) releaseImageryLayerAfterRender(targetViewer, trueColorLayer)
+        if (worldImageryLayer) releaseImageryLayerAfterRender(targetViewer, worldImageryLayer)
       }
     }
   }, [viewer, observationDay, hasIonToken])

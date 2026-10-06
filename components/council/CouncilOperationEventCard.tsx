@@ -1,6 +1,7 @@
 'use client'
 
 import type { CommanderOperationEvent } from '@/lib/council/unified-experience'
+import { sanitizeRuntimeDetailsText } from '@/lib/council/commander-chat/normalChatContract'
 
 type CouncilOperationEventCardProps = {
   event: CommanderOperationEvent
@@ -92,9 +93,9 @@ export function CouncilOperationEventCard({ event }: CouncilOperationEventCardPr
             Replying to {event.replyToLabel}
           </p>
         ) : null}
-        {event.outputText ? (
+        {sanitizeRuntimeDetailsText(event.outputText) ? (
           <p className="mt-2 whitespace-pre-wrap break-words text-xs leading-relaxed" style={{ color: '#CBD5E1' }}>
-            {event.outputText}
+            {sanitizeRuntimeDetailsText(event.outputText)}
           </p>
         ) : (
           <p className="mt-2 text-xs leading-relaxed" style={{ color: '#64748B' }}>

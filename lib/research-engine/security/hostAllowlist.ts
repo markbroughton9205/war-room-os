@@ -143,6 +143,8 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
   unhcr_data: ['api.unhcr.org'],
   ocha_fts: ['api.hpc.tools'],
   opensky: ['opensky-network.org'],
+  airplanes_live: ['api.airplanes.live'],
+  adsb_exchange: ['adsbexchange.com'],
   cbdb: ['cbdb.fas.harvard.edu'],
   eclac_cepalstat: ['api-cepalstat.cepal.org'],
   oecd_data_explorer: ['sdmx.oecd.org'],
@@ -329,6 +331,10 @@ export const RESEARCH_PROVIDER_HOST_ALLOWLIST: Record<ResearchProviderId, string
  */
 export const TERRA_OFFICIAL_HOST_ALLOWLIST = {
   youtube_data_api: ['youtube.googleapis.com'],
+  airplanes_live: ['api.airplanes.live'],
+  adsb_exchange: ['adsbexchange.com'],
+  summit_gis: ['scgis.summitoh.net'],
+  ohio_lbrs: ['maps.ohio.gov'],
 } as const
 
 export type TerraOfficialFetchService = keyof typeof TERRA_OFFICIAL_HOST_ALLOWLIST

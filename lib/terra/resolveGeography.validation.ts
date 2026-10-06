@@ -13,6 +13,7 @@ import { __resetNominatimBackoffForTests } from '@/lib/research-engine/providers
 import { resolvePlaceNameViaNominatim, reverseResolveCoordinatesViaNominatim } from './resolveGeography'
 import { resolveCommanderPlaceSearch, isTransientGeocoderFailure } from './geocodeSearchPolicy'
 import { parseTerraCoordinates, looksLikePostalCode } from './locationCommand'
+import { classifyAddressMatchQuality } from './geocodeMatchQuality'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
 
@@ -223,6 +224,82 @@ async function run(): Promise<CaseResult[]> {
       JSON.stringify(resolved),
     ))
   })
+
+  await withMockedFetch(
+    jsonResponse([
+      { place_id: 91, osm_type: 'way', osm_id: 11, lat: '41.101', lon: '-81.510', display_name: 'Springdale Drive, Akron, Summit County, Ohio, United States', name: 'Springdale Drive', class: 'highway', type: 'residential', address: { road: 'Springdale Drive', city: 'Akron', state: 'Ohio', postcode: '44310', country_code: 'us' } },
+      { place_id: 90, osm_type: 'way', osm_id: 10, lat: '41.1041339', lon: '-81.5215850', display_name: 'Springdale Street, West Hill, Akron, Summit County, Ohio, 44310, United States', name: 'Springdale Street', class: 'highway', type: 'residential', address: { road: 'Springdale Street', city: 'Akron', state: 'Ohio', postcode: '44310', country_code: 'us' }, boundingbox: ['41.1037670', '41.1045150', '-81.5215870', '-81.5215390'] },
+    ]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('932 Springdale St, Akron OH 44310', 'commander-location:springdale')
+      results.push(check('springdale_does_not_land_on_drive', (resolved.quality === 'strong' || resolved.quality === 'exact') && String(resolved.quality) !== 'unresolved' && !/Drive/i.test(resolved.quality === 'strong' || resolved.quality === 'exact' ? resolved.matchTitle : ''), JSON.stringify(resolved)))
+      if (resolved.quality === 'strong' || resolved.quality === 'exact') {
+        results.push(check('springdale_uses_street_point', resolved.latitude === 41.1041339 && resolved.longitude === -81.521585, `lat=${resolved.latitude} lon=${resolved.longitude}`))
+        results.push(check('springdale_match_quality_is_street', resolved.addressMatchQuality === 'STREET', String(resolved.addressMatchQuality)))
+        results.push(check('springdale_is_not_rooftop', resolved.addressMatchQuality !== 'ROOFTOP', String(resolved.addressMatchQuality)))
+      }
+    },
+  )
+
+  await withMockedFetch(
+    jsonResponse([
+      { place_id: 91, osm_type: 'way', osm_id: 11, lat: '41.101', lon: '-81.510', display_name: 'Springdale Drive, Akron, Ohio', name: 'Springdale Drive', class: 'highway', type: 'residential', address: { road: 'Springdale Drive' } },
+    ]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('932 Springdale St, Akron OH 44310', 'commander-location:drive-only')
+      results.push(check('springdale_drive_only_is_not_auto_selected', resolved.quality === 'ambiguous', `quality=${resolved.quality}`))
+    },
+  )
+
+  await withMockedFetch(
+    jsonResponse([
+      { place_id: 77, osm_type: 'node', osm_id: 77, lat: '41.11', lon: '-81.52', display_name: '932 Main Street, Akron, Ohio', name: '932 Main Street', class: 'building', type: 'house', address: { house_number: '932', road: 'Main Street', city: 'Akron', state: 'Ohio' } },
+    ]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('932 Main St, Akron OH 44310', 'commander-location:rooftop')
+      // ROOFTOP needs the provider to say so. A building address node with a house number is an ADDRESS_POINT (streetNameGuard and placePrecision pin the same), and the same evidence with an explicit rooftop signal is ROOFTOP.
+      const evidence = { placeClass: 'building', placeType: 'house', osmType: 'node', houseNumber: '932', requestedHouseNumber: '932' }
+      results.push(check('rooftop_only_with_provider_rooftop_proof', (resolved.quality === 'strong' || resolved.quality === 'exact') && resolved.addressMatchQuality === 'ADDRESS_POINT' && classifyAddressMatchQuality({ ...evidence, providerPrecisionSignal: 'rooftop' }) === 'ROOFTOP' && classifyAddressMatchQuality(evidence) !== 'ROOFTOP', JSON.stringify(resolved)))
+    },
+  )
+
+  await withMockedFetch(
+    jsonResponse([
+      { place_id: 78, osm_type: 'way', osm_id: 78, lat: '41.11', lon: '-81.52', display_name: '932 Main Street, Akron, Ohio', name: '932 Main Street', class: 'place', type: 'house', address: { house_number: '932', road: 'Main Street' } },
+    ]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('932 Main St, Akron OH 44310', 'commander-location:interpolated')
+      results.push(check('interpolated_way_house_quality', (resolved.quality === 'strong' || resolved.quality === 'exact') && resolved.addressMatchQuality === 'INTERPOLATED', JSON.stringify(resolved)))
+    },
+  )
+
+  await withMockedFetch(
+    jsonResponse([
+      { place_id: 501, osm_type: 'relation', osm_id: 34914, lat: '60.1674881', lon: '24.9427473', display_name: 'Helsinki, Manner-Suomi, Suomi', name: 'Helsinki', class: 'place', type: 'city', address: { city: 'Helsinki', country: 'Suomi', country_code: 'fi' } },
+    ]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('Helsinki, Finland', 'commander-location:helsinki')
+      results.push(check(
+        'helsinki_is_place_not_us_address',
+        (resolved.quality === 'strong' || resolved.quality === 'exact') && resolved.addressMatchQuality === 'PLACE' && resolved.structuredQuery !== true && resolved.city === 'Helsinki' && resolved.state == null,
+        JSON.stringify(resolved),
+      ))
+    },
+  )
+
+  await withMockedFetch(
+    jsonResponse([
+      { place_id: 502, osm_type: 'way', osm_id: 88, lat: '41.3874', lon: '2.1686', display_name: 'Carrer de Mallorca, Barcelona, Catalunya, España', name: 'Carrer de Mallorca', class: 'highway', type: 'residential', address: { road: 'Carrer de Mallorca', city: 'Barcelona', state: 'Catalunya', country: 'España', country_code: 'es' } },
+    ]),
+    async () => {
+      const resolved = await resolvePlaceNameViaNominatim('Carrer de Mallorca, Barcelona, Spain', 'commander-location:barcelona')
+      results.push(check(
+        'barcelona_keeps_native_road_not_us_fields',
+        (resolved.quality === 'strong' || resolved.quality === 'exact') && resolved.addressMatchQuality === 'STREET' && resolved.road === 'Carrer de Mallorca' && resolved.structuredQuery !== true,
+        JSON.stringify(resolved),
+      ))
+    },
+  )
 
   return results
 }

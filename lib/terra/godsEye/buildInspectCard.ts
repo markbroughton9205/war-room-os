@@ -8,6 +8,8 @@ import { cameraPreviewHref } from './trafficCamera'
 import { cameraInspectFreshness } from './cameraInspectFreshness'
 import { inspectEnrichAppliesTo, inspectMustNotCopyNeighborAddress } from './inspectRace'
 import { haversineKm } from '../geographicContext'
+import { godsEyeAircraftSections } from '../flightIntelligence/godsEye'
+import { readFlightTruth } from '../flightIntelligence/project'
 
 export type GodsEyeInspectSelection =
   | { kind: 'none' }
@@ -261,6 +263,7 @@ export function buildGodsEyeInspectCard(input: {
     preview,
     sections: {
       IDENTITY: [
+        ...(featureClass === 'aircraft' ? (godsEyeAircraftSections(readFlightTruth(feature)).IDENTITY ?? []) : []),
         { label: 'kind', value: feature?.kind ?? 'marker' },
         ...(typeof feature?.properties?.event === 'string' && feature.properties.event ? [{ label: 'event', value: String(feature.properties.event) }] : []),
         ...(typeof feature?.properties?.status === 'string' && feature.properties.status ? [{ label: 'status', value: String(feature.properties.status) }] : []),
@@ -290,6 +293,11 @@ export function buildGodsEyeInspectCard(input: {
         { label: 'source', value: sourceUrl ?? 'source URL not reported' },
         { label: 'preview', value: preview?.kind === 'still' ? 'still on inspect' : preview?.kind === 'html_viewer' ? 'HTML viewer at source' : 'none' },
       ] : [],
+      CLASSIFICATION: featureClass === 'aircraft' ? (godsEyeAircraftSections(readFlightTruth(feature)).CLASSIFICATION ?? []) : [],
+      POSITION: featureClass === 'aircraft' ? (godsEyeAircraftSections(readFlightTruth(feature)).POSITION ?? []) : [],
+      SIGNAL: featureClass === 'aircraft' ? (godsEyeAircraftSections(readFlightTruth(feature)).SIGNAL ?? []) : [],
+      QUALITY: featureClass === 'aircraft' ? (godsEyeAircraftSections(readFlightTruth(feature)).QUALITY ?? []) : [],
+      TRANSPONDER: featureClass === 'aircraft' ? (godsEyeAircraftSections(readFlightTruth(feature)).TRANSPONDER ?? []) : [],
       LIVE_INTEL: feature && featureClass !== 'street_camera' ? [
         { label: 'title', value: feature.title },
         ...(feature.timestamp ? [{ label: 'time', value: feature.timestamp }] : []),
@@ -299,6 +307,7 @@ export function buildGodsEyeInspectCard(input: {
       PROVENANCE: [
         { label: 'layer', value: 'SOURCE DATA' },
         { label: 'provider', value: feature?.provenance.provider ?? selection.layerId },
+        ...(featureClass === 'aircraft' ? (godsEyeAircraftSections(readFlightTruth(feature)).PROVENANCE ?? []) : []),
         ...(inspectFreshness ? [
           { label: 'catalog status', value: inspectFreshness.catalogStatus },
           { label: 'catalog', value: inspectFreshness.catalogNote },

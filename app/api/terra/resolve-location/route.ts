@@ -5,6 +5,7 @@ import { parseTerraCoordinates, type TerraLocationResolution, looksLikePostalCod
 import { reverseResolveCoordinatesViaNominatim } from '@/lib/terra/resolveGeography'
 import { resolveCommanderPlaceSearch } from '@/lib/terra/geocodeSearchPolicy'
 import type { TerraReverseLocationResolution } from '@/lib/terra/activeLocation'
+import { parseTypedPlaceQuery, shouldAttemptAddressEnrichment } from '@/lib/terra/placePrecision/parsePlaceQuery'
 import { formatPlaceDisplayLabel } from '@/lib/terra/liveIntelLanguage'
 
 export const runtime = 'nodejs'
@@ -53,6 +54,10 @@ export async function GET(request: NextRequest) {
       ? 'geonames' as const
       : 'nominatim' as const
   if (resolution.quality === 'strong' || resolution.quality === 'exact') {
+    const quality = resolution.addressMatchQuality ?? (source === 'nominatim' ? 'PLACE' : 'PLACE')
+    const parsed = parseTypedPlaceQuery(command)
+    const enrichmentEligible = shouldAttemptAddressEnrichment(parsed)
+      && (quality === 'STREET' || quality === 'INTERPOLATED' || quality === 'ADDRESS_POINT' || quality === 'PLACE')
     return NextResponse.json<TerraLocationResolution>({
       status: 'resolved',
       target: {
@@ -69,11 +74,24 @@ export async function GET(request: NextRequest) {
         coverage: source,
         retrievedAt: resolution.retrievedAt,
         instantRequested: false,
+        matchQuality: quality,
+        houseNumber: resolution.houseNumber ?? parsed.houseNumber,
+        road: resolution.road ?? parsed.us?.street ?? null,
+        city: resolution.city ?? parsed.city,
+        state: resolution.state ?? parsed.stateProvince,
+        postcode: resolution.postcode ?? parsed.postalCode,
+        streetMismatch: resolution.streetMismatch ?? false,
+        provider: source,
+        precisionSource: source === 'nominatim' ? 'OpenStreetMap Nominatim' : source,
+        enrichmentState: enrichmentEligible ? 'pending' : 'skipped',
+        enrichmentEligible,
+        geometryType: 'point',
       },
     })
   }
 
   if (resolution.quality === 'ambiguous') {
+    const streetConflict = (resolution.matches ?? []).some(match => match.streetMismatch)
     const matches = (resolution.matches ?? []).map(match => ({
       latitude: match.latitude,
       longitude: match.longitude,
@@ -88,12 +106,22 @@ export async function GET(request: NextRequest) {
       coverage: source,
       retrievedAt: resolution.retrievedAt,
       instantRequested: false,
+      matchQuality: match.addressMatchQuality ?? 'AMBIGUOUS',
+      houseNumber: match.houseNumber ?? null,
+      road: match.road ?? null,
+      city: match.city ?? null,
+      state: match.state ?? null,
+      postcode: match.postcode ?? null,
+      streetMismatch: match.streetMismatch ?? false,
+      provider: source,
     }))
     return NextResponse.json<TerraLocationResolution>({
       status: 'ambiguous',
       message: looksLikePostalCode(command)
         ? 'That postal code matches more than one place. Pick a listed match or add a city, state, or country — coordinates are never guessed.'
-        : 'That command matches multiple locations. Pick a listed match or add a city, region, postal code, or country.',
+        : streetConflict
+          ? 'Street type conflict — Street ≠ Drive. Pick a listed match. Coordinates are never guessed.'
+          : 'That command matches multiple locations. Pick a listed match or add a city, region, postal code, or country.',
       matches,
     })
   }

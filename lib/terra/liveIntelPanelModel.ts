@@ -374,21 +374,31 @@ function eventTimeFields(input: {
   }
 }
 
-function localStoryFreshness(publishedAt: string | null, now: string, fromCache?: boolean): TerraLiveFreshness {
+function publishedArticleFreshness(publishedAt: string | null, now: string, fromCache?: boolean, retrievedAt?: string): TerraLiveFreshness {
+  // Feed retrieval recency is not a live broadcast. RSS/Atom/local-station articles are
+  // recorded publications. LIVE is reserved for source/asset evidence elsewhere.
   if (fromCache) return 'CACHED'
-  if (!publishedAt) return 'STALE'
-  const age = Date.parse(now) - Date.parse(publishedAt)
+  const clock = publishedAt ?? retrievedAt
+  if (!clock) return 'STALE'
+  const age = Date.parse(now) - Date.parse(clock)
   if (!Number.isFinite(age)) return 'STALE'
-  if (age <= 2 * 60 * 60 * 1000) return 'LIVE'
   if (age <= 36 * 60 * 60 * 1000) return 'RECENT'
   return 'STALE'
 }
 
-function newsSeedFreshness(seed: TerraLiveIntelNewsSeed, now: string, asLocalStory: boolean): TerraLiveFreshness {
+function officialYoutubeFeedFreshness(seed: TerraLiveIntelNewsSeed, now: string): TerraLiveFreshness {
+  // Feed retrieval recency is not a live broadcast. Official YouTube Atom/Data API
+  // uploads are recorded assets unless a dedicated live-evidence field exists (it does not
+  // on this ingest path). Never promote that absence to LIVE.
+  if (seed.fromCache) return 'CACHED'
+  if (!seed.publishedAt) return 'STALE'
+  return publishedArticleFreshness(seed.publishedAt, now, false)
+}
+
+function newsSeedFreshness(seed: TerraLiveIntelNewsSeed, now: string, _asLocalStory: boolean): TerraLiveFreshness {
   if (seed.lastKnownGood) return 'STALE_LAST_GOOD'
-  if (seed.contentType === 'official_youtube') return seed.fromCache ? 'CACHED' : 'LIVE'
-  if (asLocalStory) return localStoryFreshness(seed.publishedAt, now, seed.fromCache)
-  return seed.fromCache ? 'CACHED' : 'LIVE'
+  if (seed.contentType === 'official_youtube') return officialYoutubeFeedFreshness(seed, now)
+  return publishedArticleFreshness(seed.publishedAt, now, seed.fromCache, seed.retrievedAt)
 }
 
 function newsSeedFreshnessLabel(seed: TerraLiveIntelNewsSeed, freshness: TerraLiveFreshness, now: string): string | null {

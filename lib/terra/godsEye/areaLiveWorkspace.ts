@@ -67,6 +67,8 @@ export function areaLiveCoverageTruth(state: NearbyCameraLocationState | string 
   if (!state) return 'UNAVAILABLE'
   if (state === 'NO_COVERAGE') return 'NO_VERIFIED_PROVIDER'
   if (state === 'AUTH_REQUIRED') return 'COMMANDER_AUTH_REQUIRED'
+  if (state === 'AUTH_FAIL') return 'AUTH_FAIL'
+  if (state === 'NONE_WITHIN_RADIUS') return 'NO_DATA'
   return state
 }
 

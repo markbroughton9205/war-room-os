@@ -395,3 +395,10 @@ export function isCouncilMessageRepairPacketEligible(message: {
   const integrity = validateProviderResponseIntegrity(text, { councilMode: true })
   return integrity.integrity_status === 'COMPLETE' && !isDegradedResponseQuality(integrity.integrity_status)
 }
+
+/** GI-ENG-01: SHORT_PATH must not force a full-team debate panel render. */
+export function shouldForceFullTeamRenderForGiPath(
+  path?: import('@/lib/council/gi/types').CouncilPath,
+): boolean {
+  return path === 'AGENT_PATH'
+}

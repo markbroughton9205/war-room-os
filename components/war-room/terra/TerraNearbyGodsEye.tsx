@@ -9,8 +9,14 @@ const STATE_CLASS: Record<string, string> = {
   PARTIAL: 'text-amber-300',
   AUTH_REQUIRED: 'text-cyan-200',
   PROVIDER_AUTH_REQUIRED: 'text-amber-300',
+  AUTH_FAIL: 'text-amber-300',
   NONE_WITHIN_RADIUS: 'text-amber-200',
   UNAVAILABLE: 'text-rose-400',
+  LOADING: 'text-slate-400',
+  LIVE: 'text-emerald-400',
+  STALE: 'text-amber-300',
+  OFFLINE: 'text-rose-400',
+  NO_DATA: 'text-amber-200',
 }
 
 export function TerraNearbyGodsEye({ snapshot }: { snapshot: NearbyGodsEyeSnapshot | null }) {

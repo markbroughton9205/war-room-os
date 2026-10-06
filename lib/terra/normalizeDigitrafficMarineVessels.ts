@@ -11,6 +11,7 @@
  */
 import type { ResearchDocument } from '@/lib/research-engine/core/types'
 import type { NormalizeResult } from './types'
+import { classifyVesselIconType } from './vehicleIcons'
 
 function parseFiniteNumber(raw: string | undefined): number | null {
   if (raw === undefined) return null
@@ -36,6 +37,11 @@ export function normalizeDigitrafficMarineVessels(documents: ResearchDocument[])
     const headingDeg = parseFiniteNumber(doc.identifiers.headingDeg)
     const draughtMeters = parseFiniteNumber(doc.identifiers.draughtMeters)
     const lastObservedIso = doc.identifiers.lastObservedIso ?? null
+    const vesselName = doc.identifiers.name ?? null
+    const vesselIconType = classifyVesselIconType({
+      shipTypeCode: doc.identifiers.shipTypeCode ?? null,
+      shipTypeLabel: doc.identifiers.shipTypeLabel ?? null,
+    })
 
     events.push({
       id: doc.providerRecordId ?? doc.id,
@@ -58,6 +64,7 @@ export function normalizeDigitrafficMarineVessels(documents: ResearchDocument[])
       evidence: null,
       properties: {
         mmsi,
+        name: vesselName,
         callSign: doc.identifiers.callSign ?? null,
         imo: doc.identifiers.imo ?? null,
         speedKnots,
@@ -69,6 +76,7 @@ export function normalizeDigitrafficMarineVessels(documents: ResearchDocument[])
         draughtMeters,
         shipTypeCode: doc.identifiers.shipTypeCode ?? null,
         shipTypeLabel: doc.identifiers.shipTypeLabel ?? null,
+        vesselIconType,
         vesselMetadataAvailable: doc.identifiers.vesselMetadataAvailable === 'true',
       },
       provenance: {

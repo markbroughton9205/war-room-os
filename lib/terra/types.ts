@@ -16,6 +16,7 @@
  */
 import type { ResearchProviderId, ResearchProviderResponse } from '@/lib/research-engine/core/types'
 import type { EvidenceConfidenceTier } from '@/lib/intelligence/intelligencePacket'
+import type { TerraAddressMatchQuality } from '@/lib/terra/geocodeMatchQuality'
 
 // ---------------------------------------------------------------------------
 // Domain / kind — deliberately separate concepts. `domain` is Terra's own coarse grouping (for
@@ -201,6 +202,24 @@ export type TerraGeoResolutionMethod = (typeof TERRA_GEO_RESOLUTION_METHODS)[num
 export const TERRA_GEO_MATCH_QUALITY = ['exact', 'strong', 'ambiguous', 'unresolved'] as const
 export type TerraGeoMatchQuality = (typeof TERRA_GEO_MATCH_QUALITY)[number]
 
+export type TerraResolvedGeographyMatch = {
+  latitude: number
+  longitude: number
+  label: string
+  placeType: string | null
+  boundingBox: { south: number; north: number; west: number; east: number } | null
+  nativeName: string | null
+  englishName: string | null
+  sourceUrl: string | null
+  addressMatchQuality?: TerraAddressMatchQuality
+  houseNumber?: string | null
+  road?: string | null
+  city?: string | null
+  state?: string | null
+  postcode?: string | null
+  streetMismatch?: boolean
+}
+
 export type TerraResolvedGeography =
   | {
       quality: 'exact' | 'strong'
@@ -229,6 +248,15 @@ export type TerraResolvedGeography =
       boundingBox?: { south: number; north: number; west: number; east: number } | null
       nativeName?: string | null
       englishName?: string | null
+      /** Honest address precision — never ROOFTOP for a Nominatim road centroid. */
+      addressMatchQuality?: TerraAddressMatchQuality
+      houseNumber?: string | null
+      road?: string | null
+      city?: string | null
+      state?: string | null
+      postcode?: string | null
+      streetMismatch?: boolean
+      structuredQuery?: boolean
     }
   | {
       quality: 'ambiguous' | 'unresolved'
@@ -242,16 +270,8 @@ export type TerraResolvedGeography =
       /** Present only for ambiguous lookups. Each row is a real Nominatim candidate. Never
        * auto-selected; the Commander must pick or refine the query. Coordinates stay off the
        * top-level ambiguous result. */
-      matches?: Array<{
-        latitude: number
-        longitude: number
-        label: string
-        placeType: string | null
-        boundingBox: { south: number; north: number; west: number; east: number } | null
-        nativeName: string | null
-        englishName: string | null
-        sourceUrl: string | null
-      }>
+      matches?: TerraResolvedGeographyMatch[]
+      structuredQuery?: boolean
     }
 
 /**

@@ -7,13 +7,15 @@ export function CouncilContextInspector({
   research,
   terra,
   diagnostics,
+  intelligence,
 }: {
   evidence?: ReactNode
   research?: ReactNode
   terra?: ReactNode
   diagnostics?: ReactNode
+  intelligence?: ReactNode
 }) {
-  const [open, setOpen] = useState<'evidence' | 'research' | 'terra' | 'diagnostics' | null>('evidence')
+  const [open, setOpen] = useState<'evidence' | 'research' | 'terra' | 'diagnostics' | 'intelligence' | null>('evidence')
   const tab = (id: typeof open, label: string) => (
     <button
       type="button"
@@ -37,12 +39,14 @@ export function CouncilContextInspector({
         {tab('evidence', 'Evidence')}
         {tab('research', 'Research')}
         {tab('terra', 'Terra')}
+        {tab('intelligence', 'Intelligence')}
         {tab('diagnostics', 'Diagnostics')}
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-3 text-[11px] leading-relaxed text-slate-300">
         {open === 'evidence' ? evidence ?? <p className="text-slate-500">No evidence packet for this turn.</p> : null}
         {open === 'research' ? research ?? <p className="text-slate-500">Research idle.</p> : null}
         {open === 'terra' ? terra ?? <p className="text-slate-500">No Terra pin on this turn.</p> : null}
+        {open === 'intelligence' ? intelligence ?? <p className="text-slate-500">No intelligence artifacts for this turn.</p> : null}
         {open === 'diagnostics' ? diagnostics ?? <p className="text-slate-500">No extra diagnostics.</p> : null}
         {open === null ? <p className="text-slate-600">Inspector collapsed.</p> : null}
       </div>

@@ -25,6 +25,11 @@ export const GODS_EYE_INSPECT_SECTIONS = [
   'MOBILITY',
   'STREET',
   'LIVE_INTEL',
+  'CLASSIFICATION',
+  'POSITION',
+  'SIGNAL',
+  'QUALITY',
+  'TRANSPONDER',
   'PROVENANCE',
 ] as const
 export type GodsEyeInspectSectionId = (typeof GODS_EYE_INSPECT_SECTIONS)[number]

@@ -31,7 +31,7 @@ export function runCouncilBrowserAcceptanceFixtureValidation(): BrowserAcceptanc
   })
   const visible = stripHiddenReasoning(sample.prose)
   return [
-    check('optimistic_round_shell_exists', page.includes('setNebulaRoundShell') && banner.includes('ASTRA coordinating'), 'shell+banner'),
+    check('optimistic_round_shell_exists', page.includes('setNebulaRoundShell') && banner.includes('Council coordinating') && !banner.includes('ASTRA coordinating'), 'shell+banner'),
     check('group_mode_testid', controls.includes('council-mode-${mode}') || controls.includes('council-mode-stable_group'), 'group testid'),
     check('execute_testid', consoleSource.includes('council-execute') && consoleSource.includes('council-command-input'), 'execute/input testids'),
     check('provider_not_in_bubble_header', !page.includes('{msg.provider && <span className="text-xs" style={{ color: \'#444\' }}>{msg.provider}</span>}'), 'provider subtitle removed'),

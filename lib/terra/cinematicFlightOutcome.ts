@@ -79,6 +79,11 @@ export function cameraSettledAtDestination(
     })
     return haversineKm(camera, center) <= (options?.instant ? Math.max(tolerance, 120) : tolerance)
   }
+  if (destination.kind === 'boundingSphere') {
+    const tolerance = destinationSettleToleranceKm({ destinationHeightMeters: destination.rangeMeters })
+    const allowed = options?.instant ? Math.max(tolerance, 120) : tolerance
+    return haversineKm(camera, destination) <= allowed && camera.heightMeters < 8_000
+  }
   const tolerance = destinationSettleToleranceKm({ destinationHeightMeters: destination.heightMeters })
   const allowed = options?.instant ? Math.max(tolerance, 120) : tolerance
   if (haversineKm(camera, destination) > allowed) return false

@@ -1,0 +1,90 @@
+{
+  "id": "WRIM_GENESIS_EVALUATION_MANIFEST_v1",
+  "locked": true,
+  "never_train_on": [
+    "WRIM-FOUNDATION-GRADUATION-1-v1.0.0",
+    "extra_unseen_natural_span_eval"
+  ],
+  "suites": {
+    "structured_phrase": {
+      "path": "WR-CORPUS-PLM-SHORT-PHRASE-ALIGN-1-v1.0.0/val.jsonl",
+      "ref": 17
+    },
+    "two_token": {
+      "path": "WR-CORPUS-PLM-TWO-TOKEN-1-v1.0.0/val.jsonl",
+      "parent_ref": 6,
+      "mod02a_always_structured": 3,
+      "mod02a_learned": 1
+    },
+    "three_token": {
+      "path": "WR-CORPUS-PLM-THREE-TOKEN-ALIGN-1-v1.0.0/val.jsonl",
+      "ref": 10
+    },
+    "paraphrase": {
+      "path": "WR-CORPUS-PLM-GENERALIZATION-EVAL-1-v1.0.0/val.jsonl",
+      "ref": 3
+    },
+    "natural_official": {
+      "path": "WR-CORPUS-PLM-SHORT-NATURAL-1-v1.0.0/val.jsonl",
+      "oracle_bypass": 3
+    },
+    "natural_extra_unseen": {
+      "fn": "natural_span_eval",
+      "n": 20,
+      "oracle_bypass": 1,
+      "never_train": true
+    },
+    "gold_prefix": {
+      "hook": "wrim_entry_bypass_review / wrim_na1_mod01b"
+    },
+    "response_routing": {
+      "hook": "wrim_rmr1_mod02a",
+      "completed": true
+    },
+    "eos_stopping_ramble_empty": {
+      "hook": "_score_loaded"
+    },
+    "stage3": {
+      "id": "WRIM-EVAL-S3-000001",
+      "sha": "934ff60bcd179ec643257fbfaa30f2a3a7621b175fc7d3c3d0efc30d946d5ac4",
+      "floor": 5,
+      "prefer": 6
+    },
+    "documents": {
+      "document_parity": "PASS"
+    },
+    "general_nl": {
+      "independent_nl_nll": 6.972,
+      "general_nl_nll": 5.247
+    },
+    "code": {
+      "nll": 3.579
+    },
+    "json": {
+      "nll": 3.282
+    },
+    "multi_turn": {
+      "hook": "rmr1 latch/EOS tests",
+      "status": "PASS"
+    },
+    "instruction_following": {
+      "status": "NOT_TESTED"
+    },
+    "reasoning": {
+      "status": "NOT_TESTED"
+    },
+    "tool_readiness": {
+      "status": "NOT_TESTED"
+    },
+    "graduation": {
+      "id": "WRIM-FOUNDATION-GRADUATION-1-v1.0.0",
+      "never_train": true
+    }
+  },
+  "public_metrics_must_split": [
+    "train",
+    "official_validation",
+    "extra_unseen",
+    "family_holdout"
+  ]
+}

@@ -49,6 +49,31 @@ function run(): CaseResult[] {
     longitude: 0,
     features: [camera('near', 60.17, 24.94)],
   }).length === 0, 'NaN origin'))
+  results.push(check('covering_filter_drops_foreign_provider', nearbyPublicCameras({
+    latitude: 41.1041339,
+    longitude: -81.521585,
+    features: [
+      { ...camera('helsinki', 41.1042, -81.5215), layerId: 'digitraffic_road_cameras', providerId: 'digitraffic_road_cameras' },
+      { ...camera('ohgo', 41.1042, -81.5215), layerId: 'ohgo_cameras', providerId: 'ohgo' },
+    ],
+    coveringLayerIds: ['ohgo_cameras'],
+  }).every(row => row.layerId === 'ohgo_cameras') && nearbyPublicCameras({
+    latitude: 41.1041339,
+    longitude: -81.521585,
+    features: [
+      { ...camera('helsinki', 41.1042, -81.5215), layerId: 'digitraffic_road_cameras', providerId: 'digitraffic_road_cameras' },
+    ],
+    coveringLayerIds: ['ohgo_cameras'],
+  }).length === 0, 'OHGO only'))
+  results.push(check('helsinki_origin_drops_ohgo', nearbyPublicCameras({
+    latitude: 60.1699,
+    longitude: 24.9384,
+    features: [
+      { ...camera('ohgo', 60.17, 24.94), layerId: 'ohgo_cameras', providerId: 'ohgo' },
+      camera('near', 60.171, 24.94),
+    ],
+    coveringLayerIds: ['digitraffic_road_cameras'],
+  }).every(row => row.layerId === 'digitraffic_road_cameras'), 'Digitraffic only'))
   return results
 }
 
