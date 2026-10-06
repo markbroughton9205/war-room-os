@@ -18,7 +18,8 @@ const bench = (o: Partial<BenchmarkRecord>): BenchmarkRecord => ({ modelRef: 'hu
 try {
   const s = new ForgeStore(dir)
   for (const m of FIRST_POOL) s.registerModel(m)
-  check('F01_pool_registered_with_exact_refs', s.models().length === 4 && s.models().some((m) => m.ref === 'huihui_ai/devstral-abliterated:24b'))
+  check('F01_pool_registered_with_exact_refs', s.models().length === 5 && s.models().some((m) => m.ref === 'huihui_ai/devstral-abliterated:24b') && s.models().some((m) => m.ref === 'AliBilge/Huihui-Devstral-Small-2-24B-Instruct-2512-abliterated:q4_k_m'))
+  check('F01b_the_two_devstral_generations_are_distinct_identities_with_distinct_generation_labels', (() => { const a = s.models().find((m) => m.ref === 'huihui_ai/devstral-abliterated:24b')!, b = s.models().find((m) => m.ref.startsWith('AliBilge/'))!; return a.generation !== b.generation && a.id !== b.id && /2505/.test(a.generation ?? '') && /2512/.test(b.generation ?? '') })())
   check('F02_qwen25_is_baseline_and_not_routable_and_123b_future_not_routable', s.models().find((m) => m.ref === 'qwen2.5-coder:14b')!.status === 'BASELINE' && s.models().filter((m) => m.status !== 'ACTIVE').every((m) => !m.routing.eligible))
   check('F03_abliterated_derivatives_do_not_claim_a_verified_license', FIRST_POOL.filter((m) => /abliterated/.test(m.ref)).every((m) => m.license.permissive === 'UNKNOWN'))
   check('F04_no_evidence_means_no_route_not_a_default', routeFor('complete_feature', s.models(), []).model === null && routeFor('complete_feature', s.models(), []).basis === 'NO_EVIDENCE')
@@ -40,7 +41,7 @@ try {
   const e123 = estimateFeasibility(70 * GiB, 16 * GiB, 30 * GiB), e24 = estimateFeasibility(14 * GiB, 16 * GiB, 30 * GiB)
   check('F12_123b_estimated_requires_offload_and_24b_not_called_full_gpu_before_measurement', e123.residency === 'REQUIRES_OFFLOAD' && e123.basis === 'ESTIMATED' && e24.residency === 'UNKNOWN' && e24.basis === 'ESTIMATED')
   appendFileSync(s.file, '{"type":"smoke","rid":"torn')
-  check('F13_torn_line_tolerated', new ForgeStore(dir).models().length === 4)
+  check('F13_torn_line_tolerated', new ForgeStore(dir).models().length === 5)
   let refused = false; try { s.registerModel({ ...FIRST_POOL[0], lineage: { note: 'key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF' } }) } catch { refused = true }
   check('F14_credential_like_content_refused', refused)
 } finally { rmSync(dir, { recursive: true, force: true }) }

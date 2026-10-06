@@ -9,6 +9,8 @@ export type ModelEntry = {
   id: string
   ref: string // exact tag the executor is called with
   family: string
+  /** Exact model generation; distinct generations of a family are never merged into one score. */
+  generation?: string
   roles: string[]
   status: ModelStatus
   license: { statement: string; permissive: 'YES' | 'NO' | 'UNKNOWN' }
