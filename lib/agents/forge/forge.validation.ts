@@ -6,6 +6,10 @@ import { FIRST_POOL } from './registry'
 import { routeFor } from './routing'
 import { classifyResidency, estimateFeasibility } from './profile'
 import type { BenchmarkRecord } from './types'
+import { ENGINEERING_WORKFLOW_ID, emitEngineeringRun, engineeringRunToEvents, failureClassOf } from './phase9'
+import { LearningLog } from '@/lib/recursive-learning/store'
+import { scoreMatrix } from '@/lib/recursive-learning/scoring'
+import { detectRecurringFailures } from '@/lib/recursive-learning/analysis'
 
 let fails = 0
 const check = (n: string, ok: boolean, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${ok ? '' : ' ' + d}`); if (!ok) fails++ }
@@ -40,5 +44,31 @@ try {
   let refused = false; try { s.registerModel({ ...FIRST_POOL[0], lineage: { note: 'key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF' } }) } catch { refused = true }
   check('F14_credential_like_content_refused', refused)
 } finally { rmSync(dir, { recursive: true, force: true }) }
+await (async () => {
+// ---- Phase 9 wiring: real engineering runs become attributable evaluation events
+{
+  const learnDir = mkdtempSync(path.join(tmpdir(), 'forge-p9-'))
+  try {
+    const log = new LearningLog(learnDir)
+    const real = (o: Partial<BenchmarkRecord>) => bench({ at: new Date(Date.now() - 3600_000).toISOString(), fixture: 'task-board (TASK_FEATURE, independent 12-check verifier)', engineSha: 'abc123def456', executor: 'ollama:huihui_ai/devstral-abliterated:24b', ...o })
+    const ok = engineeringRunToEvents(real({}))
+    check('F15_a_real_run_yields_a_model_event_and_a_workflow_event_with_attribution_in_source_and_note', ok.events.length === 2 && ok.events.some((e) => e.subject.kind === 'model' && e.subject.id === 'huihui_ai/devstral-abliterated:24b') && ok.events.some((e) => e.subject.kind === 'workflow' && e.subject.id === ENGINEERING_WORKFLOW_ID) && ok.events.every((e) => e.taskClass === 'code_modification' && /fixture=task-board/.test(e.note ?? '') && /engine=abc123def456/.test(e.note ?? '') && /verifier=12\/12/.test(e.note ?? '') && /executor=ollama:/.test(e.note ?? '') && /intervention=none/.test(e.note ?? '') && e.source.ref.includes('abc123def456')))
+    check('F16_cost_and_tokens_are_never_invented_only_latency_and_retries_are_reported', ok.events.every((e) => e.metrics && !('costUsd' in e.metrics) && !('tokensIn' in e.metrics) && !('tokensOut' in e.metrics) && e.metrics.latencyMs === 60000 && e.metrics.retries === 1))
+    check('F17_scripted_double_runs_are_refused_as_evidence', engineeringRunToEvents(real({ executor: 'test-double' })).events.length === 0)
+    const partial = engineeringRunToEvents(real({ verifierScore: { pass: 9, total: 12 }, completion: 'PARTIAL', rootCause: 'independent verification: UNDETERMINED' }))
+    check('F18_a_partial_run_is_PARTIAL_with_validation_FAILED_and_carries_a_failure_class', partial.events[0].outcome === 'PARTIAL' && partial.events[0].validation === 'FAILED' && partial.events[0].errorClass === 'repair_unresolved' && failureClassOf('src/x.mjs: incompatible rewrite after 2 rejections') === 'edit_rejected_repeatedly')
+    check('F19_a_run_that_reports_COMPLETED_but_not_full_score_is_not_a_SUCCESS', engineeringRunToEvents(real({ verifierScore: { pass: 11, total: 12 }, completion: 'COMPLETED' })).events[0].outcome !== 'SUCCESS')
+    const r1 = emitEngineeringRun(log, real({}), { trial: 't1' }); const r2 = emitEngineeringRun(log, real({}), { trial: 't1' })
+    check('F20_ingestion_is_idempotent_by_stable_event_id', r1.inserted === 2 && r2.inserted === 0 && r2.duplicates === 2 && r1.rejected.length === 0, JSON.stringify([r1, r2]))
+    for (let i = 0; i < 3; i++) emitEngineeringRun(log, real({ modelRef: 'huihui_ai/qwen3-abliterated:14b', verifierScore: { pass: 0, total: 12 }, completion: 'FAILED', rootCause: 'src/chatService.mjs: incompatible rewrite after 2 rejections' }), { trial: `q${i}` })
+    const events = log.view().events
+    const cards = scoreMatrix(events, new Date(), undefined, 'model').filter((c) => c.taskClass === 'code_modification')
+    const dev = cards.find((c) => c.subject.id === 'huihui_ai/devstral-abliterated:24b'), qw = cards.find((c) => c.subject.id === 'huihui_ai/qwen3-abliterated:14b')
+    check('F21_phase9_scores_models_by_task_class_from_these_events', !!dev && !!qw && typeof dev.score === 'number' && typeof qw.score === 'number' && dev.score > qw.score && dev.costUsd === 'UNKNOWN', JSON.stringify([dev?.score, qw?.score]))
+    const wf = scoreMatrix(events, new Date(), undefined, 'workflow').find((c) => c.subject.id === ENGINEERING_WORKFLOW_ID)
+    check('F22_phase9_scores_the_engineering_workflow_and_detects_the_repeated_failure_class', !!wf && wf.rawSamples >= 4 && detectRecurringFailures(events, new Date(), { minCount: 3 }).some((f) => f.signature.includes('qwen3') && f.signature.includes('edit_rejected_repeatedly')))
+  } finally { rmSync(learnDir, { recursive: true, force: true }) }
+}
+})()
 console.log(`FORGE_VALIDATION ${fails ? 'FAIL (' + fails + ')' : 'PASS'}`)
 process.exit(fails ? 1 : 0)
