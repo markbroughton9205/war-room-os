@@ -1,11 +1,12 @@
 'use client'
 
-import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import type { Viewer as CesiumViewer } from 'cesium'
 import { TerraWorkspaceLayoutStore, type TerraWorkspaceAttentionState, type WorkspacePanelSize, type WorkspaceViewport } from './terraWorkspaceStore'
 import { setTerraGlobeInputsEnabled } from './isolateTerraGlobeInputs'
-import type { TerraWorkspacePanelId } from '@/lib/terra/workspace/panelIds'
+import { type TerraWorkspacePanelId } from '@/lib/terra/workspace/panelIds'
 import type { TerraWorkspacePanelRecord } from '@/lib/terra/workspace/layout'
+import { useTerraMissionControlOptional } from '../mission-control/TerraMissionControlProvider'
 
 export type LayoutApi = {
   store: TerraWorkspaceLayoutStore
@@ -26,6 +27,7 @@ const EMPTY_RECORD: TerraWorkspacePanelRecord = {
   locked: false,
   minimized: false,
   dock: 'float',
+  closed: false,
 }
 
 function readViewport(node: HTMLElement | null): WorkspaceViewport {
@@ -34,6 +36,14 @@ function readViewport(node: HTMLElement | null): WorkspaceViewport {
     width: Math.max(1, Math.round(rect?.width ?? window.innerWidth)),
     height: Math.max(1, Math.round(rect?.height ?? window.innerHeight)),
   }
+}
+
+function createHydratedStore(): TerraWorkspaceLayoutStore {
+  const store = new TerraWorkspaceLayoutStore()
+  if (typeof window !== 'undefined') {
+    store.hydrateFromStorage({ width: window.innerWidth, height: window.innerHeight })
+  }
+  return store
 }
 
 export function TerraWorkspaceLayoutProvider({
@@ -49,17 +59,11 @@ export function TerraWorkspaceLayoutProvider({
    * once the provider's memoized api is ready; never creates a second store/provider. */
   onApiReady?: (api: LayoutApi) => void
 }) {
-  const storeRef = useRef<TerraWorkspaceLayoutStore | null>(null)
-  if (!storeRef.current) storeRef.current = new TerraWorkspaceLayoutStore()
-  const store = storeRef.current
-  const hydratedRef = useRef(false)
-  if (!hydratedRef.current && typeof window !== 'undefined') {
-    store.hydrateFromStorage({ width: window.innerWidth, height: window.innerHeight })
-    hydratedRef.current = true
-  }
+  const [store] = useState(createHydratedStore)
+  const mission = useTerraMissionControlOptional()
+  const missionRef = useRef(mission)
   const hostRef = useRef<HTMLDivElement | null>(null)
   const viewerRef = useRef(viewer)
-  viewerRef.current = viewer
   const sizesRef = useRef<Partial<Record<TerraWorkspacePanelId, WorkspacePanelSize>>>({})
 
   const api = useMemo<LayoutApi>(() => ({
@@ -76,8 +80,26 @@ export function TerraWorkspaceLayoutProvider({
   }), [store])
 
   useEffect(() => {
+    missionRef.current = mission
+  }, [mission])
+
+  useEffect(() => {
+    viewerRef.current = viewer
+  }, [viewer])
+
+  useEffect(() => {
     onApiReady?.(api)
   }, [api, onApiReady])
+
+  useEffect(() => {
+    const syncChrome = () => {
+      const current = missionRef.current
+      if (!current) return
+      current.setChromeEnabled(store.getSnapshot().settings.missionControlChrome)
+    }
+    syncChrome()
+    return store.subscribe(syncChrome)
+  }, [store])
 
   useEffect(() => {
     const host = hostRef.current
@@ -124,8 +146,13 @@ export function useTerraWorkspaceLayoutApi(): LayoutApi {
   return api
 }
 
+export function useTerraWorkspaceLayoutApiOptional(): LayoutApi | null {
+  return useContext(TerraWorkspaceLayoutContext)
+}
+
 export function useTerraWorkspacePanelState(id: TerraWorkspacePanelId): {
   record: TerraWorkspacePanelRecord
+  exists: boolean
   rank: number
   dragging: boolean
   attention: TerraWorkspaceAttentionState | undefined
@@ -136,6 +163,7 @@ export function useTerraWorkspacePanelState(id: TerraWorkspacePanelId): {
   const snapshot = useSyncExternalStore(api.store.subscribe, api.store.getSnapshot, api.store.getSnapshot)
   return {
     record: snapshot.panels[id] ?? EMPTY_RECORD,
+    exists: Boolean(snapshot.panels[id]),
     rank: snapshot.zOrder.indexOf(id) < 0 ? snapshot.zOrder.length : snapshot.zOrder.indexOf(id),
     dragging: snapshot.draggingId === id,
     attention: snapshot.attention[id],

@@ -1,14 +1,20 @@
 import type { TerraWorkspaceDock } from './layout'
 
+/** Terra workspace panel ids are independent of Home FeatureDock, Home header,
+ * chat minimized state, and the OS Media fallback launcher. Hiding Home Media
+ * does not unregister `terra_media`. */
 export const TERRA_WORKSPACE_PANEL_IDS = [
   'workspace_control',
   'left_rail',
   'live_intel',
+  'terra_media',
+  'terra_emergency_report',
   'weather_toast',
   'weather_drawer',
   'area_live_viewer',
   'street_view',
   'gods_eye_inspect',
+  'flight_monitor',
   'nearby_cameras',
   'radar',
   'search_command',
@@ -26,8 +32,16 @@ export const TERRA_WORKSPACE_PANEL_IDS = [
 
 export type TerraWorkspacePanelId = (typeof TERRA_WORKSPACE_PANEL_IDS)[number]
 
+export const TERRA_MEDIA_PANEL_ID: TerraWorkspacePanelId = 'terra_media'
+export const TERRA_EMERGENCY_REPORT_PANEL_ID: TerraWorkspacePanelId = 'terra_emergency_report'
+export const TERRA_MEDIA_DEFAULT_SIZE = { width: 720, height: 540 }
+export const TERRA_MEDIA_COMPACT_SIZE = { width: 336, height: 168 }
+export const TERRA_EMERGENCY_REPORT_DEFAULT_SIZE = { width: 336, height: 420 }
+
 export const TERRA_WORKSPACE_DOCKABLE_IDS: readonly TerraWorkspacePanelId[] = [
   'live_intel',
+  'terra_media',
+  'terra_emergency_report',
   'weather_drawer',
   'weather_toast',
   'street_view',
@@ -62,6 +76,10 @@ export function defaultPanelPosition(id: TerraWorkspacePanelId, vw: number, vh: 
       return { x: 8, y: 148 }
     case 'live_intel':
       return { x: right(320), y: 12 }
+    case 'terra_media':
+      return { x: right(720), y: 220 }
+    case 'terra_emergency_report':
+      return { x: right(336), y: 12 }
     case 'weather_toast':
       return { x: centerX(352), y: 12 }
     case 'weather_drawer':
@@ -72,6 +90,8 @@ export function defaultPanelPosition(id: TerraWorkspacePanelId, vw: number, vh: 
       return { x: centerX(448), y: bottom(400) }
     case 'gods_eye_inspect':
       return { x: 248, y: Math.max(12, vh * 0.28) }
+    case 'flight_monitor':
+      return { x: right(360), y: 148 }
     case 'nearby_cameras':
       return { x: 248, y: Math.max(12, vh * 0.58) }
     case 'radar':
@@ -103,11 +123,14 @@ export const TERRA_WORKSPACE_PANEL_TITLE: Record<TerraWorkspacePanelId, string> 
   workspace_control: 'Workspace',
   left_rail: 'Commander',
   live_intel: 'Live Intel',
+  terra_media: 'War Room Media',
+  terra_emergency_report: 'Emergency Report',
   weather_toast: 'Weather Alert',
   weather_drawer: 'Weather',
   area_live_viewer: 'Area Live',
   street_view: 'Street View',
   gods_eye_inspect: 'Inspect',
+  flight_monitor: 'Flight Monitor',
   nearby_cameras: 'Nearby Cameras',
   radar: 'Radar',
   search_command: 'Search',
@@ -125,6 +148,8 @@ export const TERRA_WORKSPACE_PANEL_TITLE: Record<TerraWorkspacePanelId, string> 
 
 export const TERRA_GLOBE_FOCUS_MINIMIZE: readonly TerraWorkspacePanelId[] = [
   'live_intel',
+  'terra_media',
+  'terra_emergency_report',
   'nearby_cameras',
   'weather_drawer',
   'weather_toast',
@@ -153,14 +178,16 @@ export type TerraSmartClickInteractionKind =
   | 'building_or_object'
   | 'hazard_or_event'
   | 'location'
+  | 'emergency_media'
 
 export const TERRA_SMART_CLICK_ROUTES: Record<TerraSmartClickInteractionKind, { primary: TerraWorkspacePanelId; secondary: readonly TerraWorkspacePanelId[] }> = {
-  camera: { primary: 'gods_eye_inspect', secondary: ['nearby_cameras'] },
-  weather_alert: { primary: 'weather_drawer', secondary: ['live_intel'] },
+  camera: { primary: 'gods_eye_inspect', secondary: ['nearby_cameras', 'terra_media'] },
+  weather_alert: { primary: 'weather_drawer', secondary: ['live_intel', 'terra_media'] },
   street_view_point: { primary: 'street_view', secondary: [] },
   building_or_object: { primary: 'gods_eye_inspect', secondary: ['street_intel'] },
-  hazard_or_event: { primary: 'live_intel', secondary: ['gods_eye_inspect'] },
+  hazard_or_event: { primary: 'live_intel', secondary: ['gods_eye_inspect', 'terra_media'] },
   location: { primary: 'location_gps', secondary: ['nearby_cameras'] },
+  emergency_media: { primary: 'terra_emergency_report', secondary: ['terra_media'] },
 }
 
 export const TERRA_INTEL_FOCUS_MINIMIZE: readonly TerraWorkspacePanelId[] = [

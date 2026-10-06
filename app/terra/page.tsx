@@ -10,6 +10,7 @@
 import { WarRoomUiModeProvider } from '@/components/war-room/WarRoomUiModeContext'
 import { TerraShell } from '@/components/war-room/terra/TerraShell'
 import { TerraActiveLocationProvider } from '@/components/war-room/terra/TerraActiveLocationContext'
+import { TerraMissionControlProvider } from '@/components/war-room/terra/mission-control/TerraMissionControlProvider'
 
 export const dynamic = 'force-dynamic'
 
@@ -17,7 +18,9 @@ export default function TerraPage() {
   return (
     <WarRoomUiModeProvider>
       <TerraActiveLocationProvider>
-        <TerraShell />
+        <TerraMissionControlProvider>
+          <TerraShell />
+        </TerraMissionControlProvider>
       </TerraActiveLocationProvider>
     </WarRoomUiModeProvider>
   )

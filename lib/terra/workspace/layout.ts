@@ -15,6 +15,9 @@ export const TERRA_WORKSPACE_DOCKS = ['float', 'left', 'right', 'top', 'bottom']
 export type TerraWorkspaceDock = (typeof TERRA_WORKSPACE_DOCKS)[number]
 export type TerraWorkspacePreset = 'default' | 'globe_focus' | 'intel_focus'
 
+export const TERRA_MEDIA_PLAYER_CHROMES = ['full', 'compact'] as const
+export type TerraMediaPlayerChrome = (typeof TERRA_MEDIA_PLAYER_CHROMES)[number]
+
 export type TerraWorkspacePanelRecord = {
   x: number
   y: number
@@ -23,16 +26,24 @@ export type TerraWorkspacePanelRecord = {
   locked: boolean
   minimized: boolean
   dock: TerraWorkspaceDock
+  /** Closed panels are unregistered from view but remain in the persisted layout.
+   * Distinct from minimized (title bar still visible). Rail launchers reopen them. */
+  closed?: boolean
+  /** terra_media only: same panel, compact vs full chrome. Independent of PLAYING/PAUSED. */
+  playerChrome?: TerraMediaPlayerChrome
 }
 
 export type TerraWorkspaceSettings = {
   smartClick: boolean
   smartOpen: boolean
+  /** Mission-control chrome hosts panels in drawers. false restores classic floating panels. */
+  missionControlChrome: boolean
 }
 
 export const TERRA_WORKSPACE_DEFAULT_SETTINGS: TerraWorkspaceSettings = {
   smartClick: true,
   smartOpen: false,
+  missionControlChrome: true,
 }
 
 export type TerraWorkspaceLayoutV1 = {
@@ -177,7 +188,13 @@ export function normalizePanelRecord(raw: Partial<TerraWorkspacePanelRecord> | u
     locked: Boolean(raw.locked),
     minimized: Boolean(raw.minimized),
     dock: isWorkspaceDock(raw.dock) ? raw.dock : 'float',
+    closed: Boolean(raw.closed),
+    playerChrome: raw.playerChrome === 'compact' ? 'compact' : raw.playerChrome === 'full' ? 'full' : undefined,
   }
+}
+
+export function panelIsHidden(record: TerraWorkspacePanelRecord | undefined): boolean {
+  return !record || record.minimized || Boolean(record.closed)
 }
 
 /** Reflowed by Smart Organize; every other panel (large viewers, the pinned workspace control)
@@ -185,15 +202,102 @@ export function normalizePanelRecord(raw: Partial<TerraWorkspacePanelRecord> | u
  * around the globe, it does not relocate contextual viewers the Commander just opened. */
 const SMART_ORGANIZE_TOP_IDS: readonly TerraWorkspacePanelId[] = ['search_command', 'globe_status', 'hazard_counters']
 const SMART_ORGANIZE_LEFT_IDS: readonly TerraWorkspacePanelId[] = ['left_rail', 'nearby_cameras', 'camera_directory']
-const SMART_ORGANIZE_RIGHT_IDS: readonly TerraWorkspacePanelId[] = ['live_intel', 'gods_eye_controls', 'camera_discovery', 'area_live_controls', 'location_gps', 'weather_drawer', 'weather_toast']
+const SMART_ORGANIZE_RIGHT_IDS: readonly TerraWorkspacePanelId[] = ['live_intel', 'terra_media', 'gods_eye_controls', 'camera_discovery', 'area_live_controls', 'location_gps', 'weather_drawer', 'weather_toast']
 const SMART_ORGANIZE_BOTTOM_IDS: readonly TerraWorkspacePanelId[] = ['timeline', 'radar']
+
+export function smartOrganizeRectsOverlap(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): boolean {
+  return a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
+}
+
+function resolveSmartOrganizeOverlaps(input: {
+  placements: TerraSmartOrganizePlacement[]
+  sizes: Partial<Record<TerraWorkspacePanelId, { width: number; height: number }>>
+  viewportWidth: number
+  viewportHeight: number
+}): TerraSmartOrganizePlacement[] {
+  const margin = TERRA_WORKSPACE_MARGIN_PX
+  const sizeOf = (id: TerraWorkspacePanelId) => input.sizes[id] ?? { width: 280, height: 96 }
+  const next = input.placements.map(row => ({ ...row }))
+  const rectOf = (row: TerraSmartOrganizePlacement) => {
+    const size = sizeOf(row.id)
+    return { x: row.x, y: row.y, width: size.width, height: size.height }
+  }
+  let moved = true
+  let guard = 0
+  while (moved && guard < 24) {
+    moved = false
+    guard += 1
+    for (let i = 0; i < next.length; i += 1) {
+      for (let j = i + 1; j < next.length; j += 1) {
+        const left = next[i]!
+        const right = next[j]!
+        const a = rectOf(left)
+        const b = rectOf(right)
+        if (!smartOrganizeRectsOverlap(a, b)) continue
+        const aLeftBand = a.x + a.width / 2 < input.viewportWidth / 2
+        const bLeftBand = b.x + b.width / 2 < input.viewportWidth / 2
+        if (aLeftBand && !bLeftBand) {
+          const placed = clampPanelPosition({
+            x: a.x + a.width + margin,
+            y: b.y,
+            panelWidth: b.width,
+            panelHeight: b.height,
+            viewportWidth: input.viewportWidth,
+            viewportHeight: input.viewportHeight,
+          })
+          right.x = placed.x
+          right.y = placed.y
+        } else if (!aLeftBand && bLeftBand) {
+          const placed = clampPanelPosition({
+            x: b.x + b.width + margin,
+            y: a.y,
+            panelWidth: a.width,
+            panelHeight: a.height,
+            viewportWidth: input.viewportWidth,
+            viewportHeight: input.viewportHeight,
+          })
+          left.x = placed.x
+          left.y = placed.y
+        } else if (a.y <= b.y) {
+          const placed = clampPanelPosition({
+            x: b.x,
+            y: a.y + a.height + margin,
+            panelWidth: b.width,
+            panelHeight: b.height,
+            viewportWidth: input.viewportWidth,
+            viewportHeight: input.viewportHeight,
+          })
+          right.x = placed.x
+          right.y = placed.y
+        } else {
+          const placed = clampPanelPosition({
+            x: a.x,
+            y: b.y + b.height + margin,
+            panelWidth: a.width,
+            panelHeight: a.height,
+            viewportWidth: input.viewportWidth,
+            viewportHeight: input.viewportHeight,
+          })
+          left.x = placed.x
+          left.y = placed.y
+        }
+        moved = true
+      }
+    }
+  }
+  return next
+}
 
 /** Pure layout heuristic for the WORKSPACE → SMART ORGANIZE action. Packs the currently-visible
  * (non-minimized) HUD/control panels into top/left/right/bottom bands sized from each panel's
  * actual measured dimensions (never assumed fixed sizes), leaving the center of the viewport —
  * the globe's focal area — clear, and clamps every result on-screen via clampPanelPosition so
- * nothing is ever placed off-screen. Does not decide persistence — callers choose whether/when
- * to save the result. */
+ * nothing is ever placed off-screen. A final overlap pass separates any remaining AABB collisions
+ * (for example a left-docked Terra Media sitting on Nearby Cameras) without hardcoded pair offsets.
+ * Does not decide persistence — callers choose whether/when to save the result. */
 export function computeSmartOrganizeLayout(input: {
   panels: Partial<Record<TerraWorkspacePanelId, TerraWorkspacePanelRecord>>
   sizes: Partial<Record<TerraWorkspacePanelId, { width: number; height: number }>>
@@ -205,7 +309,7 @@ export function computeSmartOrganizeLayout(input: {
   const sizeOf = (id: TerraWorkspacePanelId) => sizes[id] ?? { width: 280, height: 96 }
   const isVisible = (id: TerraWorkspacePanelId) => {
     const record = panels[id]
-    return record !== undefined && !record.minimized
+    return record !== undefined && !record.minimized && !record.closed
   }
   const place = (id: TerraWorkspacePanelId, x: number, y: number, width: number, height: number): TerraSmartOrganizePlacement => {
     const clamped = clampPanelPosition({ x, y, panelWidth: width, panelHeight: height, viewportWidth, viewportHeight })
@@ -251,7 +355,12 @@ export function computeSmartOrganizeLayout(input: {
     bottomX += size.width + margin
   }
 
-  return results
+  return resolveSmartOrganizeOverlaps({
+    placements: results,
+    sizes,
+    viewportWidth,
+    viewportHeight,
+  })
 }
 
 export function parseWorkspaceLayout(raw: string | null): TerraWorkspaceLayoutV1 | null {
@@ -268,6 +377,7 @@ export function parseWorkspaceLayout(raw: string | null): TerraWorkspaceLayoutV1
       ? {
         smartClick: typeof parsed.settings.smartClick === 'boolean' ? parsed.settings.smartClick : TERRA_WORKSPACE_DEFAULT_SETTINGS.smartClick,
         smartOpen: typeof parsed.settings.smartOpen === 'boolean' ? parsed.settings.smartOpen : TERRA_WORKSPACE_DEFAULT_SETTINGS.smartOpen,
+        missionControlChrome: typeof parsed.settings.missionControlChrome === 'boolean' ? parsed.settings.missionControlChrome : TERRA_WORKSPACE_DEFAULT_SETTINGS.missionControlChrome,
       }
       : undefined
     return {
