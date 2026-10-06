@@ -3,7 +3,9 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { LearningLog } from './store'
-import { rankWorkflows, scoreSubject } from './scoring'
+import { rankWorkflows, scoreMatrix, scoreSubject } from './scoring'
+import { detectRecurringFailures } from './analysis'
+import { buildDoctrineProposals, buildMemoryCandidates, decideProposal, promoteMemoryCandidate, proposalStatus, submitProposal } from './proposals'
 import type { EvaluationEventInput, TaskClass } from './types'
 
 type Result = { name: string; pass: boolean; detail: string }
@@ -132,6 +134,34 @@ export const freshLog = () => new LearningLog(mkdtempSync(path.join(tmpdir(), 'p
   const t14 = E([ev('claude', 'summarization', 'SUCCESS', 1), ev('claude', 'summarization', 'SUCCESS', 1, { metrics: { latencyMs: 800 } })])
   const k = card(t14, 'claude', 'summarization')
   check('14c_scorecard_metrics_unknown_not_zero', k.costUsd === 'UNKNOWN' && k.latencyMs !== 'UNKNOWN' && Math.abs((k.latencyMs as number) - 800) < 1e-9, `lat=${k.latencyMs} cost=${k.costUsd}`)
+}
+
+// ---- S4: failure analysis + proposals (tests 4, 9)
+{
+  const log = freshLog()
+  for (const d of [1, 3, 5]) log.recordEvent(ev('gpt', 'code_modification', 'FAILURE', d, { errorClass: 'tool_timeout' }), NOW)
+  for (const d of [2, 4]) log.recordEvent(ev('claude', 'code_modification', 'FAILURE', d, { errorClass: 'tool_timeout' }), NOW)
+  log.recordEvent(ev('gpt', 'code_modification', 'SUCCESS', 2), NOW)
+  log.recordEvent(ev('gpt', 'code_modification', 'FAILURE', 90, { errorClass: 'tool_timeout' }), NOW) // outside window
+  const active = log.view().activeEvents
+  const findings = detectRecurringFailures(active, NOW)
+  check('04_recurring_failures_detected', findings.length === 1 && findings[0].subject.id === 'gpt' && findings[0].count === 3 && findings[0].contradictingSuccessIds.length === 1, JSON.stringify(findings.map((f) => [f.signature, f.count])))
+
+  const drafts = buildMemoryCandidates(findings, scoreMatrix(active, NOW), NOW)
+  const p = submitProposal(log, drafts[0], NOW)
+  let autoPromoted = true
+  try { promoteMemoryCandidate(log, p.id, NOW) } catch { autoPromoted = false }
+  let nonCommander = true
+  try { decideProposal(log, p.id, 'APPROVED', 'agent:claude', 'self approve', NOW) } catch { nonCommander = false }
+  const stillProposed = proposalStatus(log.view(), p.id) === 'PROPOSED' && log.view().promotions.length === 0
+  decideProposal(log, p.id, 'APPROVED', 'commander:mark', 'evidence reviewed', NOW)
+  const rec = promoteMemoryCandidate(log, p.id, NOW)
+  check('09_memory_candidates_cannot_auto_promote', !autoPromoted && !nonCommander && stillProposed && rec.approvedBy === 'commander:mark' && p.applied === false && !!p.reviewBy && p.evidenceEventIds.length === 3)
+
+  const bigLog = freshLog()
+  for (const d of [1, 2, 3, 4, 5]) bigLog.recordEvent(ev('gpt', 'risk_review', 'FAILURE', d, { errorClass: 'ignored_approval_gate' }), NOW)
+  const doctrine = buildDoctrineProposals(detectRecurringFailures(bigLog.view().activeEvents, NOW))
+  check('09b_doctrine_proposals_protected_and_unapplied', doctrine.length === 1 && submitProposal(bigLog, doctrine[0], NOW).targetsProtectedPolicy === true)
 }
 
 export function finish(extra: Result[] = []) {
