@@ -81,6 +81,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       for (const f of sl.files) { n += 1; fileSteps.push({ id: `s${n}`, title: `${layer}: ${f.action} ${f.path}`, status: 'PENDING', layer, files: [f.path], note: f.rationale.slice(0, 120) }) }
     }
     if (!fileSteps.length) { failAssignment(log, assignmentId, actor, 'the code-aware plan found no files to change: ' + (plan.uncertainties[0] ?? 'UNDETERMINED'), undefined, clock()); return result('FAILED', 'no plan: ' + (plan.uncertainties[0] ?? 'UNDETERMINED')) }
+    // Acceptance runs BEFORE model-written tests: the independent verifier is ground truth for the implementation, so implementation defects are repaired against it first.
+    if (deps.finalVerification) { const at = fileSteps.findIndex((x) => x.layer === 'tests'); fileSteps.splice(at < 0 ? fileSteps.length : at, 0, { id: 'accept', title: 'acceptance: independent verification', status: 'PENDING', files: [] }) }
     fileSteps.push({ id: 'verify', title: 'end-to-end validation', status: 'PENDING', files: [] })
     const treeBefore = treeHash(baselineSnap)
     state = {
@@ -88,7 +90,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       workspace: { id: asg.assignment.workspace?.id ?? 'UNKNOWN', root: ws.root, kind: asg.assignment.workspace?.kind ?? 'sandbox', gitHead: 'UNKNOWN', baselineTreeHash: treeBefore, baselineFileHashes: Object.keys(baselineSnap).length <= 400 ? baselineSnap : 'UNKNOWN' },
     }
     saveCheckpoint(log, assignmentId, state, actor, clock())
-    emit('PLAN', `${fileSteps.length - 1} file step(s): ${fileSteps.filter((s) => s.id !== 'verify').map((s) => s.files[0]).join(', ')}`)
+    emit('PLAN', `${fileSteps.filter((s) => s.files.length).length} file step(s): ${fileSteps.filter((s) => s.files.length).map((s) => s.files[0]).join(', ')}`)
   }
   const checkpoint = () => { state.fileChanges = state.fileChanges.slice(-200); saveCheckpoint(log, assignmentId, state, actor, clock()) }
 
@@ -266,6 +268,16 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const bs0 = budgetStop(); if (bs0) { failAssignment(log, assignmentId, actor, bs0.reason, undefined, clock()); return bs0 }
       if (deps.crashAfterSteps !== undefined && stepsDone >= deps.crashAfterSteps) { checkpoint(); return result('CRASHED', `simulated process death after ${stepsDone} step(s)`) }
       state.currentStepId = step.id; step.status = 'ACTIVE'; checkpoint()
+      if (step.id === 'accept') {
+        const fv = deps.finalVerification!
+        const run = await fv.run()
+        state.validations.push({ stepId: 'accept', command: fv.argv.join(' '), status: run.exitCode === 0 ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: run.outputHash, summary: fv.label })
+        if (run.exitCode !== 0) {
+          const ok = await debugLoop(run, [...changed].filter((f) => !/^test\//.test(f)), step.id, fv.label, fv.run)
+          if (!ok) { step.status = 'FAILED'; step.note = `${fv.label} failing (UNDETERMINED)`; checkpoint(); failAssignment(log, assignmentId, actor, `${fv.label} fails and the cause is UNDETERMINED after bounded evidence-based repairs`, { validation: 'FAILED', summary: fv.label, artifacts: [...changed], executor, tokens, latencyMs: Date.now() - t0, retries: repairs }, clock()); return result('FAILED', `${fv.label}: UNDETERMINED`) }
+        }
+        step.status = 'DONE'; stepsDone += 1; checkpoint(); continue
+      }
       if (step.id === 'verify') {
         // end-to-end: all repo tests, then the independent verification supplied by the Commander/harness
         const tests = allTests()
