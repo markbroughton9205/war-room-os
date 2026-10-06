@@ -261,7 +261,16 @@ export type DebugEntry =
 
 export type LessonClass = 'DUPLICATE_DECLARATION' | 'MISSING_EXPORT' | 'REMOVED_EXPORT' | 'ESM_COMMONJS_MIX' | 'MISSING_FILE' | 'SYNTAX' | 'ASSERTION' | 'OTHER'
 /** A correction learned from REAL evidence (a fixed failure or a gate rejection); never from narrative. */
-export type Lesson = { id: string; cls: LessonClass; taskClass: string; observation: string; correction: string; evidence: { assignmentId: string; failureId?: string; kind: 'FIXED_FAILURE' | 'GATE_REJECTION' }; at: string; executor: string }
+export type Lesson = {
+  id: string; cls: LessonClass; taskClass: string; observation: string; correction: string
+  evidence: { assignmentId: string; failureId?: string; kind: 'FIXED_FAILURE' | 'GATE_REJECTION' }
+  at: string; executor: string
+  /** The task pattern that triggers recall, when the failure happened (file/layer/mode), and when the correction applies. */
+  trigger?: string
+  applicability?: string[]
+  /** How the correction was confirmed on the original evidence (re-run passed / corrected reply accepted / not confirmed). */
+  validation?: string
+}
 export type AgentOpsRecord =
   | { t: 'need'; rid: string; need: NeedRecord }
   | { t: 'agent'; rid: string; agent: AgentSpec }

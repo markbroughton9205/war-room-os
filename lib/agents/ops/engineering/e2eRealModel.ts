@@ -20,6 +20,7 @@ import { OllamaModelClient } from './runtime/ollamaModel'
 import { ForgeStore } from '@/lib/agents/forge/store'
 import { gpuUsedMiB, ramUsedMiB } from '@/lib/agents/forge/profile'
 import { makeIndependentVerification } from './runtime/verifier'
+import { allLessons, lessonsFor, measureLessonEffect } from './lessons'
 import { Workspace } from './runtime/workspaceFs'
 import { runFeatureWorkflow } from './workflow'
 import type { ModelClient, ModelResult } from './runtime/ports'
@@ -62,17 +63,30 @@ const traced: ModelClient = {
 }
 const verification = makeIndependentVerification(`independent ${FX.id} verification`, path.join(outDir, `verifier-${stamp}`), 'verify.mjs', FX.verify, wsRoot)
 console.log(`workspace: ${wsRoot}\nmodel: ${modelName}\nassignment: ${assignment.id}`)
+// Optional lesson retrieval (LESSON_STORE=<dir> of previously harvested lessons). Off by default; control runs never see lessons.
+const lessonStoreDir = process.env.LESSON_STORE
+let lessonTexts: string[] = []
+let lessonIds: string[] = []
+if (lessonStoreDir) {
+  const src = new AgentOpsLog(lessonStoreDir, { readOnly: true })
+  for (const l of allLessons(src)) { try { log.append({ t: 'lesson', lesson: l }) } catch { /* already present */ } }
+  const got = lessonsFor(log, assignment.id, 'feature_implementation')
+  lessonTexts = got.texts; lessonIds = got.ids
+  console.log(`lessons retrieved: ${lessonIds.length}`)
+}
 const t0 = Date.now()
 let peakGpu: number | 'UNKNOWN' = 'UNKNOWN', peakRam: number | 'UNKNOWN' = 'UNKNOWN'
 const sampler = setInterval(() => { const g = gpuUsedMiB(), r = ramUsedMiB(); if (typeof g === 'number' && (peakGpu === 'UNKNOWN' || g > peakGpu)) peakGpu = g; if (typeof r === 'number' && (peakRam === 'UNKNOWN' || r > peakRam)) peakRam = r }, 3000)
-const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, onEvent: (e) => console.log(`[${e.kind}] ${e.detail}`) }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
+const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => console.log(`[${e.kind}] ${e.detail}`) }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
 const v = deriveAssignments(log).assignments.get(assignment.id)!
 const finalVerify = await verification.run()
+const lessonEffect = lessonStoreDir ? measureLessonEffect(log, assignment.id) : null
 const report = {
   stamp, fixture: FX.id, engineSha, model: modelName, workspace: wsRoot, assignmentId: assignment.id, wallMs: Date.now() - t0,
   result, assignmentState: v.state, outcome: v.outcome, stopReason: v.stopReason ?? null,
   independentVerificationNow: { exitCode: finalVerify.exitCode, summary: finalVerify.stdout.split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ') },
   checkpoint: latestCheckpoint(log, assignment.id)?.state.steps.map((s) => `${s.id} ${s.status} ${s.files[0] ?? ''}${s.note ? ' — ' + s.note : ''}`),
+  lessons: { storeDir: lessonStoreDir ?? null, retrievedIds: lessonIds, retrievedTexts: lessonTexts, effect: lessonEffect },
   debug: debugSummary(log, assignment.id), ledgerFailures: deriveLedger(log, assignment.id).failures.size,
 }
 clearInterval(sampler)

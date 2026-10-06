@@ -17,7 +17,7 @@ export function classifyFailure(text: string): LessonClass {
   return 'OTHER'
 }
 const GUIDANCE: Record<LessonClass, string> = {
-  DUPLICATE_DECLARATION: 'Never declare a name that already exists in the file (imports, functions, consts); extend or edit the existing declaration instead of redeclaring it.',
+  DUPLICATE_DECLARATION: 'When you edit an EXISTING file, reply with ONLY the new or changed code. Never repeat code that is already in the file (do not echo existing functions, imports or consts) and never declare a name twice; if you wrap an imported function, import it with an alias (import { x as storeX }). Use a SEARCH/REPLACE block to change existing code and an append block only for brand-new code.',
   MISSING_EXPORT: 'Import only names that the target module really exports (read RELATED CODE); add the export in the module first if it is needed.',
   REMOVED_EXPORT: 'Never delete or rename an export other files import; add new exports beside the old ones.',
   ESM_COMMONJS_MIX: 'This workspace is ES modules: use import/export, never require(); derive paths from import.meta.url instead of __dirname.',
@@ -47,13 +47,19 @@ export function captureLessons(log: AgentOpsLog, assignmentId: string, ctx: { ta
     if (!fixed) continue
     const rep = led.repairs.find((r) => r.repairId === fixed.repairId)
     const cls = classifyFailure(f.excerpt)
-    add({ cls, taskClass: ctx.taskClass, observation: `${f.signature.slice(0, 160)}`, correction: `${GUIDANCE[cls] || 'see repair'} Worked: ${(rep?.rationale ?? '').slice(0, 220)}`.trim(), evidence: { assignmentId, failureId, kind: 'FIXED_FAILURE' }, at: now.toISOString(), executor: ctx.executor })
+    add({ cls, taskClass: ctx.taskClass, observation: `${f.signature.slice(0, 160)}`, correction: `${GUIDANCE[cls] || 'see repair'} Worked: ${(rep?.rationale ?? '').slice(0, 220)}`.trim(), evidence: { assignmentId, failureId, kind: 'FIXED_FAILURE' }, at: now.toISOString(), executor: ctx.executor,
+      trigger: `${ctx.taskClass}: command \`${f.argv.join(' ').slice(0, 80)}\` failed with class ${cls}`, applicability: [`task class ${ctx.taskClass}`, `same failure class ${cls}`], validation: `the original failing command was re-run after the repair and passed (ORIGINAL_FIXED) in assignment ${assignmentId}` })
   }
   for (const d of latestCheckpoint(log, assignmentId)?.state.doNotRepeat ?? []) {
     if (!d.key.startsWith('reject:')) continue
     const cls = classifyFailure(d.reason)
     if (cls === 'OTHER') continue
-    add({ cls, taskClass: ctx.taskClass, observation: d.reason.slice(0, 200), correction: GUIDANCE[cls], evidence: { assignmentId, kind: 'GATE_REJECTION' }, at: now.toISOString(), executor: ctx.executor })
+    const rejPath = d.key.split(':')[1] ?? 'UNKNOWN'
+    const cp = latestCheckpoint(log, assignmentId)?.state
+    const accepted = !!cp && (cp.fileChanges.some((c) => c.path === rejPath) || cp.steps.some((x) => x.files.includes(rejPath) && x.status === 'DONE'))
+    add({ cls, taskClass: ctx.taskClass, observation: d.reason.slice(0, 200), correction: GUIDANCE[cls], evidence: { assignmentId, kind: 'GATE_REJECTION' }, at: now.toISOString(), executor: ctx.executor,
+      trigger: `${ctx.taskClass}: editing existing file ${rejPath} that other modules import (static pre-write gate rejected the reply)`, applicability: [`task class ${ctx.taskClass}`, 'ES-module workspace', 'file already declares or exports names that a reply could repeat'],
+      validation: accepted ? `a later reply for ${rejPath} passed the gates and was written in assignment ${assignmentId}` : `NOT confirmed: no accepted reply for ${rejPath} followed the rejection in assignment ${assignmentId}` })
   }
   return made
 }
