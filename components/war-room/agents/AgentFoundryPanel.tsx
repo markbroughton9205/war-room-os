@@ -25,7 +25,7 @@ type FoundryWorker = {
   id: string
   name: string
   state: string
-  queueDepth: number
+  queueDepth: number | null
   persistence: FoundryStatus
 }
 
@@ -72,7 +72,7 @@ type FoundrySnapshot = {
     agents: FoundryAgent[]
     workers: FoundryWorker[]
     governance: { rules: string[]; pendingApprovals: number }
-    coordination: { queueDepth: number; readyWorkers: number; degradedWorkers: number; persistentQueueRows: number | null; coordinationRule: string }
+    coordination: { queueDepth: number | null; readyWorkers: number; degradedWorkers: number; persistentQueueRows: number | null; coordinationRule: string }
     memory: { domains: { id: string; label: string }[]; rule: string }
     performance: { scorecards: { agentId: string; name: string; reliabilityScore: number; warning: string }[] }
     health: { state: string; warnings: string[]; workerHealth: { total: number; ready: number; paused: number; degraded: number } }
@@ -241,7 +241,7 @@ export function AgentFoundryPanel() {
                   <span className="font-semibold text-amber-100">{worker.name}</span>
                   <Badge status={worker.state} />
                 </div>
-                <div className="mt-1 text-[10px] text-slate-500">queue {worker.queueDepth} · store {worker.persistence}</div>
+                <div className="mt-1 text-[10px] text-slate-500">queue {worker.queueDepth ?? "UNKNOWN"} · store {worker.persistence}</div>
               </li>
             ))}
           </ul>

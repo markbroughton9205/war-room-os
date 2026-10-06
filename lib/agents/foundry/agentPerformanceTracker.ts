@@ -1,19 +1,22 @@
 import type { AgentPerformanceMetrics, FoundryAgent } from './agentBlueprints'
 
+/** Every measure is null (UNKNOWN) until real performance rows exist: absence of data is never reported as a zero score or a failure. */
 export type AgentPerformanceScorecard = {
   agentId: string
   name: string
-  reliabilityScore: number
-  accuracy: number
-  usefulness: number
-  contradictionRate: number
-  hallucinationIndicators: number
-  successfulForecasts: number
-  operationalContribution: number
-  latencyMs: number
-  retrievalQuality: number
-  approvalSuccessRate: number
-  warning: 'none' | 'watch' | 'degrade'
+  measured: boolean
+  samples: number
+  reliabilityScore: number | null
+  accuracy: number | null
+  usefulness: number | null
+  contradictionRate: number | null
+  hallucinationIndicators: number | null
+  successfulForecasts: number | null
+  operationalContribution: number | null
+  latencyMs: number | null
+  retrievalQuality: number | null
+  approvalSuccessRate: number | null
+  warning: 'none' | 'watch' | 'degrade' | 'unknown'
 }
 
 const EMPTY_METRICS: AgentPerformanceMetrics = {
@@ -56,6 +59,9 @@ function averageMetrics(history: AgentPerformanceMetrics[]): AgentPerformanceMet
 }
 
 export function buildAgentScorecard(agent: FoundryAgent): AgentPerformanceScorecard {
+  if (!agent.performanceHistory.length) {
+    return { agentId: agent.id, name: agent.name, measured: false, samples: 0, reliabilityScore: null, accuracy: null, usefulness: null, contradictionRate: null, hallucinationIndicators: null, successfulForecasts: null, operationalContribution: null, latencyMs: null, retrievalQuality: null, approvalSuccessRate: null, warning: 'unknown' }
+  }
   const metrics = averageMetrics(agent.performanceHistory)
   const latencyPenalty = metrics.latencyMs > 0 ? Math.min(metrics.latencyMs / 10_000, 0.15) : 0
   const reliabilityScore = Math.max(0, Math.min(1,
@@ -77,6 +83,8 @@ export function buildAgentScorecard(agent: FoundryAgent): AgentPerformanceScorec
   return {
     agentId: agent.id,
     name: agent.name,
+    measured: true,
+    samples: agent.performanceHistory.length,
     reliabilityScore,
     warning,
     ...metrics,
@@ -84,7 +92,7 @@ export function buildAgentScorecard(agent: FoundryAgent): AgentPerformanceScorec
 }
 
 export function rankAgentReliability(agents: FoundryAgent[]): AgentPerformanceScorecard[] {
-  return agents.map(buildAgentScorecard).sort((a, b) => b.reliabilityScore - a.reliabilityScore)
+  return agents.map(buildAgentScorecard).sort((a, b) => (b.reliabilityScore ?? -1) - (a.reliabilityScore ?? -1))
 }
 
 export function getPerformanceBehavior() {

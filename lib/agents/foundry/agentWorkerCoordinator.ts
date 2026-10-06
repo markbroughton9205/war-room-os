@@ -1,7 +1,7 @@
 import type { AgentQueueItem, DurableWorker, FoundryAgent } from './agentBlueprints'
 
 export function buildDurableWorkers(agents: FoundryAgent[], persistence: DurableWorker['persistence']): DurableWorker[] {
-  return agents.map((agent, index) => ({
+  return agents.map((agent) => ({
     id: `worker-${agent.blueprintId}`,
     name: `${agent.name} Worker`,
     kind: agent.operationalRole === 'retrieval'
@@ -19,7 +19,7 @@ export function buildDurableWorkers(agents: FoundryAgent[], persistence: Durable
                 : 'analytics',
     assignedAgentBlueprintId: agent.blueprintId,
     state: agent.state === 'active' ? 'ready' : agent.state === 'degraded' ? 'degraded' : agent.state === 'paused' ? 'paused' : 'idle',
-    queueDepth: agent.state === 'active' ? index % 3 : 0,
+    queueDepth: null,
     memoryScope: agent.memoryScope,
     operationalHistory: agent.activityHistory.slice(-5),
     externalExecutionAllowed: false,
@@ -49,7 +49,7 @@ export function routeScopedAgentTask(input: {
 }
 
 export function buildCoordinationSummary(workers: DurableWorker[], queueRows: number | null) {
-  const queueDepth = workers.reduce((sum, worker) => sum + worker.queueDepth, 0) + (queueRows ?? 0)
+  const queueDepth = queueRows // real persisted rows only; null = UNKNOWN (no per-worker queue is simulated)
   return {
     queueDepth,
     readyWorkers: workers.filter(worker => worker.state === 'ready').length,

@@ -112,7 +112,8 @@ export type DurableWorker = {
   kind: WorkerKind
   assignedAgentBlueprintId: string
   state: 'idle' | 'ready' | 'working' | 'paused' | 'degraded'
-  queueDepth: number
+  /** null = UNKNOWN: this scaffold has no per-worker queue; only the persisted queue row count is real */
+  queueDepth: number | null
   memoryScope: AgentMemoryDomain[]
   operationalHistory: AgentActivityEvent[]
   externalExecutionAllowed: false

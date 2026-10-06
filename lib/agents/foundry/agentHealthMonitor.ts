@@ -15,8 +15,8 @@ export type AgentEcosystemHealth = {
 export function monitorAgentEcosystem(agents: FoundryAgent[], workers: DurableWorker[], persistentRows: number | null): AgentEcosystemHealth {
   const scorecards = rankAgentReliability(agents)
   const warnings = [
-    ...scorecards.filter(card => card.warning !== 'none').map(card => `${card.name}: ${card.warning}`),
-    ...workers.filter(worker => worker.queueDepth > 5).map(worker => `${worker.name}: queue pressure`),
+    ...scorecards.filter(card => card.warning !== 'none' && card.warning !== 'unknown').map(card => `${card.name}: ${card.warning}`),
+    ...workers.filter(worker => (worker.queueDepth ?? 0) > 5).map(worker => `${worker.name}: queue pressure`),
     ...workers.filter(worker => worker.state === 'degraded').map(worker => `${worker.name}: degraded`),
   ]
   const rowCount = persistentRows ?? 0
