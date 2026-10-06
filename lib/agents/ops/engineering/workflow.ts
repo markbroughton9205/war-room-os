@@ -4,7 +4,7 @@ import { acknowledgeCancel, completeAssignment, deriveAssignments, executionGate
 import { type EngineeringCodePlan, planFromCode } from './codePlanner'
 import { latestCheckpoint, planResume, runEffectOnce, saveCheckpoint, sha256 } from './continuity'
 import { MAX_REPAIR_ATTEMPTS, addEvidence, deriveLedger, markUndetermined, proposeHypothesis, recordFailure, recordRepair, recordValidation, authorizeRepair, parseToolOutput } from './debugLedger'
-import { ANALYST_SYSTEM, ENGINEER_SYSTEM, analystPrompt, featurePrompt, parseEditReply, repairPrompt, type FileJob } from './prompts'
+import { ANALYST_SYSTEM, ENGINEER_REWRITE_SYSTEM, ENGINEER_SYSTEM, analystPrompt, chooseMode, featurePrompt, parseEditReply, repairPrompt, type FileJob } from './prompts'
 import type { CommandRecord, ModelClient, ModelResult } from './runtime/ports'
 import { runCommand } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
@@ -196,7 +196,9 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const diff = attempt > 1 ? (parsed.differs && parsed.differs !== 'first attempt' ? parsed.differs : `attempt ${attempt} targets ${file} using the new failure output`) : null
       const gate = authorizeRepair(log, assignmentId, rec.failureId, { hypothesisId: hid, newEvidence: attempt > 1 ? [evCmd.id] : [], differsFromPrevious: diff, files: [file] })
       if (!gate.ok) { attemptsNotes.push(`repair blocked: ${gate.reason}`); markUndetermined(log, assignmentId, rec.failureId, gate.reason, actor, clock()); state.doNotRepeat.push({ key: `failure:${rec.failureId}`, reason: `${label}: ${gate.reason}; cause UNDETERMINED` }); return false }
-      const rr = await call(ENGINEER_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: hypText, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [] }))
+      const keepR = keepExportsFor(file)
+      const modeR = chooseMode(true, ws.read(file).split('\n').length, keepR)
+      const rr = await call(modeR === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: hypText, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: modeR }))
       noteTokens(rr)
       if (!rr.ok) { attemptsNotes.push(`repair call failed: ${rr.detail}`); continue }
       const pr = parseEditReply(rr.text, ws.read(file))
@@ -256,7 +258,9 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const notes = state.steps.filter((s) => s.status === 'DONE').map((s) => s.title)
       const lessons = deps.lessons?.({ plan, request: req.request }) ?? []
       let feedback = ''
-      const askFile = async (extra: string[]) => { const r = await call(ENGINEER_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keepExportsFor(path) })); noteTokens(r); return r }
+      const keep = keepExportsFor(path)
+      const mode = chooseMode(job.exists, job.current.split('\n').length, keep)
+      const askFile = async (extra: string[]) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode })); noteTokens(r); return r }
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 2 && reply.ok; rej++) {

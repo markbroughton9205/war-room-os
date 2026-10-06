@@ -24,6 +24,25 @@ export const ENGINEER_SYSTEM = [
   '- Keep the code simple and correct.',
 ].join('\n')
 
+export const ENGINEER_REWRITE_SYSTEM = [
+  "You are Foundry's engineering worker. You produce ONE complete file inside a bounded workspace.",
+  'How to reply:',
+  '- Reply with the COMPLETE new content of the requested file in exactly one fenced code block, and nothing else.',
+  '- If the file needs no change for this feature, reply with exactly: NO_CHANGE',
+  'Rules:',
+  '- Keep all existing behavior and structure that the feature does not need to change; new code must be placed where it actually runs (for example inside the existing request handler, not after it).',
+  '- Use ES modules (import/export). Use only Node.js built-in modules. Do not add dependencies.',
+  '- Use the exact names that exist in the provided code; do not invent files.',
+  '- Keep the code simple and correct.',
+].join('\n')
+
+export type EditMode = 'new' | 'rewrite' | 'edits'
+/** Files other modules import are edited (so exports cannot be dropped); small leaf files are rewritten whole (insertion points matter). */
+export function chooseMode(exists: boolean, lines: number, keepExports: string[]): EditMode {
+  if (!exists) return 'new'
+  return keepExports.length === 0 && lines <= 160 ? 'rewrite' : 'edits'
+}
+
 export const ANALYST_SYSTEM = `You are Foundry's debugging analyst. You are given REAL tool output from a failed command and the code involved.
 Reply with ONE JSON object: {"hypothesis": "...", "file": "<one of the candidate files>", "differs": "..."}.
 - hypothesis: the most likely root cause in one or two sentences, grounded in a specific line of the output.
@@ -33,7 +52,7 @@ If the output does not establish a cause, say so in hypothesis and still choose 
 
 export type FileJob = { path: string; layer: string; exists: boolean; current: string; role: 'feature' | 'test' }
 
-export function featurePrompt(input: { request: string; acceptance: string[]; plan: EngineeringCodePlan; job: FileJob; related: { path: string; text: string }[]; lessons: string[]; priorNotes: string[]; keepExports?: string[] }): string {
+export function featurePrompt(input: { request: string; acceptance: string[]; plan: EngineeringCodePlan; job: FileJob; related: { path: string; text: string }[]; lessons: string[]; priorNotes: string[]; keepExports?: string[]; mode?: EditMode }): string {
   const rel = input.related.map((r) => `--- ${r.path} ---\n${r.text}`).join('\n\n')
   return [
     `TASK: ${input.request}`,
@@ -46,7 +65,7 @@ export function featurePrompt(input: { request: string; acceptance: string[]; pl
     input.job.exists ? `CURRENT CONTENT OF ${input.job.path}:\n\`\`\`\n${input.job.current}\n\`\`\`` : `${input.job.path} does not exist yet.`,
     input.job.exists && input.keepExports?.length ? `EXISTING EXPORTS OF ${input.job.path} THAT OTHER FILES IMPORT (they must all still exist afterwards): ${input.keepExports.join(', ')}` : '',
     input.job.role === 'test' ? `Write node:test tests (import test from 'node:test'; import assert from 'node:assert') that prove the feature through the real functions above. Use a temporary data file via the environment variable the code reads.` : '',
-    input.job.exists ? `Reply with edits for ${input.job.path} (append and/or search/replace), or NO_CHANGE.` : `Reply with the complete content of the new file ${input.job.path} in one fenced block.`,
+    !input.job.exists || input.mode === 'rewrite' ? `Reply with the complete ${input.job.exists ? 'new content' : 'content'} of ${input.job.path} in one fenced block${input.job.exists ? ', or NO_CHANGE' : ''}.` : `Reply with edits for ${input.job.path} (append and/or search/replace), or NO_CHANGE.`,
   ].filter(Boolean).join('\n\n')
 }
 
@@ -59,7 +78,7 @@ export function analystPrompt(input: { failureOutput: string; candidates: { path
   ].filter(Boolean).join('\n\n')
 }
 
-export function repairPrompt(input: { failureOutput: string; hypothesis: string; file: string; current: string; related: { path: string; text: string }[]; request: string; lessons: string[] }): string {
+export function repairPrompt(input: { failureOutput: string; hypothesis: string; file: string; current: string; related: { path: string; text: string }[]; request: string; lessons: string[]; mode?: EditMode }): string {
   return [
     `FEATURE: ${input.request}`,
     input.lessons.length ? `LESSONS (apply them):\n${input.lessons.map((l) => `- ${l}`).join('\n')}` : '',
@@ -67,7 +86,7 @@ export function repairPrompt(input: { failureOutput: string; hypothesis: string;
     `HYPOTHESIS (grounded in that output): ${input.hypothesis}`,
     input.related.length ? `RELATED CODE:\n${input.related.map((r) => `--- ${r.path} ---\n${r.text.slice(0, 3000)}`).join('\n\n')}` : '',
     `FILE TO FIX: ${input.file}\nCURRENT CONTENT:\n\`\`\`\n${input.current}\n\`\`\``,
-    `Fix the cause with the smallest change. Reply with edits for ${input.file} (append and/or search/replace blocks), not a rewrite.`,
+    input.mode === 'rewrite' ? `Fix the cause. Reply with the complete corrected content of ${input.file} in one fenced block.` : `Fix the cause with the smallest change. Reply with edits for ${input.file} (append and/or search/replace blocks), not a rewrite.`,
   ].filter(Boolean).join('\n\n')
 }
 
