@@ -86,7 +86,7 @@ const get = (log: AgentOpsLog, q: string) => handleOpsRead(new URL(`http://x/?${
   const wDocs = snap.workers.find((w) => w.view.spec.id === 'w-docs')!
   check('E16_worker_health_progress_and_usage_are_evidence_based', wDocs.health === 'IDLE' && wDocs.lastMeaningfulProgress !== 'NO EVIDENCE' && snap.workers.find((w) => w.view.spec.id === 'w-incident')!.lastMeaningfulProgress === 'NO EVIDENCE' && snap.resourceUsage.find((u) => u.workerId === 'w-docs')!.costUsd === 'UNKNOWN')
   check('E17_errors_listed_with_recovery', snap.errors.some((e) => e.workerId === 'w-eval-noperm' && e.recovery.length > 0))
-  check('E18_snapshot_declares_no_boot_autostart', snap.governance.autoStartOnBoot === false)
+  check('E18_snapshot_declares_scheduled_runs_default_off', snap.governance.scheduledRunsDefault === 'off')
   // read API
   const bytes = readFileSync(o.log.file, 'utf8')
   const ro = new AgentOpsLog(o.dir, { readOnly: true })

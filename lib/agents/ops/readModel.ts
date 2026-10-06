@@ -3,10 +3,13 @@ import { AgentRegistry, deriveAgents, type AgentView } from './registry'
 import { evaluateAgent, type AgentEvaluation } from './evaluation'
 import { deriveWorkers, type WorkerView } from './workers'
 import type { AgentOpsRecord, RunRecord } from './types'
+import { SCHEDULER_ELIGIBLE, SCHED_MAX_CONCURRENT, deriveScheduler, evaluateDue, schedulabilityProblem } from './scheduler'
+import { readSchedulerHealth } from './schedulerHealth'
+import path from 'node:path'
 
 export type OpsSnapshot = {
   generatedAt: string
-  governance: { note: string; autoStartOnBoot: false; externalActionsRequireApproval: true }
+  governance: { note: string; schedulerProcessStart: string; scheduledRunsDefault: 'off'; externalActionsRequireApproval: true }
   totals: { agents: number; activeAgents: number; workers: number; runningWorkers: number; stoppedWorkers: number; runs: number; blockedRuns: number; corruptLines: number; rejectedRecords: number }
   agents: { view: AgentView; evaluation: AgentEvaluation; latestRecommendation: Extract<AgentOpsRecord, { t: 'recommendation' }>['rec'] | null; workerIds: string[] }[]
   needs: { id: string; title: string; detectedAt: string; hasAgent: boolean }[]
@@ -14,6 +17,15 @@ export type OpsSnapshot = {
   recentRuns: RunRecord[]
   pendingApprovals: { kind: 'agent_proposal' | 'adaptation' | 'blocked_effect' | 'recommendation'; ref: string; summary: string; payload?: Record<string, unknown> }[]
   errors: { runId: string; workerId: string; at: string; message: string; recovery: string }[]
+  scheduler: {
+    globalEnabled: boolean
+    globalReason: string
+    envOff: boolean
+    health: { state: 'RUNNING' | 'STALE' | 'UNKNOWN'; detail: string }
+    eligibleCategories: readonly string[]
+    maxConcurrent: number
+    workers: { workerId: string; schedulable: boolean; schedulableProblem: string | null; enabled: boolean; cadenceMinutes: number | null; nextEligibleAt: string | 'UNKNOWN'; lastAutomaticRunAt: string | 'NONE'; lastDecision: string | 'NONE'; lastSkipReason: string | 'NONE'; lastClaimId: string | 'NONE'; dueNow: boolean }[]
+  }
   resourceUsage: { workerId: string; runs: number; totalDurationMs: number; costUsd: number | 'UNKNOWN' }[]
 }
 
@@ -48,9 +60,27 @@ export function buildOpsSnapshot(log: AgentOpsLog, now: Date = new Date(), opts:
     const costs = w.view.runs.map((r) => r.resource.costUsd)
     return { workerId: w.view.spec.id, runs: w.view.runs.length, totalDurationMs: w.view.runs.reduce((a, r) => a + (r.resource.durationMs ?? 0), 0), costUsd: (costs.length && costs.every((c) => typeof c === 'number') ? (costs as number[]).reduce((a, b) => a + b, 0) : 'UNKNOWN') as number | 'UNKNOWN' }
   })
+  const sched = deriveScheduler(log)
+  const runningScheduled = workerRows.reduce((n, w) => n + w.view.runs.filter((r) => r.status === 'RUNNING' && r.origin === 'scheduled').length, 0)
+  const envOff = process.env.WAR_ROOM_AGENT_SCHEDULER === 'off'
+  const scheduler: OpsSnapshot['scheduler'] = {
+    globalEnabled: !envOff && sched.global?.enabled === true,
+    globalReason: envOff ? 'disabled by environment (WAR_ROOM_AGENT_SCHEDULER=off)' : sched.global ? `${sched.global.enabled ? 'enabled' : 'paused'} by ${sched.global.by}: ${sched.global.reason}` : 'never enabled (default: off)',
+    envOff,
+    health: (() => { const h = readSchedulerHealth(path.dirname(log.file), now); return { state: h.state, detail: h.detail } })(),
+    eligibleCategories: SCHEDULER_ELIGIBLE,
+    maxConcurrent: SCHED_MAX_CONCURRENT,
+    workers: workerRows.map((w) => {
+      const sc = sched.schedules.get(w.view.spec.id)
+      const ev = evaluateDue(w.view, sc, sched.lastClaim.get(w.view.spec.id)?.at, agents.get(w.view.spec.agentId)?.state, runningScheduled, now)
+      const ld = sched.lastDecision.get(w.view.spec.id)
+      const sk = sched.lastSkip.get(w.view.spec.id)
+      return { workerId: w.view.spec.id, schedulable: schedulabilityProblem(w.view) === null, schedulableProblem: schedulabilityProblem(w.view), enabled: sc?.enabled === true, cadenceMinutes: sc ? sc.cadenceMinutes : null, nextEligibleAt: sc?.enabled && ev.nextEligibleAt ? ev.nextEligibleAt.toISOString() : 'UNKNOWN', lastAutomaticRunAt: sched.lastClaim.get(w.view.spec.id)?.at ?? 'NONE', lastDecision: ld ? `${ld.decision} ${ld.reason} @ ${ld.at.slice(0, 19)}Z` : 'NONE', lastSkipReason: sk ? `${sk.reason} @ ${sk.at.slice(0, 19)}Z` : 'NONE', lastClaimId: sched.lastClaim.get(w.view.spec.id)?.claimId ?? 'NONE', dueNow: ev.action === 'RUN' }
+    }),
+  }
   return {
     generatedAt: now.toISOString(),
-    governance: { note: 'Read model of durable agent-foundry state. Recommendations are advisory; risky actions need Commander approval; nothing runs at boot.', autoStartOnBoot: false, externalActionsRequireApproval: true },
+    governance: { note: 'Read model of durable agent-foundry state. Recommendations are advisory; risky actions need Commander approval; background runs happen only for Commander-scheduled read-only workers.', schedulerProcessStart: 'instrumentation hook starts the scheduler process unless WAR_ROOM_AGENT_SCHEDULER=off; no run happens unless a Commander enabled scheduling', scheduledRunsDefault: 'off', externalActionsRequireApproval: true },
     totals: { agents: agents.size, activeAgents: [...agents.values()].filter((a) => a.state === 'ACTIVE').length, workers: workers.size, runningWorkers: workerRows.filter((w) => w.health === 'RUNNING').length, stoppedWorkers: workerRows.filter((w) => w.health === 'STOPPED').length, runs: allRuns.length, blockedRuns: allRuns.filter((r) => r.status === 'BLOCKED').length, corruptLines: v.corruptLines, rejectedRecords: rejectedTransitions },
     agents: agentRows,
     needs: [...needs.values()].map((n) => ({ id: n.id, title: n.title, detectedAt: n.detectedAt, hasAgent: [...agents.values()].some((a) => a.spec.needId === n.id) })),
@@ -58,6 +88,7 @@ export function buildOpsSnapshot(log: AgentOpsLog, now: Date = new Date(), opts:
     recentRuns: allRuns.slice(0, opts.runLimit ?? 30),
     pendingApprovals: pending,
     errors: allRuns.filter((r) => r.errors.length > 0).slice(0, 20).flatMap((r) => r.errors.map((e) => ({ runId: r.runId, workerId: r.workerId, at: r.endedAt ?? r.startedAt, message: e.message, recovery: e.recovery }))),
+    scheduler,
     resourceUsage: usage,
   }
 }

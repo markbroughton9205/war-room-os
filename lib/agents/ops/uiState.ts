@@ -23,6 +23,7 @@ const AGENT_CONTROLS: Record<AgentState, { to: AgentState; label: string; confir
 }
 
 export type AgentRow = { id: string; title: string; detail: string; evaluation: string; recommendation: string; flags: string[]; controls: Control[] }
+export type GenericRow = { id: string; title: string; detail: string; outputs?: string[]; controls?: Control[] }
 export type WorkerRow = { id: string; title: string; detail: string; limits: string; flags: string[]; controls: Control[] }
 
 export function buildOpsViewModel(env: OpsEnvelope) {
@@ -52,18 +53,31 @@ export function buildOpsViewModel(env: OpsEnvelope) {
     ],
   }))
   return {
-    header: `${s.totals.agents} agent(s) (${s.totals.activeAgents} active) · ${s.totals.workers} worker(s) (${s.totals.runningWorkers} running, ${s.totals.stoppedWorkers} stopped) · ${s.totals.runs} run(s) · ${s.totals.blockedRuns} blocked`,
+    header: `scheduler ${s.scheduler.globalEnabled ? 'ENABLED' : 'OFF'} (health ${s.scheduler.health.state}) · ${s.totals.agents} agent(s) (${s.totals.activeAgents} active) · ${s.totals.workers} worker(s) (${s.totals.runningWorkers} running, ${s.totals.stoppedWorkers} stopped) · ${s.totals.runs} run(s) · ${s.totals.blockedRuns} blocked`,
     banner: s.governance.note,
     sections: {
       agents: { title: 'Agents', empty: 'No agents yet. An agent is proposed only when all seven roadmap criteria of a recorded need are evidenced.', rows: agents },
-      workers: { title: 'Long-lived workers', empty: 'No workers registered. Nothing runs in the background; workers run only when a Commander triggers them.', rows: workers },
+      workers: { title: 'Long-lived workers', empty: 'No workers registered. A worker runs in the background only if a Commander has scheduled it (read-only first-party workers only); otherwise it runs only on Run now.', rows: workers },
       approvals: { title: 'Pending approvals', empty: 'Nothing awaits Commander approval.', rows: s.pendingApprovals.map((p) => ({
         id: `${p.kind}:${p.ref}`, title: p.kind.replace('_', ' '), detail: p.summary,
         controls: (p.kind === 'blocked_effect' && p.payload ? [{ label: 'Approve one run with this effect', action: 'approveEffect', payload: { ...p.payload, reason: 'Commander approval from operator surface' }, confirm: true }]
           : p.kind === 'adaptation' && p.payload ? [{ label: 'Approve', action: 'decideAdaptation', payload: { ...p.payload, status: 'APPROVED', reason: 'Commander approved' } }, { label: 'Reject', action: 'decideAdaptation', payload: { ...p.payload, status: 'REJECTED', reason: 'Commander rejected' } }]
           : p.kind === 'agent_proposal' ? [{ label: 'Approve agent', action: 'transitionAgent', payload: { agentId: p.ref, to: 'APPROVED', reason: 'Commander approved' } }] : []) as Control[],
       })) },
-      runs: { title: 'Recent actions', empty: 'No worker runs recorded.', rows: s.recentRuns.map((r) => ({ id: r.runId, title: `${r.workerId} · ${r.status} · ${r.startedAt.slice(0, 19)}Z`, detail: `tools ${r.toolsUsed.join(', ') || 'none'} · outputs ${r.outputs.length} · escalations ${r.escalations.length} · errors ${r.errors.length} · executor ${r.executor === 'UNKNOWN' ? 'UNKNOWN' : `${r.executor.provider}/${r.executor.model}`} · duration ${ms(r.resource.durationMs ?? 'UNKNOWN')} · cost ${usd(typeof r.resource.costUsd === 'number' ? r.resource.costUsd : 'UNKNOWN')}`, outputs: r.outputs.map((o) => `${o.kind}: ${o.summary}`) })) },
+      scheduler: {
+        title: 'Scheduler', empty: 'No scheduler data.',
+        rows: [
+          { id: 'scheduler:global', title: `Global scheduling: ${s.scheduler.globalEnabled ? 'ENABLED' : 'OFF'}`, detail: `${s.scheduler.globalReason} · health ${s.scheduler.health.state}: ${s.scheduler.health.detail} · eligible categories ${s.scheduler.eligibleCategories.join(', ')} · max ${s.scheduler.maxConcurrent} concurrent scheduled runs · no continuous mode`,
+            controls: s.scheduler.envOff ? [] : [s.scheduler.globalEnabled ? { label: 'Pause scheduling', action: 'setSchedulerGlobal', payload: { enabled: false, reason: 'Commander paused scheduling' } } : { label: 'Resume scheduling', action: 'setSchedulerGlobal', payload: { enabled: true, reason: 'Commander enabled scheduling' } }] as Control[] },
+          ...s.scheduler.workers.map((w) => ({
+            id: `scheduler:${w.workerId}`,
+            title: `${w.workerId}: ${w.enabled ? `scheduled every ${w.cadenceMinutes} min` : w.schedulable ? 'not scheduled' : 'not schedulable'}`,
+            detail: w.schedulable ? `next eligible ${w.nextEligibleAt} · last automatic run ${w.lastAutomaticRunAt} · last decision ${w.lastDecision} · last skip ${w.lastSkipReason} · last claim ${w.lastClaimId}` : `not schedulable: ${w.schedulableProblem}`,
+            controls: (w.schedulable ? [...(w.enabled ? [{ label: 'Disable scheduling', action: 'setSchedule', payload: { workerId: w.workerId, enabled: false, cadenceMinutes: w.cadenceMinutes ?? 5, reason: 'Commander disabled scheduling' } }] : []), ...[1, 5, 15, 60].map((m) => ({ label: `${w.enabled ? 'Set' : 'Schedule'} every ${m} min`, action: 'setSchedule', payload: { workerId: w.workerId, enabled: true, cadenceMinutes: m, reason: `Commander scheduled every ${m} min` } }))] : []) as Control[],
+          })),
+        ] as GenericRow[],
+      },
+      runs: { title: 'Recent actions', empty: 'No worker runs recorded.', rows: s.recentRuns.map((r) => ({ id: r.runId, title: `${r.workerId} · ${(r.origin ?? 'manual') === 'scheduled' ? 'SCHEDULED' : 'MANUAL'} · ${r.status === 'INTERRUPTED' ? 'RECOVERED (interrupted)' : r.status === 'RUNNING' && Date.parse(env.generatedAt) - Date.parse(r.startedAt) > 120_000 ? 'RUNNING (possibly recovering)' : r.status} · ${r.startedAt.slice(0, 19)}Z`, detail: `origin ${r.origin ?? 'manual'}${r.claimId ? ` (${r.claimId})` : ''} · tools ${r.toolsUsed.join(', ') || 'none'} · outputs ${r.outputs.length} · escalations ${r.escalations.length} · errors ${r.errors.length} · executor ${r.executor === 'UNKNOWN' ? 'UNKNOWN' : `${r.executor.provider}/${r.executor.model}`} · duration ${ms(r.resource.durationMs ?? 'UNKNOWN')} · cost ${usd(typeof r.resource.costUsd === 'number' ? r.resource.costUsd : 'UNKNOWN')}`, outputs: r.outputs.map((o) => `${o.kind}: ${o.summary}`) })) },
       errors: { title: 'Errors and recovery', empty: 'No errors recorded.', rows: s.errors.map((e) => ({ id: `${e.runId}:${e.message}`, title: `${e.workerId} @ ${e.at.slice(0, 19)}Z`, detail: `${e.message} — recovery: ${e.recovery}` })) },
       usage: { title: 'Resource usage', empty: 'No usage recorded.', rows: s.resourceUsage.map((u) => ({ id: u.workerId, title: u.workerId, detail: `${u.runs} run(s) · ${u.totalDurationMs}ms total · cost ${usd(u.costUsd)}` })) },
     },

@@ -112,6 +112,9 @@ export type RunRecord = {
   resource: { durationMs?: number; costUsd?: number | Unknown; tokens?: number | Unknown }
   requestedEffects: ProtectedEffect[]
   approvalRef?: string
+  /** manual (Commander) or scheduled (scheduler claim). Absent on runs recorded before P10-I = manual. */
+  origin?: 'manual' | 'scheduled'
+  claimId?: string
 }
 
 export type AdaptationKind =
@@ -158,6 +161,10 @@ export type AgentOpsRecord =
   | { t: 'stop'; rid: string; workerId: string; by: Actor; at: string; reason: string; resumed: boolean }
   | { t: 'adaptation'; rid: string; proposal: AdaptationProposal }
   | { t: 'decision'; rid: string; proposalId: string; status: 'APPROVED' | 'REJECTED'; by: Actor; at: string; reason: string }
+  | { t: 'schedule'; rid: string; workerId: string; enabled: boolean; cadenceMinutes: number; by: Actor; at: string; reason: string }
+  | { t: 'schedulerGlobal'; rid: string; enabled: boolean; by: Actor; at: string; reason: string }
+  | { t: 'schedClaim'; rid: string; claimId: string; workerId: string; slotMs: number; dueAt: string; instanceId: string; at: string; collapsedIntervals: number }
+  | { t: 'schedDecision'; rid: string; workerId: string; at: string; decision: 'RUN' | 'SKIP'; reason: string; nextEligibleAt: string | null; claimId?: string }
   | { t: 'feedback'; rid: string; runId: string; verdict: 'accepted' | 'corrected' | 'rejected'; usefulEscalation?: boolean; by: Actor; at: string; note: string }
   | { t: 'effectApproval'; rid: string; workerId: string; effects: ProtectedEffect[]; by: Actor; at: string; reason: string }
   | { t: 'scope'; rid: string; agentId: string; proposalId: string; permissionScope: SafePermission[]; memoryScope: MemoryScope[]; by: Actor; at: string }

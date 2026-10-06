@@ -67,7 +67,7 @@ export function FoundryAgentOpsPanel() {
           </div>
         ))}
       </section>
-      {(['approvals', 'runs', 'errors', 'usage'] as const).map((k) => (
+      {(['scheduler', 'approvals', 'runs', 'errors', 'usage'] as const).map((k) => (
         <section key={k} data-testid={`agentops-${k}`} className="mb-6">
           <h2 className="text-lg border-b border-gray-700 mb-2">{vm.sections[k].title}</h2>
           {vm.sections[k].rows.length === 0 && <p className="text-gray-400 text-sm">{vm.sections[k].empty}</p>}
@@ -76,6 +76,7 @@ export function FoundryAgentOpsPanel() {
               <div className="font-medium">{r.title}</div>
               <div className="text-gray-300 text-xs">{r.detail}</div>
               {'outputs' in r && Array.isArray(r.outputs) && r.outputs.map((o: string) => <div key={o} className="text-gray-400 text-xs">· {o}</div>)}
+              {'controls' in r && Array.isArray(r.controls) && r.controls.length > 0 && <div>{controlButtons(r.id, r.controls)}</div>}
             </div>
           ))}
         </section>

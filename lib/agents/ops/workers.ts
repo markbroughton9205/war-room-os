@@ -136,7 +136,7 @@ export async function executeWorker(
   log: AgentOpsLog,
   workerId: string,
   runner: WorkerRunner,
-  opts: { now?: Date; runId?: string; approvalRid?: string } = {},
+  opts: { now?: Date; runId?: string; approvalRid?: string; origin?: 'manual' | 'scheduled'; claimId?: string } = {},
 ): Promise<ExecuteResult> {
   const now = opts.now ?? new Date()
   const runId = opts.runId ?? `run-${randomUUID()}`
@@ -163,6 +163,8 @@ export async function executeWorker(
       permissionScope: w.spec.permissionScope, memoryScope: w.spec.memoryScope, startedAt: now.toISOString(), status: 'RUNNING',
       toolsUsed: [], outputs: [], escalations: [], errors: [], executor: 'UNKNOWN', resource: { costUsd: 'UNKNOWN', tokens: 'UNKNOWN' }, requestedEffects: [],
       approvalRef: approval?.rid,
+      origin: opts.origin ?? 'manual',
+      ...(opts.claimId ? { claimId: opts.claimId } : {}),
     }
     log.append({ t: 'run', rid: `run:${runId}:start`, run: base })
     return { w, agentEscalation: agent.spec.escalationPath, approval, base }

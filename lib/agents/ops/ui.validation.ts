@@ -11,7 +11,7 @@ const wd = (agentId: string, id: string) => ({ id, agentId, category: 'documenta
 
 {
   const empty = buildOpsViewModel(env(freshOps().log))
-  check('U01_empty_state_is_honest', Object.values(empty.sections).every((s) => s.rows.length === 0 && s.empty.length > 15) && empty.sections.workers.empty.includes('Nothing runs in the background') && empty.header.startsWith('0 agent(s)'))
+  check('U01_empty_state_is_honest', Object.entries(empty.sections).every(([k, s]) => (k === 'scheduler' ? s.rows.length === 1 && s.rows[0].title.includes('OFF') : s.rows.length === 0) && s.empty.length > 10) && empty.sections.workers.empty.includes('only if a Commander has scheduled it') && empty.header.includes('0 agent(s)') && empty.header.startsWith('scheduler OFF'))
 
   const a = activeAgent()
   // PROPOSED agent in same registry
@@ -46,6 +46,7 @@ const wd = (agentId: string, id: string) => ({ id, agentId, category: 'documenta
   const fetches = [...src.matchAll(/fetch\(([^)]*)/g)].map((m) => m[1])
   check('U10_panel_only_get_summary_or_header_protected_post', fetches.length === 2 && src.includes("'x-wr-agent-ops': '1'") && fetches.filter((f) => f.includes("method: 'POST'") || src.includes("method: 'POST'")).length >= 1 && !/\b(by|actor)\s*:/.test(src))
   check('U11_panel_has_loading_error_notice_states', src.includes('agentops-loading') && src.includes('agentops-error') && src.includes('agentops-notice'))
+  check('U13_panel_renders_scheduler_section_and_row_controls', src.includes("'scheduler', 'approvals', 'runs'") && src.includes("'controls' in r"))
   check('U12_page_route_is_plain_server_component', readFileSync('app/war-room/engineering/agents/page.tsx', 'utf8').includes('FoundryAgentOpsPanel'))
 }
 finish()

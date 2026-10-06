@@ -2,6 +2,7 @@ import { AdaptationError, applyApprovedScopeChange, decideAdaptation, proposeAda
 import { BUILTIN_RUNNERS } from './builtinWorkers'
 import { FeedbackError, evaluateAgent, recommendForAgent, recordFeedback } from './evaluation'
 import { AgentTransitionError, isCommander } from './lifecycle'
+import { SchedulerError, setSchedule, setSchedulerGlobal } from './scheduler'
 import type { AgentOpsLog } from './log'
 import { detectNeed } from './need'
 import { buildOpsSnapshot } from './readModel'
@@ -40,7 +41,7 @@ export function commanderActor(userId: string | null | undefined): string | null
   return clean ? `commander:${clean}` : null
 }
 
-export const CONTROL_ACTIONS = ['detectNeed', 'proposeAgent', 'transitionAgent', 'registerWorker', 'stopWorker', 'resumeWorker', 'approveEffect', 'runWorker', 'proposeAdaptation', 'decideAdaptation', 'applyScopeChange', 'recordFeedback', 'evaluateAgent', 'recoverRuns'] as const
+export const CONTROL_ACTIONS = ['detectNeed', 'proposeAgent', 'transitionAgent', 'registerWorker', 'stopWorker', 'resumeWorker', 'approveEffect', 'runWorker', 'proposeAdaptation', 'decideAdaptation', 'applyScopeChange', 'recordFeedback', 'evaluateAgent', 'recoverRuns', 'setSchedule', 'setSchedulerGlobal'] as const
 
 type Body = Record<string, unknown>
 const s = (v: unknown) => (typeof v === 'string' ? v : '')
@@ -78,12 +79,15 @@ export async function handleOpsControl(body: Body, actor: string | null, log: Ag
         if (!deriveAgents(log).agents.has(id)) return { status: 404, body: { error: 'unknown agent' } }
         return { status: 200, body: { evaluation: evaluateAgent(log, id, now), recommendation: recommendForAgent(log, id, now, { persist: body.persist === true, flagForReview: body.flagForReview === true }) } }
       }
+      case 'setSchedule': { const rec = setSchedule(log, s(body.workerId), { enabled: body.enabled === true, cadenceMinutes: Number(body.cadenceMinutes) }, actor, s(body.reason) || 'Commander schedule change', now); return { status: 200, body: { schedule: { workerId: s(body.workerId), enabled: body.enabled === true, rid: rec.rid } } } }
+      case 'setSchedulerGlobal': setSchedulerGlobal(log, body.enabled === true, actor, s(body.reason) || (body.enabled === true ? 'Commander resumed scheduling' : 'Commander paused scheduling'), now); return { status: 200, body: { schedulerEnabled: body.enabled === true } }
       default: return { status: 200, body: { interrupted: recoverInterruptedRuns(log, now) } }
     }
   } catch (err) {
     if (err instanceof AgentTransitionError) return { status: err.code === 'ACTOR_NOT_AUTHORIZED' ? 403 : 409, body: { error: err.message, code: err.code } }
     if (err instanceof NeedGateError) return { status: 422, body: { error: err.message, code: 'NEED_GATE', missing: err.missing } }
     if (err instanceof AdaptationError || err instanceof WorkerError) return { status: err.code === 'NOT_AUTHORIZED' ? 403 : 400, body: { error: err.message, code: err.code } }
+    if (err instanceof SchedulerError) return { status: err.code === 'NOT_AUTHORIZED' ? 403 : err.code === 'NOT_ELIGIBLE' ? 409 : 400, body: { error: err.message, code: err.code } }
     if (err instanceof FeedbackError) return { status: 400, body: { error: err.message, code: 'FEEDBACK' } }
     return { status: 400, body: { error: err instanceof Error ? err.message.slice(0, 200) : 'invalid request', code: 'INVALID' } }
   }

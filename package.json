@@ -368,7 +368,8 @@
     "validate:agent-ops-api": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/api.validation.ts",
     "validate:agent-ops-ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/ui.validation.ts",
     "validate:agent-ops-governance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/governance.validation.ts",
-    "validate:agent-ops-all": "pnpm run validate:agent-ops && pnpm run validate:agent-ops-api && pnpm run validate:agent-ops-ui && pnpm run validate:agent-ops-governance",
+    "validate:agent-ops-scheduler": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/scheduler.validation.ts",
+    "validate:agent-ops-all": "pnpm run validate:agent-ops && pnpm run validate:agent-ops-api && pnpm run validate:agent-ops-ui && pnpm run validate:agent-ops-scheduler && pnpm run validate:agent-ops-governance",
     "validate:recursive-learning-all": "pnpm run validate:recursive-learning && pnpm run validate:recursive-learning-ingestion && pnpm run validate:recursive-learning-backfill && pnpm run validate:recursive-learning-api && pnpm run validate:recursive-learning-ui && pnpm run validate:recursive-learning-governance && pnpm run validate:recursive-learning-integration",
     "backfill:recursive-learning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/ingestion/backfill.cli.ts"
   },
