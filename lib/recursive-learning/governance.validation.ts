@@ -13,6 +13,7 @@ import { recommendRouting, routingProposalDraft } from './recommendations'
 import { scoreMatrix } from './scoring'
 import { missionToEvents } from './ingestion/missionAdapter'
 import { containsSecret } from './ingestion/redact'
+import { learningDir } from './paths'
 
 const { check, finish } = harness('RECURSIVE_LEARNING_GOVERNANCE_VALIDATION')
 
@@ -101,7 +102,7 @@ const leaky = missionFixture({
 const out = missionToEvents(leaky, { backfilled: false })
 const serialized = JSON.stringify(out.events)
 check('N13_ingestion_exposes_no_secrets', out.events.length > 0 && SECRETS.every((s) => !serialized.includes(s.slice(0, 20))) && !containsSecret(serialized), `events=${out.events.length}`)
-const realLog = '.war-room/recursive-learning/recursive-learning.jsonl'
+const realLog = path.join(learningDir(), 'recursive-learning.jsonl')
 if (existsSync(realLog)) {
   const lines = readFileSync(realLog, 'utf8').split('\n').filter(Boolean)
   check('N14_real_learning_log_contains_no_secrets', lines.every((l) => !containsSecret(l)), `lines=${lines.length}`)
