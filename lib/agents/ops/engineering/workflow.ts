@@ -365,7 +365,9 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             const acceptPassed = state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED')
             const out = `${run.stdout}\n${run.stderr}`
             const otherTests = tests.slice(2).filter((t) => t !== path && out.includes(t))
-            const testOnly = acceptPassed && out.includes(path) && !otherTests.length
+            // ...unless the failure output itself implicates implementation files (a stack frame or path inside src/, server, public): then the implementation is a suspect too
+            const implicated = candidatesFromOutput(out, []).filter((f) => !/^test\//.test(f))
+            const testOnly = acceptPassed && out.includes(path) && !otherTests.length && !implicated.length
             stepOk = await debugLoop(run, testOnly ? [path] : [...changed].filter((f) => !/^test\//.test(f)).concat([path]), step.id, 'tests', () => runCheck(tests), testOnly ? [path] : undefined)
           }
         }

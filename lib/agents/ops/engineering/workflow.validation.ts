@@ -320,5 +320,32 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const r2 = await runFeatureWorkflow(deps(y, model2, { finalVerification: ver2 }), REQ)
   check('N40_progress_never_exceeds_the_assignment_retry_ceiling_the_same_scenario_with_maxRetries_3_stops_UNDETERMINED', r2.status === 'FAILED' && r2.repairs === 3 && view(y).state === 'FAILED')
 }
+// ---- 11. test-stage blame: after verified acceptance a failure that implicates ONLY the new test is repaired in the test; one whose output implicates src/ is not confined
+{
+  const LATENT = "\nexport function describeStore() { throw new Error('latent defect: describeStore is unfinished') }\n"
+  const mkTest = (body: string) => `import test from 'node:test'\nimport assert from 'node:assert'\nimport { describeStore } from '../src/messageStore.mjs'\ntest('describes the store', () => { ${body} })\n`
+  const x = makeWorld({ limits: { maxRetries: 5 } })
+  const m1 = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/messageStore.mjs') return fenced(SOLUTION['src/messageStore.mjs'] + LATENT)
+    if (c.kind === 'file' && c.path === 'test/messageStore.test.mjs') return fenced(mkTest("assert.strictEqual(describeStore(), 'store')"))
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'describeStore throws an unfinished-implementation error (stack points into src/messageStore.mjs)', file: 'src/messageStore.mjs', differs: 'first attempt' })
+    if (c.kind === 'repair') return fenced(SOLUTION['src/messageStore.mjs'] + "\nexport function describeStore() { return 'store' }\n")
+    return good(c)
+  })
+  const r1 = await runFeatureWorkflow(deps(x, m1, { finalVerification: x.verification }), REQ)
+  const an1 = m1.calls.find((c) => c.kind === 'analyst')
+  check('N41_when_the_failing_output_implicates_an_implementation_file_the_repair_is_not_confined_to_the_new_test', r1.status === 'COMPLETED' && !!an1 && an1.prompt.includes('--- src/messageStore.mjs ---') && x.ws.read('src/messageStore.mjs').includes("return 'store'"), `${r1.status} ${r1.reason}`)
+  const y = makeWorld({ limits: { maxRetries: 5 } })
+  const m2 = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/messageStore.mjs') return fenced(SOLUTION['src/messageStore.mjs'] + "\nexport function describeStore() { return 'store' }\n")
+    if (c.kind === 'file' && c.path === 'test/messageStore.test.mjs') return fenced(mkTest("assert.strictEqual(describeStore(), 'a different store')"))
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'the test expects the wrong string; the implementation passed acceptance', file: 'test/messageStore.test.mjs', differs: 'first attempt' })
+    if (c.kind === 'repair') return fenced(mkTest("assert.strictEqual(describeStore(), 'store')"))
+    return good(c)
+  })
+  const r2 = await runFeatureWorkflow(deps(y, m2, { finalVerification: y.verification }), REQ)
+  const an2 = m2.calls.find((c) => c.kind === 'analyst')
+  check('N42_a_failure_that_only_implicates_the_new_test_after_verified_acceptance_is_repaired_in_the_test_and_never_touches_implementation', r2.status === 'COMPLETED' && !!an2 && !an2.prompt.includes('--- src/messageStore.mjs ---') && an2.prompt.includes('The failing test is the suspect') && y.ws.read('src/messageStore.mjs').includes("return 'store'"), `${r2.status} ${r2.reason}`)
+}
 void deriveAssignments; void AgentRegistry
 finish()
