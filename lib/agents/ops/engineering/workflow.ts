@@ -8,7 +8,7 @@ import { ANALYST_SYSTEM, ENGINEER_REWRITE_SYSTEM, ENGINEER_SYSTEM, analystPrompt
 import type { CommandRecord, ModelClient, ModelResult } from './runtime/ports'
 import { runCommand } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
-import { buildWorkspaceIndex, indexSource } from './workspaceIndex'
+import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 
 export type FeatureRequest = { request: string; acceptance: string[]; hints?: string[] }
 export type WorkflowEvent = { at: string; kind: string; detail: string }
@@ -160,6 +160,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     }
     return bad.length ? `you import names that do not exist: ${bad.join('; ')}. Use only the real exports.` : null
   }
+  /** Every static gate a reply must pass BEFORE it is written. */
+  const gateProblem = (path: string, content: string, ignoreModules: Set<string> = new Set()): string | null => {
+    const dups = /\.m?[jt]sx?$/.test(path) ? topLevelDuplicates(path, content) : []
+    if (dups.length) return `your version declares ${dups.join(', ')} more than once at the top level (a SyntaxError). Edit the existing declaration instead of adding a second one.`
+    return apiCompat(path, content) ?? importCompat(path, content, ignoreModules)
+  }
   const relatedFor = (path: string, doneFiles: string[]) => {
     const idx = buildWorkspaceIndex(ws.root)
     const f = idx.files[path]
@@ -225,8 +231,14 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         if (rr2.ok) pr = parseEditReply(rr2.text, ws.read(file))
       }
       if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); continue }
-      const compat = apiCompat(file, pr.content)
-      if (compat) { attemptsNotes.push(`repair rejected: ${compat}`); continue }
+      let compat = gateProblem(file, pr.content)
+      if (compat && budgetLeft()) {
+        const rr3 = await call(ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: `${hypText}\nYOUR PREVIOUS REPLY WAS REJECTED BEFORE IT WAS WRITTEN: ${compat}`, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: 'rewrite' }))
+        noteTokens(rr3)
+        const p3 = rr3.ok ? parseEditReply(rr3.text, ws.read(file)) : null
+        if (p3 && p3.kind === 'code') { pr = p3; compat = gateProblem(file, pr.content) }
+      }
+      if (compat) { attemptsNotes.push(`repair rejected: ${compat}`); state.doNotRepeat.push({ key: `reject:${file}:repair${attempt}`, reason: compat }); continue }
       const beforeHash = ws.hash(file)
       await writeFile(stepId, file, pr.content)
       repairs += 1
@@ -286,7 +298,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 2 && reply.ok; rej++) {
-        const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? (apiCompat(path, parsedReply.content) ?? importCompat(path, parsedReply.content)) : null
+        const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : null
         if (!problem) break
         feedback = problem
         emit('REJECT', `${path}: ${problem}`)
@@ -297,7 +309,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       }
       void feedback
       if (reply.ok) { const skippedFiles = new Set(state.steps.filter((x) => x.status === 'SKIPPED').flatMap((x) => x.files)) // a skipped step's file may be the true defect: let evidence-driven repair find it rather than failing here
-      const still = parsedReply.kind === 'code' ? (apiCompat(path, parsedReply.content) ?? importCompat(path, parsedReply.content, skippedFiles)) : null; if (still) { step.status = 'FAILED'; step.note = `rejected: ${still}`; checkpoint(); failAssignment(log, assignmentId, actor, `the model repeatedly produced a ${path} that ${still}`, undefined, clock()); return result('FAILED', `${path}: incompatible rewrite after 2 rejections`) } }
+      const still = parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content, skippedFiles) : null; if (still) { step.status = 'FAILED'; step.note = `rejected: ${still}`; checkpoint(); failAssignment(log, assignmentId, actor, `the model repeatedly produced a ${path} that ${still}`, undefined, clock()); return result('FAILED', `${path}: incompatible rewrite after 2 rejections`) } }
       if (!reply.ok) { if (reply.detail.includes('cancel')) { const b = boundary(); if (b.stop) { checkpoint(); return b.stop } } step.status = 'FAILED'; step.note = `model call failed: ${reply.detail}`; checkpoint(); failAssignment(log, assignmentId, actor, `model call failed: ${reply.detail}`, undefined, clock()); return result('FAILED', `model call failed: ${reply.detail}`) }
       const pr = parsedReply
       if (pr.kind === 'no_change') { step.status = 'SKIPPED'; step.note = 'model: NO_CHANGE needed for this file'; checkpoint(); emit('NO_CHANGE', path); continue }

@@ -261,16 +261,16 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
 // ---- 8. measurable learning: lesson captured from a real fixed failure -> retrieved on a later similar task -> effect measured
 {
   const x = makeWorld(); let broke = false
-  const dup = CHAT_REFERENCE['src/chatService.mjs'] + '\nexport function validateMessage() { return 1 }\n'
+  const dup = CHAT_REFERENCE['src/chatService.mjs'].replace('export function createSession(name) {', 'export function createSession(name) {{{')
   const m1 = new ScriptedModel((c) => {
     if (c.kind === 'file' && c.path === 'src/chatService.mjs' && !broke) { broke = true; return fenced(dup) }
-    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'validateMessage is declared twice in chatService.mjs (SyntaxError: already been declared)', file: 'src/chatService.mjs', differs: 'first attempt' })
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'createSession has a stray brace so chatService.mjs fails to parse (SyntaxError)', file: 'src/chatService.mjs', differs: 'first attempt' })
     if (c.kind === 'repair') return fenced(CHAT_REFERENCE['src/chatService.mjs'])
     return good(c)
   })
   const r1 = await runFeatureWorkflow(deps(x, m1), REQ)
   const made = captureLessons(x.log, x.asg.id, { taskClass: 'feature_implementation', executor: 'test-double' })
-  check('N33_a_really_fixed_failure_becomes_a_lesson_with_evidence_pointing_at_the_assignment_and_failure', r1.status === 'COMPLETED' && made.length >= 1 && made[0].cls === 'DUPLICATE_DECLARATION' && made[0].evidence.kind === 'FIXED_FAILURE' && !!made[0].evidence.failureId && made[0].evidence.assignmentId === x.asg.id)
+  check('N33_a_really_fixed_failure_becomes_a_lesson_with_evidence_pointing_at_the_assignment_and_failure', r1.status === 'COMPLETED' && made.length >= 1 && made[0].cls === 'SYNTAX' && made[0].evidence.kind === 'FIXED_FAILURE' && !!made[0].evidence.failureId && made[0].evidence.assignmentId === x.asg.id)
   check('N34_capture_is_idempotent_and_an_unfixed_or_unverified_failure_is_not_a_lesson', captureLessons(x.log, x.asg.id, { taskClass: 'feature_implementation', executor: 'test-double' }).length === 0 && classifyFailure('SyntaxError: Identifier \'x\' has already been declared') === 'DUPLICATE_DECLARATION')
   // later similar task in the SAME durable log
   const root2 = makeChatApp(path.join(tmp(), 'chat2'))
@@ -279,11 +279,20 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const got = lessonsFor(x.log, asg2.id, 'feature_implementation')
   const m2 = new ScriptedModel(good)
   const r2 = await runFeatureWorkflow({ ...deps(x, m2), assignmentId: asg2.id, ws: new Workspace(root2), finalVerification: makeIndependentVerification('v2', tmp(), 'verify.mjs', CHAT_VERIFY_SCRIPT, root2), lessons: () => got.texts }, REQ)
-  check('N35_the_lesson_is_retrieved_for_a_similar_later_task_and_reaches_the_model_prompt', got.ids.length >= 1 && got.texts.some((t) => t.includes('DUPLICATE_DECLARATION')) && m2.calls.filter((c) => c.kind === 'file').every((c) => c.prompt.includes('DUPLICATE_DECLARATION')) && r2.status === 'COMPLETED')
+  check('N35_the_lesson_is_retrieved_for_a_similar_later_task_and_reaches_the_model_prompt', got.ids.length >= 1 && got.texts.some((t) => t.includes('[SYNTAX]')) && m2.calls.filter((c) => c.kind === 'file').every((c) => c.prompt.includes('[SYNTAX]')) && r2.status === 'COMPLETED')
   const eff = measureLessonEffect(x.log, asg2.id)
   const rep = learningReport(x.log)
-  check('N36_effect_is_measured_per_class_the_class_did_not_recur_in_the_later_task_and_the_first_task_is_not_counted_as_a_use', eff.avoided >= 1 && eff.repeated === 0 && rep.byClass.DUPLICATE_DECLARATION.retrieved === 1 && rep.byClass.DUPLICATE_DECLARATION.avoided === 1 && measureLessonEffect(x.log, asg2.id).avoided === 0)
+  check('N36_effect_is_measured_per_class_the_class_did_not_recur_in_the_later_task_and_the_first_task_is_not_counted_as_a_use', eff.avoided >= 1 && eff.repeated === 0 && rep.byClass.SYNTAX.retrieved === 1 && rep.byClass.SYNTAX.avoided === 1 && measureLessonEffect(x.log, asg2.id).avoided === 0)
   check('N37_a_lesson_is_never_retrieved_for_the_assignment_that_produced_it', lessonsFor(x.log, x.asg.id, 'feature_implementation').ids.length === 0)
+}
+// ---- 9. duplicate-declaration gate: a reply that redeclares a name is rejected BEFORE it is written, and the rejection becomes a lesson
+{
+  const x = makeWorld(); let first = true
+  const dup = CHAT_REFERENCE['src/chatService.mjs'] + '\nexport function validateMessage() { return 1 }\n'
+  const model = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'src/chatService.mjs' && first) { first = false; return fenced(dup) } return good(c) })
+  const r = await runFeatureWorkflow(deps(x, model), REQ)
+  const les = captureLessons(x.log, x.asg.id, { taskClass: 'feature_implementation', executor: 'test-double' })
+  check('N38_a_reply_declaring_a_name_twice_is_rejected_before_writing_with_a_reason_and_the_rejection_becomes_a_lesson', r.status === 'COMPLETED' && r.repairs === 0 && model.calls.filter((c) => c.path === 'src/chatService.mjs')[1].prompt.includes('more than once') && les.some((l) => l.cls === 'DUPLICATE_DECLARATION' && l.evidence.kind === 'GATE_REJECTION'))
 }
 void deriveAssignments; void AgentRegistry
 finish()

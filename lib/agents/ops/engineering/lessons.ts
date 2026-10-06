@@ -7,7 +7,7 @@ import { latestCheckpoint } from './continuity'
 const sha = (t: string) => createHash('sha256').update(t).digest('hex')
 
 export function classifyFailure(text: string): LessonClass {
-  if (/Identifier '[^']+' has already been declared/.test(text)) return 'DUPLICATE_DECLARATION'
+  if (/Identifier '[^']+' has already been declared|more than once at the top level/.test(text)) return 'DUPLICATE_DECLARATION'
   if (/does not provide an export named|import names that do not exist|is not exported/.test(text)) return 'MISSING_EXPORT'
   if (/removes exports that other files still import/.test(text)) return 'REMOVED_EXPORT'
   if (/require is not defined|__dirname is not defined|__filename is not defined|Cannot use import statement/.test(text)) return 'ESM_COMMONJS_MIX'

@@ -83,6 +83,24 @@ function resolveImport(from: string, spec: string, files: Set<string>): string |
   return null
 }
 
+/** Names declared more than once at module top level (functions, classes, consts, imports): a certain SyntaxError in ES modules. */
+export function topLevelDuplicates(rel: string, text: string): string[] {
+  const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(rel) ? ts.ScriptKind.TSX : /\.(mjs|cjs|js)$/.test(rel) ? ts.ScriptKind.JS : ts.ScriptKind.TS)
+  const seen = new Map<string, number>()
+  const add = (n: string) => { seen.set(n, (seen.get(n) ?? 0) + 1) }
+  for (const st of sf.statements) {
+    if (ts.isFunctionDeclaration(st) && st.name) add(st.name.text)
+    else if (ts.isClassDeclaration(st) && st.name) add(st.name.text)
+    else if (ts.isVariableStatement(st)) { for (const d of st.declarationList.declarations) if (ts.isIdentifier(d.name)) add(d.name.text) }
+    else if (ts.isImportDeclaration(st) && st.importClause) {
+      const c = st.importClause
+      if (c.name) add(c.name.text)
+      if (c.namedBindings) { if (ts.isNamedImports(c.namedBindings)) c.namedBindings.elements.forEach((e) => add(e.name.text)); else add(c.namedBindings.name.text) }
+    }
+  }
+  return [...seen.entries()].filter(([, n]) => n > 1).map(([name]) => name)
+}
+
 export function indexSource(rel: string, text: string, known: Set<string>): FileEntry {
   const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, /\.(tsx|jsx)$/.test(rel) ? ts.ScriptKind.TSX : /\.(mjs|cjs|js)$/.test(rel) ? ts.ScriptKind.JS : ts.ScriptKind.TS)
   const entry: FileEntry = { path: rel, kind: IS_TEST.test(rel) ? 'test' : 'source', lines: text.split('\n').length, imports: [], nodeImports: [], decls: [], exports: [], hasJsx: false, isHtml: false, apiRefs: [], storageRefs: [], uses: Object.create(null), mentionText: '', routeMethods: [] }
