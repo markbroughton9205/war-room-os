@@ -215,6 +215,71 @@ export const freshLog = () => new LearningLog(mkdtempSync(path.join(tmpdir(), 'p
   check('08b_protected_targets_flagged', api.touchesProtectedPolicy('ROUTING_RECOMMENDATION', ['lib/auth/session.ts']) && api.touchesProtectedPolicy('ROUTING_RECOMMENDATION', ['deploy rules']) && !api.touchesProtectedPolicy('ROUTING_RECOMMENDATION', ['routing/summarization']))
 }
 
+// ---- S6: independent evaluation (I). Oracle reads the raw JSONL and recomputes from the roadmap's rules,
+// sharing no code with scoring.ts; plus seeded property checks.
+{
+  let state = 20261006
+  const rnd = () => ((state = (state * 1664525 + 1013904223) >>> 0) / 2 ** 32)
+  const log = freshLog()
+  const provs = ['p1', 'p2', 'p3']
+  const classes: TaskClass[] = ['risk_review', 'summarization', 'code_modification']
+  const outs: EvaluationEventInput['outcome'][] = ['SUCCESS', 'SUCCESS', 'PARTIAL', 'FAILURE', 'ROLLED_BACK']
+  for (let i = 0; i < 120; i++) {
+    const outcome = outs[Math.floor(rnd() * outs.length)]
+    log.recordEvent(ev(provs[Math.floor(rnd() * 3)], classes[Math.floor(rnd() * 3)], outcome, Math.floor(rnd() * 120), { signal: rnd() < 0.15 ? 'COMMANDER_CORRECTION' : undefined, validation: rnd() < 0.1 ? 'FAILED' : 'UNKNOWN', metrics: rnd() < 0.5 ? { costUsd: rnd(), latencyMs: 100 + rnd() * 900 } : undefined }), NOW)
+  }
+  // drop two events via supersession to confirm both implementations honor it
+  const ids = log.view().events.slice(0, 2).map((e) => e.id)
+  ids.forEach((id) => log.supersede(id, 'oracle exclusion', undefined, NOW))
+
+  // --- oracle: raw file only
+  const raw = readFileSync(log.file, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  const dead = new Set(raw.filter((r) => r.t === 'supersede').map((r) => r.eventId))
+  let maxErr = 0
+  let pairs = 0
+  for (const prov of provs) for (const tc of classes) {
+    let num = 0, den = 0
+    for (const r of raw.filter((x) => x.t === 'event' && !dead.has(x.event.id))) {
+      const e = r.event
+      if (e.subject.id !== prov || e.taskClass !== tc) continue
+      const age = (NOW.getTime() - new Date(e.occurredAt).getTime()) / 864e5
+      const d = 2 ** (-age / 30)
+      let val = 0, wt = 1
+      if (e.outcome === 'ROLLED_BACK') { val = 0; wt = 1.5 }
+      else if (e.signal === 'COMMANDER_CORRECTION') { val = e.outcome === 'SUCCESS' ? 0.5 : 0.25; wt = 1.25 }
+      else if (e.outcome === 'SUCCESS') val = 1
+      else if (e.outcome === 'PARTIAL') val = 0.5
+      num += wt * d * val; den += wt * d
+    }
+    const expected = (num + 1.5) / (den + 3)
+    const got = scoreSubject(log.view().activeEvents, { kind: 'provider', id: prov }, tc, NOW)
+    if (got.rawSamples === 0) continue
+    pairs += 1
+    maxErr = Math.max(maxErr, Math.abs((got.score as number) - expected))
+  }
+  check('I1_oracle_matches_scorer', pairs >= 6 && maxErr < 1e-9, `pairs=${pairs} maxErr=${maxErr}`)
+
+  // coercion oracle: no SUCCESS/PARTIAL event in the file may carry validation FAILED
+  check('I2_no_failed_validation_marked_success', raw.filter((r) => r.t === 'event').every((r) => !(r.event.validation === 'FAILED' && (r.event.outcome === 'SUCCESS' || r.event.outcome === 'PARTIAL'))))
+
+  // properties: bounded, deterministic, monotone
+  const act = log.view().activeEvents
+  const all = scoreMatrix(act, NOW)
+  const again = scoreMatrix(act, NOW)
+  check('I3_scores_bounded_and_deterministic', all.every((c) => typeof c.score === 'number' && c.score >= 0 && c.score <= 1 && c.confidence >= 0 && c.confidence <= 1) && JSON.stringify(all) === JSON.stringify(again))
+  let mono = true
+  for (const c of all) {
+    const f = log.recordEvent(ev(c.subject.id, c.taskClass, 'FAILURE', 0), NOW)
+    const worse = scoreSubject(log.view().activeEvents, c.subject, c.taskClass, NOW).score as number
+    const s = log.recordEvent(ev(c.subject.id, c.taskClass, 'SUCCESS', 0), NOW)
+    const better = scoreSubject(log.view().activeEvents, c.subject, c.taskClass, NOW).score as number
+    if (!(worse <= (c.score as number) + 1e-12 && better >= worse - 1e-12)) mono = false
+    log.supersede(f.id, 'property probe', undefined, NOW)
+    log.supersede(s.id, 'property probe', undefined, NOW)
+  }
+  check('I4_adding_failure_never_raises_success_never_lowers', mono)
+}
+
 export function finish(extra: Result[] = []) {
   const all = [...results, ...extra]
   for (const r of all) console.log(`${r.pass ? 'PASS' : 'FAIL'} ${r.name}${r.detail ? ' ' + r.detail : ''}`)
