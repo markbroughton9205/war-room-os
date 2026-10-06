@@ -355,7 +355,8 @@
     "validate:council-engine-10": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/engines/councilEngineFinal.validation.ts 10",
     "validate:council-engine-11": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/engines/councilEngineFinal.validation.ts 11",
     "validate:council-engine-12": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/engines/councilEngineFinal.validation.ts 12",
-    "validate:council-complete": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/engines/councilEngineFinal.validation.ts"
+    "validate:council-complete": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/engines/councilEngineFinal.validation.ts",
+    "validate:phase9": "node scripts/run-phase9-acceptance.mjs"
   },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0",
