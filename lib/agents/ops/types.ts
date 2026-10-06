@@ -248,6 +248,17 @@ export type HandoffPacket = {
   lessonsApplied?: string[]
 }
 
+export type EvidenceKind = 'command_output' | 'file_read' | 'server_log' | 'browser_console' | 'network' | 'api_response' | 'rendered_state' | 'type_diagnostic' | 'docs' | 'test_result'
+export type DebugEvidence = { id: string; kind: EvidenceKind; ref: string; excerptHash: string; summary: string; available: boolean; unavailableReason?: string }
+export type DebugEntry =
+  | { kind: 'FAILURE'; failureId: string; argv: string[]; ran: true; exitCode: number | null; startedAt: string; outputHash: string; excerpt: string; signature: string; testsTargeted: string[]; testsRun: number | Unknown; failingTests: string[] }
+  | { kind: 'EVIDENCE'; evidence: DebugEvidence; failureId: string }
+  | { kind: 'HYPOTHESIS'; failureId: string; hypothesisId: string; statement: string; revisionOf?: string; whyRevised?: string; supporting: string[]; refuting: string[] }
+  | { kind: 'HYPOTHESIS_STATUS'; hypothesisId: string; status: 'OPEN' | 'SUPPORTED' | 'REFUTED' | 'UNDETERMINED'; reason: string }
+  | { kind: 'REPAIR'; failureId: string; repairId: string; hypothesisId: string; filesEdited: { path: string; afterHash: string }[]; rationale: string; differsFromPrevious: string | null; newEvidence: string[]; attempt: number }
+  | { kind: 'VALIDATION'; failureId: string; repairId: string; argv: string[]; exitCode: number | null; testsRun: number | Unknown; outcome: 'ORIGINAL_FIXED' | 'SAME_FAILURE' | 'NEW_FAILURE' | 'VACUOUS' | 'WRONG_TEST_SUSPECTED'; signature: string | null; note: string }
+  | { kind: 'UNDETERMINED'; failureId: string; reason: string; attempts: number }
+
 export type AgentOpsRecord =
   | { t: 'need'; rid: string; need: NeedRecord }
   | { t: 'agent'; rid: string; agent: AgentSpec }
@@ -266,6 +277,7 @@ export type AgentOpsRecord =
   | { t: 'checkpoint'; rid: string; assignmentId: string; seq: number; at: string; by: Actor; state: CheckpointState }
   | { t: 'effect'; rid: string; effect: EffectRecord }
   | { t: 'handoff'; rid: string; fromAssignment: string; toAssignment: string; at: string; by: Actor; reason: string; packet: HandoffPacket }
+  | { t: 'debug'; rid: string; assignmentId: string; seq: number; at: string; entry: DebugEntry }
   | { t: 'feedback'; rid: string; runId: string; verdict: 'accepted' | 'corrected' | 'rejected'; usefulEscalation?: boolean; by: Actor; at: string; note: string }
   | { t: 'effectApproval'; rid: string; workerId: string; effects: ProtectedEffect[]; by: Actor; at: string; reason: string }
   | { t: 'scope'; rid: string; agentId: string; proposalId: string; permissionScope: SafePermission[]; memoryScope: MemoryScope[]; by: Actor; at: string }
