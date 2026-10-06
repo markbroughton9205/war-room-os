@@ -190,7 +190,7 @@ export function planFromCode(index: WorkspaceIndex, input: { request: string; ac
       if (layer === 'tests') for (const t of testsToProve.filter((x) => x.proposedPath)) files.push({ path: t.proposedPath!, action: 'create' as const, rationale: t.why })
       if (layer === 'tests') for (const t of testsToProve.filter((x) => x.existing)) if (!files.some((f) => f.path === t.existing)) files.push({ path: t.existing!, action: 'modify' as const, rationale: t.why })
       if (!files.length) continue
-      const checks = [...(typecheck ? [typecheck] : files.filter((f) => /\.m?js$/.test(f.path)).map((f) => `node --check ${f.path}`)), ...(layer === 'tests' || layer === 'domain' || layer === 'api' ? testScripts.map((s) => `pnpm run ${s}`) : [])]
+      const checks = [...(typecheck ? [typecheck] : files.filter((f) => /\.m?js$/.test(f.path)).map((f) => `node --check ${f.path}`)), ...(layer === 'tests' || layer === 'domain' || layer === 'api' ? testScripts.map((s) => `${index.pm} run ${s}`) : [])]
       slices.push({ order: slices.length + 1, layer, title: `${layer}: ${files.map((f) => path.posix.basename(f.path)).join(', ')}`, files: dedupFiles(files), validation: checks })
     }
   }
@@ -208,7 +208,7 @@ export function planFromCode(index: WorkspaceIndex, input: { request: string; ac
   ]
   return {
     request: input.request, discoverySeeds: seeds, what, where, dependsOnIt, otherLayers, testsNow, testsToProve,
-    runtimeEvidence: dedupRuntime, commands: { typecheck, test: testScripts.map((s) => `pnpm run ${s}`), start: startScript ? `pnpm run ${startScript}` : null },
+    runtimeEvidence: dedupRuntime, commands: { typecheck, test: testScripts.map((s) => `${index.pm} run ${s}`), start: startScript ? `${index.pm} run ${startScript}` : null },
     slices, evidence: [...where, ...dependsOnIt].flatMap((w) => w.why).slice(0, 40), misleading, uncertainties,
     ranking: { evidence: where.map((w) => w.path), naiveKeywordFrequency: naive.map((n) => n.path), diverges: !!naive[0] && !!evidenceTop[0] && naive[0].path !== evidenceTop[0] },
     index: { fileCount: index.fileCount, truncated: index.truncated, builtAt: index.builtAt },

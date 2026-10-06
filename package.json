@@ -372,6 +372,7 @@
     "validate:agent-eng-lifecycle": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/engineering.validation.ts",
     "validate:agent-eng-planning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/codePlanner.validation.ts",
     "validate:agent-eng-continuity": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/continuity.validation.ts",
+    "validate:agent-eng-runtime": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/runtime/runtime.validation.ts",
     "validate:agent-ops-all": "pnpm run validate:agent-ops && pnpm run validate:agent-ops-api && pnpm run validate:agent-ops-ui && pnpm run validate:agent-ops-scheduler && pnpm run validate:agent-ops-governance",
     "validate:recursive-learning-all": "pnpm run validate:recursive-learning && pnpm run validate:recursive-learning-ingestion && pnpm run validate:recursive-learning-backfill && pnpm run validate:recursive-learning-api && pnpm run validate:recursive-learning-ui && pnpm run validate:recursive-learning-governance && pnpm run validate:recursive-learning-integration",
     "backfill:recursive-learning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/ingestion/backfill.cli.ts"

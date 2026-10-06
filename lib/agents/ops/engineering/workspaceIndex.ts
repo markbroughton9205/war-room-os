@@ -39,6 +39,8 @@ export type WorkspaceIndex = {
   testsFor: Record<string, string[]>
   scripts: Record<string, string>
   hasTsconfig: boolean
+  /** Package manager evidenced by the workspace itself (a lockfile); npm otherwise. */
+  pm: 'pnpm' | 'npm'
 }
 
 const SKIP_DIRS = new Set(['node_modules', '.git', '.next', 'dist', 'build', 'coverage', '.war-room', '.turbo', '.cache', 'out'])
@@ -203,5 +205,5 @@ export function buildWorkspaceIndex(root: string): WorkspaceIndex {
     for (const d of f.decls) (symbols[d.name] ??= []).push({ file: f.path, line: d.line, kind: d.kind, exported: d.exported })
     for (const i of f.imports) if (i.resolved) { (dependents[i.resolved] ??= []).push(f.path); if (f.kind === 'test') (testsFor[i.resolved] ??= []).push(f.path) }
   }
-  return { root: abs, builtAt: new Date().toISOString(), fileCount: Object.keys(files).length, truncated: state.truncated, files, symbols, dependents, testsFor, scripts, hasTsconfig: existsSync(path.join(abs, 'tsconfig.json')) }
+  return { root: abs, builtAt: new Date().toISOString(), fileCount: Object.keys(files).length, truncated: state.truncated, files, symbols, dependents, testsFor, scripts, hasTsconfig: existsSync(path.join(abs, 'tsconfig.json')), pm: existsSync(path.join(abs, 'pnpm-lock.yaml')) ? 'pnpm' : 'npm' }
 }
