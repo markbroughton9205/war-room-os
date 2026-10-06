@@ -362,6 +362,7 @@
     "validate:recursive-learning-backfill": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/ingestion/backfill.validation.ts",
     "validate:recursive-learning-api": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/api.validation.ts",
     "validate:recursive-learning-ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/ui.validation.ts",
+    "validate:recursive-learning-governance": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/governance.validation.ts",
     "backfill:recursive-learning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/ingestion/backfill.cli.ts"
   },
   "dependencies": {

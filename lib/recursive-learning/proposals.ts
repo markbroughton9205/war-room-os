@@ -46,7 +46,7 @@ export function decideProposal(
   reason: string,
   now: Date = new Date(),
 ): Decision {
-  if (!decidedBy.startsWith('commander:')) throw new Error('decisions require a commander identity (commander:<id>)')
+  if (!/^commander:[A-Za-z0-9._-]{1,64}$/.test(decidedBy)) throw new Error('decisions require a commander identity (commander:<id>)')
   if (!reason.trim()) throw new Error('decision reason required')
   if (!log.view().proposals.some((p) => p.id === proposalId)) throw new Error(`unknown proposal: ${proposalId}`)
   const decision: Decision = { proposalId, status, decidedBy, decidedAt: now.toISOString(), reason }
