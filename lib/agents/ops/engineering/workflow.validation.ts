@@ -42,7 +42,6 @@ test('sessions round-trip through the data file', () => {
   assert.strictEqual(store.loadSessions()[0].id, 'x')
 })
 `
-const SESSIONS_TEST = CHAT_REFERENCE['test/chatSessions.test.mjs'].replace(/^import test[\s\S]*?\n\n/, '')
 const INDEX_HTML = CHAT_REFERENCE['public/index.html']
 const SOLUTION: Record<string, string> = {
   'src/messageStore.mjs': CHAT_REFERENCE['src/messageStore.mjs'],
@@ -92,7 +91,7 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   check('N02_the_independent_verifier_and_the_regression_suite_actually_pass_on_the_final_workspace', (await x.verification.run()).exitCode === 0 && (await runCommand(x.root, ['node', '--test', 'test/chatService.test.mjs', 'test/messageStore.test.mjs'], TOOLS)).exitCode === 0)
   check('N03_executor_is_recorded_honestly_as_the_test_double_and_tokens_stay_UNKNOWN', v.outcome!.executor !== 'UNKNOWN' && (v.outcome!.executor as { provider: string }).provider === 'test-double' && v.outcome!.tokens === 'UNKNOWN' && r.executor !== 'UNKNOWN')
   const cp = latestCheckpoint(x.log, x.asg.id)!
-  check('N04_checkpoints_carry_objective_acceptance_steps_file_hashes_and_validations', checkpointHistory(x.log, x.asg.id).length >= 6 && cp.state.steps.every((s) => s.status === 'DONE' || s.status === 'SKIPPED') && cp.state.fileChanges.length >= 5 && cp.state.fileChanges.every((c) => c.afterHash.length === 64) && cp.state.validations.some((vv) => vv.command.includes('verify.mjs') && vv.status === 'PASSED') && cp.state.acceptanceCriteria.length === 7)
+  check('N04_checkpoints_carry_objective_acceptance_steps_file_hashes_and_validations', checkpointHistory(x.log, x.asg.id).length >= 6 && cp.state.steps.every((s) => s.status === 'DONE' || s.status === 'SKIPPED') && cp.state.fileChanges.length >= 5 && cp.state.fileChanges.every((c) => c.afterHash.length === 64) && cp.state.validations.some((vv) => vv.command.includes('verify.mjs') && vv.status === 'PASSED') && cp.state.acceptanceCriteria.length === CHAT_FEATURE.acceptance.length)
   check('N05_every_file_write_is_a_recorded_consequential_effect_done_exactly_once', cp.state.effectsDone.length >= 5 && cp.state.effectsDone.every((k) => effectStatus(x.log, x.asg.id, k).state === 'DONE'))
   const firstPrompt = model.calls[0].prompt
   check('N06_model_context_contains_the_code_aware_plan_and_the_current_file_not_a_transcript', firstPrompt.includes('PLAN (from code evidence)') && firstPrompt.includes('CURRENT CONTENT OF') && firstPrompt.includes('ACCEPTANCE CRITERIA') && firstPrompt.length < 14_000)
@@ -218,6 +217,28 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const x = makeWorld(); const model = new ScriptedModel(good)
   await runFeatureWorkflow(deps(x, model, { lessons: () => ['LESSON-XYZ: use the exact function names from RELATED CODE'] }), REQ)
   check('N26_retrieved_lessons_reach_the_model_prompt', model.calls.filter((c) => c.kind === 'file').every((c) => c.prompt.includes('LESSON-XYZ')))
+}
+
+// ---- 7. static API-compat gate and error-implicated repair candidates (found by the first real-model run)
+{
+  const x = makeWorld(); let tried = 0
+  const gutted = `// store rewritten without the legacy exports\nexport function loadSessions() { return [] }\nexport function saveSessions(s) { return s }\n`
+  const model = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'src/messageStore.mjs' && tried++ === 0) return fenced(gutted); return good(c) })
+  const r = await runFeatureWorkflow(deps(x, model), REQ)
+  check('N27_a_rewrite_that_deletes_an_export_other_files_import_is_rejected_before_it_is_written_and_the_model_is_told_why', r.status === 'COMPLETED' && model.calls.filter((c) => c.path === 'src/messageStore.mjs').length === 2 && model.calls.filter((c) => c.path === 'src/messageStore.mjs')[1].prompt.includes('REJECTED') && x.ws.read('src/messageStore.mjs').includes('allMessages') && latestCheckpoint(x.log, x.asg.id)!.state.doNotRepeat.some((d) => d.key.startsWith('reject:src/messageStore.mjs')))
+  const y = makeWorld()
+  const stubborn = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'src/messageStore.mjs' ? fenced(gutted) : good(c)))
+  const r2 = await runFeatureWorkflow(deps(y, stubborn), REQ)
+  check('N28_a_model_that_keeps_deleting_the_export_cannot_corrupt_the_workspace_the_step_fails_and_the_file_is_untouched', r2.status === 'FAILED' && y.ws.read('src/messageStore.mjs').includes('pushMessage') && view(y).state === 'FAILED' && view(y).stopReason!.includes('repeatedly produced') && !r2.filesChanged.includes('src/messageStore.mjs'))
+  const z = makeWorld(); let analysed = 0
+  const m3 = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/chatService.mjs') return 'NO_CHANGE' // wrong: the service needs the session functions
+    if (c.kind === 'analyst') { analysed += 1; return JSON.stringify({ hypothesis: 'server.mjs imports createSession etc. from chatService.mjs, which does not export them (SyntaxError in the output names src/chatService.mjs)', file: 'src/chatService.mjs', differs: 'first attempt' }) }
+    if (c.kind === 'repair') return fenced(CHAT_REFERENCE['src/chatService.mjs'])
+    return good(c)
+  })
+  const r3 = await runFeatureWorkflow(deps(z, m3), REQ)
+  check('N29_a_file_the_model_wrongly_skipped_is_offered_as_a_repair_candidate_because_the_error_output_names_it', r3.status === 'COMPLETED' && analysed >= 1 && r3.filesChanged.includes('src/chatService.mjs') && deriveLedger(z.log, z.asg.id).repairs[0].filesEdited[0].path === 'src/chatService.mjs', `${r3.status} ${r3.reason}`)
 }
 void deriveAssignments; void AgentRegistry
 finish()

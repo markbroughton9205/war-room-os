@@ -9,6 +9,7 @@ export const CHAT_FEATURE = {
     'GET /api/sessions lists sessions; GET /api/sessions/:id returns one session with its messages; unknown ids return 404',
     'POST /api/sessions/:id/messages stores a message in that session only',
     'sessions and their messages are persisted to disk and survive a server restart',
+    'the data file path comes from the CHAT_DATA_FILE environment variable (default: data/sessions.json under the working directory)',
     'the existing GET/POST /api/messages endpoints keep working',
     'the page lists the sessions and lets the user create a session and select one to see its messages',
     'node tests cover the new session service functions',
