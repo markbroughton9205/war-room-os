@@ -38,6 +38,7 @@ export async function startOwnedProcess(input: {
   cmd: string
   args: string[]
   label: string
+  env?: Record<string, string>
 }): Promise<{ ok: boolean; pid?: number; error?: string }> {
   const policy = classifyArgv(input.cmd, input.args)
   if (policy.policyClass !== 'SAFE_LOCAL') {
@@ -52,6 +53,7 @@ export async function startOwnedProcess(input: {
   if (bypass) return { ok: false, error: bypass }
   const child = spawn(input.cmd, input.args, {
     cwd,
+    env: { ...process.env, ...(input.env ?? {}) },
     windowsHide: true,
     shell: process.platform === 'win32',
     detached: process.platform !== 'win32',

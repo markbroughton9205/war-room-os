@@ -1,3 +1,4 @@
+import { isLoopbackModelEndpoint } from './foundryLaunchPolicy'
 /**
  * Real Ollama HTTP client — no prior adapter existed in this repo (the only prior reference,
  * lib/council/brain-selection/BrainCandidateRegistry.ts, is a routing-decision *label*
@@ -37,7 +38,7 @@ export async function probeOllama(
   try {
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), timeoutMs)
-    const res = await fetch(`${url}/api/tags`, { signal: controller.signal })
+    const res = await fetch(`${url}/api/tags`, { signal: controller.signal, redirect: 'error' })
     clearTimeout(timeout)
     if (!res.ok) {
       return { available: false, baseUrl: url, models: [], detail: `Ollama responded with HTTP ${res.status}.` }
@@ -115,6 +116,7 @@ function generateBody(args: {
 /** Requests a single, non-streamed completion. Never throws — callers get an honest ok:false on
  * any failure (unreachable, timeout, model not pulled, malformed response). */
 export async function requestOllamaCompletion(args: {
+  requireLoopback?: boolean
   model: string
   prompt: string
   system?: string
@@ -149,6 +151,7 @@ function mergeSignals(external: AbortSignal | undefined, timeoutMs: number): { s
  * they do not change host-wide Ollama daemon configuration. Never pin models forever.
  */
 export async function requestOllamaStreamingCompletion(args: {
+  requireLoopback?: boolean
   model: string
   prompt: string
   system?: string
@@ -160,11 +163,13 @@ export async function requestOllamaStreamingCompletion(args: {
   options?: OllamaGenerateOptions
 }): Promise<OllamaCompletionResult> {
   const url = baseUrl()
+  if (args.requireLoopback && !isLoopbackModelEndpoint(url)) return { ok: false, detail: 'Local Only requires a loopback Ollama endpoint. No request sent.' }
   const started = Date.now()
   const { signal, cleanup } = mergeSignals(args.signal, args.timeoutMs ?? GENERATE_TIMEOUT_MS)
   try {
     const res = await fetch(`${url}/api/generate`, {
       method: 'POST',
+      redirect: 'error',
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(generateBody({ ...args, stream: true })),
@@ -172,11 +177,11 @@ export async function requestOllamaStreamingCompletion(args: {
     if (!res.ok) {
       const body = await res.text().catch(() => '')
       if (res.status === 400 && /think|keep_alive/i.test(body)) {
-        return requestOllamaStreamingCompletionCompat(args, signal, started)
+        return await requestOllamaStreamingCompletionCompat(args, signal, started)
       }
       return { ok: false, detail: `Ollama HTTP ${res.status}: ${body.slice(0, 300)}` }
     }
-    return readOllamaGenerateStream(res, args.model, args.onDelta, started)
+    return await readOllamaGenerateStream(res, args.model, args.onDelta, started)
   } catch (error) {
     return { ok: false, detail: error instanceof Error ? error.message : String(error) }
   } finally {
@@ -185,13 +190,16 @@ export async function requestOllamaStreamingCompletion(args: {
 }
 
 async function requestOllamaStreamingCompletionCompat(
-  args: { model: string; prompt: string; system?: string; onDelta?: (delta: string) => void; format?: OllamaFormat; options?: OllamaGenerateOptions },
+  args: { requireLoopback?: boolean; model: string; prompt: string; system?: string; onDelta?: (delta: string) => void; format?: OllamaFormat; options?: OllamaGenerateOptions },
   signal: AbortSignal,
   started: number,
 ): Promise<OllamaCompletionResult> {
   try {
-    const res = await fetch(`${baseUrl()}/api/generate`, {
+    const url = baseUrl()
+    if (args.requireLoopback && !isLoopbackModelEndpoint(url)) return { ok: false, detail: 'Local Only requires a loopback Ollama endpoint. No request sent.' }
+    const res = await fetch(`${url}/api/generate`, {
       method: 'POST',
+      redirect: 'error',
       signal,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
@@ -207,7 +215,7 @@ async function requestOllamaStreamingCompletionCompat(
       const body = await res.text().catch(() => '')
       return { ok: false, detail: `Ollama HTTP ${res.status}: ${body.slice(0, 300)}` }
     }
-    return readOllamaGenerateStream(res, args.model, args.onDelta, started)
+    return await readOllamaGenerateStream(res, args.model, args.onDelta, started)
   } catch (error) {
     return { ok: false, detail: error instanceof Error ? error.message : String(error) }
   }

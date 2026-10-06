@@ -159,10 +159,13 @@ export type FoundryToolCallRecord = {
   reason: string
   error?: string
   excerpt?: string
+  /** Set when a budget refusal was resolved by a later Commander extension; the record is kept for audit but must not steer decisions. */
+  staleBudgetRefusal?: { resolvedByBudgetId: string; version: number }
 }
 
 export type FoundryMissionRecord = {
   missionId: string
+  modelPolicy?: 'LOCAL_ONLY'
   title: string
   userRequest: string
   createdAt: string
@@ -212,10 +215,13 @@ export type FoundryMissionRecord = {
     approvalState?: 'pending' | 'approved' | 'denied'
   } | null
   cancelRequested: boolean
+  controlRevision?: number
   pauseRequested?: boolean
   priority?: import('./foundryOperationsTypes').FoundryMissionPriority
   owner?: string
   workspace?: string
+  /** The validated workspace this mission runs in. Persisted so every run, resume and child job re-binds the same root. */
+  workspaceBinding?: import('./foundryWorkspaceBinding').FoundryWorkspaceBinding | null
   repoIdentity?: string
   lastHeartbeat?: string
   resumeToken?: string

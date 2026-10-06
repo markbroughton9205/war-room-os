@@ -137,11 +137,14 @@ export async function resolveLocalModelHealth(opts?: { tryStart?: boolean; probe
   const config = applyFoundryRuntimeConfig()
   const binary = localOllamaBinary()
   const serviceActive = await localModelServiceActive()
-  if (opts?.tryStart && Date.now() - startAttemptedAt > 30_000 && serviceActive !== true) {
+  const probeOptions = opts?.probeTimeoutMs ? { timeoutMs: opts.probeTimeoutMs } : undefined
+  let probe = await probeOllama(process.env, probeOptions)
+  // An already reachable runtime needs no service installation, including when systemd is inaccessible.
+  if (!probe.available && opts?.tryStart && Date.now() - startAttemptedAt > 30_000 && serviceActive !== true) {
     startAttemptedAt = Date.now()
     await ensureLocalModelService()
+    probe = await probeOllama(process.env, probeOptions)
   }
-  const probe = await probeOllama(process.env, opts?.probeTimeoutMs ? { timeoutMs: opts.probeTimeoutMs } : undefined)
   const probeMs = Date.now() - started
   const version = await runtimeVersion(binary)
   const preferred = config.localModelId
