@@ -9,22 +9,41 @@ import { describeTimeline } from './foundryMissionControlTimeline';
 export function buildMissionControlView(input: McInput): McView {
   const { now, mission, tasks, jobs, leases, evidence, failures, timeline } = input;
 
-  const stateLabel = 
-    mission.status === 'COMPLETE' ? 'Complete' : 
-    mission.status === 'BLOCKED' ? 'Needs the Commander' : 
-    mission.status === 'CANCELLED' ? 'Cancelled' : 'In progress';
+  const stateLabel =
+    mission.status === 'COMPLETE' ? 'Complete' :
+    mission.status === 'BLOCKED' ? 'Needs the Commander' :
+    mission.status === 'CANCELLED' ? 'Cancelled' :
+    mission.status === 'FAILED' ? 'Failed' :
+    mission.status === 'PAUSED' ? 'Paused' :
+    mission.status === 'RECOVERING' ? 'Recovering' :
+    mission.status === 'WAITING_AUTHORIZATION' ? 'Waiting for authorization' :
+    mission.status === 'WAITING_RESOURCE' ? 'Waiting for resource' :
+    'In progress';
 
-  const tone = 
-    mission.status === 'COMPLETE' || mission.status === 'IN_PROGRESS' ? 'ok' : 
-    mission.status === 'BLOCKED' ? 'blocked' : 'idle';
+  const tone =
+    mission.status === 'COMPLETE' ? 'ok' :
+    mission.status === 'FAILED' ? 'bad' :
+    mission.status === 'BLOCKED' ? 'blocked' :
+    mission.status === 'CANCELLED' ? 'idle' :
+    mission.status === 'PAUSED' ? 'wait' :
+    mission.status === 'RECOVERING' ? 'wait' :
+    mission.status === 'WAITING_AUTHORIZATION' ? 'wait' :
+    mission.status === 'WAITING_RESOURCE' ? 'wait' :
+    'ok';
 
   const endedMs = mission.status === 'COMPLETE' && mission.endedAt ? Date.parse(mission.endedAt) : NaN;
   const elapsed = formatDuration((Number.isFinite(endedMs) ? endedMs : now) - Date.parse(mission.startedAt));
 
-  const phase = 
-     mission.status === 'COMPLETE' ? 'Done' : 
-    mission.status === 'COMPLETE' ? 'Done' : 
-    mission.status === 'BLOCKED' ? 'Needs the Commander' : 'Working';
+  const phase =
+    mission.status === 'COMPLETE' ? 'Done' :
+    mission.status === 'FAILED' ? 'Failed' :
+    mission.status === 'CANCELLED' ? 'Cancelled' :
+    mission.status === 'BLOCKED' ? 'Needs the Commander' :
+    mission.status === 'PAUSED' ? 'Paused' :
+    mission.status === 'RECOVERING' ? 'Recovering' :
+    mission.status === 'WAITING_AUTHORIZATION' ? 'Waiting for authorization' :
+    mission.status === 'WAITING_RESOURCE' ? 'Waiting for resource' :
+    'Working';
 
   const lastProgress = 
     mission.lastProgressAt === null ? 'No progress recorded yet' : 
@@ -57,7 +76,7 @@ export function buildMissionControlView(input: McInput): McView {
       title: task.description.substring(0, 80),
       detail:
         (task.state === 'WAITING' || task.state === 'BLOCKED') ?
-          task.blockers[0].detail : 
+          (task.blockers[0]?.detail ?? task.description) :
           task.attempts > 1 ? 'Attempt ' + task.attempts : '',
       tone: describeTaskState(task.state).tone,
     })),

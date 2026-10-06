@@ -23,6 +23,7 @@ const nextConfig: NextConfig = {
   // Standalone output supports desktop packaging of local Next server artifacts.
   // Does not remove or break `next start` / production web deployment.
   output: "standalone",
+  outputFileTracingRoot: path.dirname(new URL(import.meta.url).pathname),
   outputFileTracingExcludes: {
     // `*` does not match nested routes, so ephemeral files stayed in those traces
     // and standalone copy failed after the lock or electron temp dir was removed.

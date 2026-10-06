@@ -166,6 +166,31 @@ assert.equal(view2.attention.kind, 'BLOCKED');
 assert.equal(view2.attention.needsCommander, true);
 assert.equal(view2.attention.message, 'Commander decision required: credentials missing');
 
+
+// P9-B: mission header must tell the truth for non-happy-path statuses.
+for (const [status, expectedLabel, expectedTone] of [
+  ['FAILED', 'Failed', 'bad'],
+  ['PAUSED', 'Paused', 'wait'],
+  ['RECOVERING', 'Recovering', 'wait'],
+  ['WAITING_AUTHORIZATION', 'Waiting for authorization', 'wait'],
+  ['WAITING_RESOURCE', 'Waiting for resource', 'wait'],
+  ['CANCELLED', 'Cancelled', 'idle'],
+] as const) {
+  const v = buildMissionControlView({ ...fixture, mission: { ...fixture.mission, status } });
+  assert.equal(v.header.stateLabel, expectedLabel, `stateLabel for ${status}`);
+  assert.equal(v.header.tone, expectedTone, `tone for ${status}`);
+}
+assert.notEqual(buildMissionControlView({ ...fixture, mission: { ...fixture.mission, status: 'FAILED' } }).header.phase, 'Working');
+
+
+// P9-E: a WAITING/BLOCKED task with no blockers array entries must not crash the view.
+const noBlockerFixture = JSON.parse(JSON.stringify(fixture))
+noBlockerFixture.tasks[0].state = 'BLOCKED'
+noBlockerFixture.tasks[0].blockers = []
+const v3 = buildMissionControlView(noBlockerFixture)
+const blockedGroup = v3.taskGroups.find(g => g.state === 'BLOCKED')
+assert.ok(blockedGroup && blockedGroup.items[0].detail.length > 0, 'BLOCKED task without blockers still renders a detail')
+
 console.log('PASS 1');
 console.log('PASS 2');
 console.log('PASS 3');
@@ -176,4 +201,6 @@ console.log('PASS 7');
 console.log('PASS 8');
 console.log('PASS 9');
 console.log('PASS 10');
-console.log('MISSION_CONTROL_VALIDATION 10/10');
+console.log('PASS 11');
+console.log('PASS 12');
+console.log('MISSION_CONTROL_VALIDATION 12/12');
