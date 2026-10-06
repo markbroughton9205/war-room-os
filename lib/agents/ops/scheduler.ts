@@ -119,8 +119,10 @@ function recordDecision(log: AgentOpsLog, workerId: string, now: Date, decision:
  * disables that worker's schedule. At most SCHED_MAX_CLAIMS_PER_TICK runs; overdue slots collapse into one.
  */
 export async function schedulerTick(log: AgentOpsLog, opts: TickOptions = {}): Promise<TickResult> {
-  const now = opts.now ?? new Date()
-  const instanceId = opts.instanceId ?? `scheduler-${process.pid}`
+  // tests inject a fixed `now`; production reads the real clock again for every worker so run timestamps are true start/end times
+  const clock = opts.now ? () => opts.now as Date : () => new Date()
+  let now = clock()
+  const instanceId = (opts.instanceId ?? `scheduler-${process.pid}`).replace(/[^A-Za-z0-9._-]/g, '').slice(0, 64) || `scheduler-${process.pid}`
   const result: TickResult = { at: now.toISOString(), instanceId, globalEnabled: false, ran: [], skipped: [] }
   const envOff = opts.envOff ?? process.env.WAR_ROOM_AGENT_SCHEDULER === 'off'
   const state = deriveScheduler(log)
@@ -133,14 +135,17 @@ export async function schedulerTick(log: AgentOpsLog, opts: TickOptions = {}): P
   }
   let claims = 0
   for (const workerId of enabledIds) {
+    now = clock()
     if (claims >= SCHED_MAX_CLAIMS_PER_TICK) { result.skipped.push({ workerId, reason: 'TICK_CLAIM_LIMIT' }); continue }
     const claim = log.withLock(() => {
       const fresh = deriveScheduler(log)
+      // pause/disable is re-checked at claim time: a pause that lands mid-tick stops further claims (it cannot stop a run already in flight)
+      if (process.env.WAR_ROOM_AGENT_SCHEDULER === 'off' || fresh.global?.enabled !== true) { result.skipped.push({ workerId, reason: 'GLOBAL_DISABLED' }); return null }
       const ws = deriveWorkers(log).workers
       const w = ws.get(workerId)
       if (!w) return null
       const agent = deriveAgents(log).agents.get(w.spec.agentId)
-      const runningScheduled = [...ws.values()].reduce((n, x) => n + x.runs.filter((r) => r.status === 'RUNNING' && r.origin === 'scheduled').length, 0)
+      const runningScheduled = [...ws.values()].reduce((n, x) => n + x.runs.filter((r) => r.status === 'RUNNING').length, 0) // all origins: a manual run uses the same resources
       const ev = evaluateDue(w, fresh.schedules.get(workerId), fresh.lastClaim.get(workerId)?.at, agent?.state, runningScheduled, now)
       if (ev.action === 'SKIP') { result.skipped.push({ workerId, reason: ev.reason }); recordDecision(log, workerId, now, 'SKIP', ev.reason, ev.nextEligibleAt); return null }
       const slotMs = Math.floor(ev.dueAt.getTime() / 60_000) * 60_000

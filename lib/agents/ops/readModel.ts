@@ -21,10 +21,10 @@ export type OpsSnapshot = {
     globalEnabled: boolean
     globalReason: string
     envOff: boolean
-    health: { state: 'RUNNING' | 'STALE' | 'UNKNOWN'; detail: string }
+    health: { state: 'RUNNING' | 'DEGRADED' | 'STALE' | 'UNKNOWN'; detail: string }
     eligibleCategories: readonly string[]
     maxConcurrent: number
-    workers: { workerId: string; schedulable: boolean; schedulableProblem: string | null; enabled: boolean; cadenceMinutes: number | null; nextEligibleAt: string | 'UNKNOWN'; lastAutomaticRunAt: string | 'NONE'; lastDecision: string | 'NONE'; lastSkipReason: string | 'NONE'; lastClaimId: string | 'NONE'; dueNow: boolean }[]
+    workers: { workerId: string; schedulable: boolean; schedulableProblem: string | null; enabled: boolean; cadenceMinutes: number | null; nextEligibleAt: string | 'UNKNOWN'; dueSince: string | null; willRunNext: boolean; lastAutomaticRunAt: string | 'NONE'; lastClaimAt: string | 'NONE'; lastDecision: string | 'NONE'; lastSkipReason: string | 'NONE'; lastClaimId: string | 'NONE'; dueNow: boolean }[]
   }
   resourceUsage: { workerId: string; runs: number; totalDurationMs: number; costUsd: number | 'UNKNOWN' }[]
 }
@@ -61,10 +61,11 @@ export function buildOpsSnapshot(log: AgentOpsLog, now: Date = new Date(), opts:
     return { workerId: w.view.spec.id, runs: w.view.runs.length, totalDurationMs: w.view.runs.reduce((a, r) => a + (r.resource.durationMs ?? 0), 0), costUsd: (costs.length && costs.every((c) => typeof c === 'number') ? (costs as number[]).reduce((a, b) => a + b, 0) : 'UNKNOWN') as number | 'UNKNOWN' }
   })
   const sched = deriveScheduler(log)
-  const runningScheduled = workerRows.reduce((n, w) => n + w.view.runs.filter((r) => r.status === 'RUNNING' && r.origin === 'scheduled').length, 0)
+  const runningScheduled = workerRows.reduce((n, w) => n + w.view.runs.filter((r) => r.status === 'RUNNING').length, 0)
   const envOff = process.env.WAR_ROOM_AGENT_SCHEDULER === 'off'
+  const scheduler0Enabled = !envOff && sched.global?.enabled === true
   const scheduler: OpsSnapshot['scheduler'] = {
-    globalEnabled: !envOff && sched.global?.enabled === true,
+    globalEnabled: scheduler0Enabled,
     globalReason: envOff ? 'disabled by environment (WAR_ROOM_AGENT_SCHEDULER=off)' : sched.global ? `${sched.global.enabled ? 'enabled' : 'paused'} by ${sched.global.by}: ${sched.global.reason}` : 'never enabled (default: off)',
     envOff,
     health: (() => { const h = readSchedulerHealth(path.dirname(log.file), now); return { state: h.state, detail: h.detail } })(),
@@ -75,7 +76,7 @@ export function buildOpsSnapshot(log: AgentOpsLog, now: Date = new Date(), opts:
       const ev = evaluateDue(w.view, sc, sched.lastClaim.get(w.view.spec.id)?.at, agents.get(w.view.spec.agentId)?.state, runningScheduled, now)
       const ld = sched.lastDecision.get(w.view.spec.id)
       const sk = sched.lastSkip.get(w.view.spec.id)
-      return { workerId: w.view.spec.id, schedulable: schedulabilityProblem(w.view) === null, schedulableProblem: schedulabilityProblem(w.view), enabled: sc?.enabled === true, cadenceMinutes: sc ? sc.cadenceMinutes : null, nextEligibleAt: sc?.enabled && ev.nextEligibleAt ? ev.nextEligibleAt.toISOString() : 'UNKNOWN', lastAutomaticRunAt: sched.lastClaim.get(w.view.spec.id)?.at ?? 'NONE', lastDecision: ld ? `${ld.decision} ${ld.reason} @ ${ld.at.slice(0, 19)}Z` : 'NONE', lastSkipReason: sk ? `${sk.reason} @ ${sk.at.slice(0, 19)}Z` : 'NONE', lastClaimId: sched.lastClaim.get(w.view.spec.id)?.claimId ?? 'NONE', dueNow: ev.action === 'RUN' }
+      return { workerId: w.view.spec.id, schedulable: schedulabilityProblem(w.view) === null, schedulableProblem: schedulabilityProblem(w.view), enabled: sc?.enabled === true, cadenceMinutes: sc ? sc.cadenceMinutes : null, nextEligibleAt: sc?.enabled ? (ev.action === 'RUN' ? ev.dueAt.toISOString() : ev.nextEligibleAt ? ev.nextEligibleAt.toISOString() : 'UNKNOWN') : 'UNKNOWN', dueSince: sc?.enabled && ev.action === 'RUN' ? ev.dueAt.toISOString() : null, willRunNext: scheduler0Enabled && ev.action === 'RUN', lastAutomaticRunAt: ([...w.view.runs].filter((r) => r.origin === 'scheduled').sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt))[0]?.startedAt) ?? 'NONE', lastClaimAt: sched.lastClaim.get(w.view.spec.id)?.at ?? 'NONE', lastDecision: ld ? `${ld.decision} ${ld.reason} @ ${ld.at.slice(0, 19)}Z` : 'NONE', lastSkipReason: sk ? `${sk.reason} @ ${sk.at.slice(0, 19)}Z` : 'NONE', lastClaimId: sched.lastClaim.get(w.view.spec.id)?.claimId ?? 'NONE', dueNow: ev.action === 'RUN' }
     }),
   }
   return {

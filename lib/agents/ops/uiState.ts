@@ -67,12 +67,12 @@ export function buildOpsViewModel(env: OpsEnvelope) {
       scheduler: {
         title: 'Scheduler', empty: 'No scheduler data.',
         rows: [
-          { id: 'scheduler:global', title: `Global scheduling: ${s.scheduler.globalEnabled ? 'ENABLED' : 'OFF'}`, detail: `${s.scheduler.globalReason} · health ${s.scheduler.health.state}: ${s.scheduler.health.detail} · eligible categories ${s.scheduler.eligibleCategories.join(', ')} · max ${s.scheduler.maxConcurrent} concurrent scheduled runs · no continuous mode`,
+          { id: 'scheduler:global', title: `Global scheduling: ${s.scheduler.globalEnabled ? 'ENABLED' : 'OFF'}`, detail: `${s.scheduler.globalReason} · health ${s.scheduler.health.state}: ${s.scheduler.health.detail} · eligible categories ${s.scheduler.eligibleCategories.join(', ')} · max ${s.scheduler.maxConcurrent} concurrent scheduled runs · pausing stops future runs only (an in-flight run finishes) · no continuous mode`,
             controls: s.scheduler.envOff ? [] : [s.scheduler.globalEnabled ? { label: 'Pause scheduling', action: 'setSchedulerGlobal', payload: { enabled: false, reason: 'Commander paused scheduling' } } : { label: 'Resume scheduling', action: 'setSchedulerGlobal', payload: { enabled: true, reason: 'Commander enabled scheduling' } }] as Control[] },
           ...s.scheduler.workers.map((w) => ({
             id: `scheduler:${w.workerId}`,
             title: `${w.workerId}: ${w.enabled ? `scheduled every ${w.cadenceMinutes} min` : w.schedulable ? 'not scheduled' : 'not schedulable'}`,
-            detail: w.schedulable ? `next eligible ${w.nextEligibleAt} · last automatic run ${w.lastAutomaticRunAt} · last decision ${w.lastDecision} · last skip ${w.lastSkipReason} · last claim ${w.lastClaimId}` : `not schedulable: ${w.schedulableProblem}`,
+            detail: w.schedulable ? `${w.dueSince ? `DUE since ${w.dueSince}${w.willRunNext ? ' (will run at the next scheduler tick)' : ' (will NOT run: scheduling is off)'}` : `next eligible ${w.nextEligibleAt}`} · last automatic run ${w.lastAutomaticRunAt} · last claim ${w.lastClaimAt} · last decision ${w.lastDecision} · last skip ${w.lastSkipReason} · last claim ${w.lastClaimId}` : `not schedulable: ${w.schedulableProblem}`,
             controls: (w.schedulable ? [...(w.enabled ? [{ label: 'Disable scheduling', action: 'setSchedule', payload: { workerId: w.workerId, enabled: false, cadenceMinutes: w.cadenceMinutes ?? 5, reason: 'Commander disabled scheduling' } }] : []), ...[1, 5, 15, 60].map((m) => ({ label: `${w.enabled ? 'Set' : 'Schedule'} every ${m} min`, action: 'setSchedule', payload: { workerId: w.workerId, enabled: true, cadenceMinutes: m, reason: `Commander scheduled every ${m} min` } }))] : []) as Control[],
           })),
         ] as GenericRow[],

@@ -1,6 +1,6 @@
 /** Phase 10 scheduler validation. Run: pnpm run validate:agent-ops-scheduler */
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { harness, freshOps, fullNeed, draft, NOW, tmp } from './testkit'
@@ -190,7 +190,7 @@ const ranCount = (log: AgentOpsLog, id: string) => deriveWorkers(log).workers.ge
   const w = world({ cadence: 5 }); await schedulerTick(w.log, { now: at(5), runners: runners(ok) })
   const snap = buildOpsSnapshot(w.log, at(6))
   const sw = snap.scheduler.workers[0]
-  check('S36_read_model_exposes_scheduler_state', snap.scheduler.globalEnabled && sw.enabled && sw.cadenceMinutes === 5 && sw.nextEligibleAt === at(10).toISOString() && sw.lastAutomaticRunAt === at(5).toISOString() && sw.lastDecision.startsWith('RUN') && sw.lastClaimId.startsWith('claim-w0-') && snap.scheduler.eligibleCategories.length === 2)
+  check('S36_read_model_exposes_scheduler_state', snap.scheduler.globalEnabled && sw.enabled && sw.cadenceMinutes === 5 && sw.nextEligibleAt === at(10).toISOString() && sw.lastAutomaticRunAt === at(5).toISOString() && sw.lastClaimAt === at(5).toISOString() && sw.dueSince === null && sw.willRunNext === false && sw.lastDecision.startsWith('RUN') && sw.lastClaimId.startsWith('claim-w0-') && snap.scheduler.eligibleCategories.length === 2)
   const noHealth = snap.scheduler.health
   check('S37_health_unknown_when_no_scheduler_reported_never_assumed', noHealth.state === 'UNKNOWN')
   const vm = buildOpsViewModel({ generatedAt: snap.generatedAt, totals: snap.totals, governance: snap.governance, data: snap })
@@ -204,5 +204,42 @@ const ranCount = (log: AgentOpsLog, id: string) => deriveWorkers(log).workers.ge
   check('S40_control_api_schedules_validates_and_requires_commander_session_actor', api.status === 200 && deriveScheduler(w.log).schedules.get('w0')!.by === 'commander:real' && bad.status === 400 && gl.status === 200 && noauth.status === 403 && handleOpsRead(new URL('http://x/?section=summary'), new AgentOpsLog(w.dir, { readOnly: true }), at(10)).status === 200)
   const instr = readFileSync('instrumentation.ts', 'utf8')
   check('S41_boot_hook_is_node_only_skips_build_and_cannot_throw_into_startup', instr.includes("NEXT_RUNTIME !== 'nodejs'") && instr.includes('phase-production-build') && /try \{[\s\S]*\} catch/.test(instr))
+}
+// ---- review-driven regressions (independent scheduler review)
+{
+  // MED-1: a pause that lands mid-tick stops further claims
+  const w = world({ workers: 2, cadence: 5 })
+  const pauser: WorkerRunner = async () => { setSchedulerGlobal(w.log, false, C, 'pause mid-tick', at(5)); return { outputs: [{ kind: 'k', ref: 'r', summary: 'w0 finished' }] } }
+  const t = await schedulerTick(w.log, { now: at(5), runners: runners(pauser) })
+  check('S42_pause_mid_tick_stops_further_claims_but_not_the_inflight_run', t.ran.length === 1 && t.ran[0].workerId === 'w0' && t.skipped.some((x) => x.workerId === 'w1' && x.reason === 'GLOBAL_DISABLED') && ranCount(w.log, 'w1') === 0)
+  // MED-2/3: health honesty
+  const dir = tmp()
+  const mk = (over: Record<string, unknown>) => { writeFileSync(path.join(dir, 'scheduler-health.json'), JSON.stringify({ instanceId: 'scheduler-x', pid: 1, startedAt: NOW.toISOString(), intervalMs: 30_000, lastTickAt: NOW.toISOString(), lastHeartbeatAt: NOW.toISOString(), busySince: null, lastTickRan: 0, lastError: null, ...over })); return readSchedulerHealth(dir, new Date(NOW.getTime() + 10_000)) }
+  check('S43_health_degraded_when_last_tick_failed_and_busy_run_is_not_stale', mk({ lastError: 'boom' }).state === 'DEGRADED' && mk({ lastTickAt: new Date(NOW.getTime() - 600_000).toISOString(), busySince: NOW.toISOString() }).state === 'RUNNING' && mk({ lastTickAt: null, lastHeartbeatAt: null }).state === 'UNKNOWN' && mk({ intervalMs: 'x' as never }).state === 'UNKNOWN' && mk({ lastHeartbeatAt: new Date(NOW.getTime() - 3_600_000).toISOString() }).state === 'STALE')
+  // MED-4: real per-run clock when no `now` is injected
+  const clk = world({ workers: 2, cadence: 1 })
+  const sleepy: WorkerRunner = async () => { await new Promise((r) => setTimeout(r, 400)); return {} }
+  const wallStart = Date.now()
+  setSchedule(clk.log, 'w0', { enabled: true, cadenceMinutes: 1 }, C, 're-anchor in the past', new Date(wallStart - 120_000)); setSchedule(clk.log, 'w1', { enabled: true, cadenceMinutes: 1 }, C, 're-anchor in the past', new Date(wallStart - 120_000))
+  await schedulerTick(clk.log, { runners: runners(sleepy) })
+  const rr = ['w0', 'w1'].map((id) => deriveWorkers(clk.log).workers.get(id)!.runs[0])
+  check('S44_run_timestamps_use_the_real_clock_not_the_tick_start', rr.every(Boolean) && Date.parse(rr[1].startedAt) - Date.parse(rr[0].startedAt) >= 350 && Date.parse(rr[0].endedAt!) - Date.parse(rr[0].startedAt) >= 350)
+  // MED-5: truthful due / next-eligible fields
+  const due = world({ cadence: 5 })
+  const sDue = buildOpsSnapshot(due.log, at(65)).scheduler.workers[0]
+  setSchedulerGlobal(due.log, false, C, 'pause', at(66))
+  const sPaused = buildOpsSnapshot(due.log, at(67)).scheduler.workers[0]
+  check('S45_due_worker_reports_dueSince_not_a_moving_future_time_and_paused_never_claims_it_will_run', sDue.dueSince === at(5).toISOString() && sDue.nextEligibleAt === at(5).toISOString() && sDue.willRunNext === true && sPaused.willRunNext === false && sPaused.dueSince !== null)
+  const pvm = buildOpsViewModel({ generatedAt: at(67).toISOString(), totals: buildOpsSnapshot(due.log, at(67)).totals, governance: buildOpsSnapshot(due.log, at(67)).governance, data: buildOpsSnapshot(due.log, at(67)) })
+  check('S46_ui_states_paused_due_worker_will_not_run_and_pause_does_not_stop_inflight', pvm.sections.scheduler.rows[1].detail.includes('will NOT run: scheduling is off') && pvm.sections.scheduler.rows[0].detail.includes('in-flight run finishes'))
+  // LOW: caller-supplied oversized/empty instance ids cannot silently kill a worker
+  const inst = world({ cadence: 5 })
+  const ti = await schedulerTick(inst.log, { now: at(5), instanceId: 'x'.repeat(200) + '!!', runners: runners(ok) })
+  check('S47_oversized_instance_id_is_sanitized_claim_stays_valid', ti.ran.length === 1 && deriveScheduler(inst.log).lastClaim.has('w0') && (await schedulerTick(inst.log, { now: at(10), instanceId: '', runners: runners(ok) })).ran.length === 1)
+  // LOW: manual RUNNING runs count toward the concurrency cap
+  const cap = world({ workers: 3 })
+  for (const id of ['w0', 'w1']) cap.log.append({ t: 'run', rid: `run:man-${id}:start`, run: { runId: `man-${id}`, workerId: id, agentId: cap.spec.id, workerVersion: '1', mission: 'm', permissionScope: ['read_docs'], memoryScope: ['docs'], startedAt: at(4).toISOString(), status: 'RUNNING', toolsUsed: [], outputs: [], escalations: [], errors: [], executor: 'UNKNOWN', resource: { costUsd: 'UNKNOWN', tokens: 'UNKNOWN' }, requestedEffects: [], origin: 'manual' } })
+  const tcap = await schedulerTick(cap.log, { now: at(5), runners: runners(ok) })
+  check('S48_manual_runs_count_toward_the_global_concurrency_cap', tcap.skipped.some((x) => x.workerId === 'w2' && x.reason === 'CONCURRENCY_LIMIT'))
 }
 finish()

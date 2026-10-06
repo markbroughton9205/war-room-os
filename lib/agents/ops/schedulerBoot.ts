@@ -24,12 +24,14 @@ export function startAgentScheduler(opts: { dir?: string; intervalMs?: number; s
   let log: AgentOpsLog
   try { log = new AgentOpsLog(opts.dir) } catch { return null }
   const dir = path.dirname(log.file)
-  const health: SchedulerHealth = { instanceId, pid: process.pid, startedAt: new Date().toISOString(), intervalMs, lastTickAt: null, lastTickRan: 0, lastError: null }
+  const health: SchedulerHealth = { instanceId, pid: process.pid, startedAt: new Date().toISOString(), intervalMs, lastTickAt: null, lastHeartbeatAt: null, busySince: null, lastTickRan: 0, lastError: null }
   let busy = false
-  const report = () => { try { writeSchedulerHealth(dir, health) } catch { /* health is best effort */ } }
+  const report = () => { health.lastHeartbeatAt = new Date().toISOString(); try { writeSchedulerHealth(dir, health) } catch { /* health is best effort */ } }
   const tick = async () => {
     if (busy) return
     busy = true
+    health.busySince = new Date().toISOString()
+    report()
     try {
       recoverInterruptedRuns(log, new Date())
       const r = await schedulerTick(log, { instanceId })
@@ -39,13 +41,16 @@ export function startAgentScheduler(opts: { dir?: string; intervalMs?: number; s
     } catch (err) {
       health.lastTickAt = new Date().toISOString()
       health.lastError = (err instanceof Error ? err.message : 'tick failed').slice(0, 200)
-    } finally { busy = false; report() }
+    } finally { busy = false; health.busySince = null; report() }
   }
   report()
   let interval: ReturnType<typeof setInterval> | undefined
   const first = setTimeout(() => { void tick(); interval = setInterval(() => void tick(), intervalMs); interval.unref?.() }, startupDelayMs)
   first.unref?.()
-  const handle: Handle = { instanceId, stop: () => { clearTimeout(first); if (interval) clearInterval(interval); delete g[KEY] } }
+  // heartbeat is independent of ticking so a long scheduled run does not make a live scheduler look stopped
+  const beat = setInterval(report, clamp(Math.floor(intervalMs / 2), 1_000, 15_000))
+  beat.unref?.()
+  const handle: Handle = { instanceId, stop: () => { clearTimeout(first); if (interval) clearInterval(interval); clearInterval(beat); delete g[KEY] } }
   g[KEY] = handle
   return handle
 }
