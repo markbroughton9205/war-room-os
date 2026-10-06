@@ -30,6 +30,7 @@ check('M05_failures_show_signature_count_mitigation', sec('recurring-failures').
 check('M06_recommendations_confidence_alternatives_caveats', sec('routing-recommendations').rows.every((r) => r.detail.includes('alternatives') || r.detail === 'no candidates') && sec('routing-recommendations').rows.some((r) => r.explanation.includes('applied=false')))
 check('M07_memory_candidates_never_auto_promoted', sec('memory-candidates').rows.length > 0 && sec('memory-candidates').rows.every((r) => !/PROMOTED/.test(r.detail) && (r.detail.includes('never auto-promoted') || r.detail.includes('requires Commander approval'))))
 check('M08_doctrine_requires_commander_approval', sec('doctrine-proposals').rows.length === 2 && sec('doctrine-proposals').rows.every((r) => r.detail.includes('requires Commander approval') && r.flags.includes('protected: governance')))
+check('M14_workflow_gap_stated_explicitly', buildLearningViewModel({ ...env, data: buildSnapshot(freshLog(), NOW) }).sections.find((x) => x.key === 'workflow-performance')!.empty.includes('No attributable workflow data'))
 check('M09_empty_state_honest', buildLearningViewModel({ ...env, data: buildSnapshot(freshLog(), NOW) }).sections.every((s) => s.rows.length === 0 && s.empty.length > 10))
 const d = resolveDrill(log, sec('provider-performance').rows[0].drill, NOW)!
 const dd = describeDrill(d)

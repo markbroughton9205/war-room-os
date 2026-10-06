@@ -35,6 +35,8 @@ export type Snapshot = {
   governance: { readOnly: true; note: string }
   totals: { events: number; active: number; superseded: number; backfilled: number; live: number; proposals: number; decisions: number }
   scores: ScoreRow[]
+  /** Data-source limitation, stated explicitly: Foundry mission records carry no workflow attribution. */
+  workflowAttribution: { available: boolean; note: string }
   workflows: { taskClass: TaskClass; ranking: { rank: number; card: Scorecard; explanation: string; drill: string }[] }[]
   recentEvents: EvaluationEvent[]
   failures: (FailureFinding & { drill: string })[]
@@ -51,6 +53,11 @@ function deriveCandidates(active: EvaluationEvent[], now: Date) {
   const mem: CandidateRow[] = buildMemoryCandidates(failures, cards, now).map((draft) => ({ key: candKey(draft), draft, state: 'PROPOSED_NOT_RECORDED' }))
   const doc: CandidateRow[] = buildDoctrineProposals(failures).map((draft) => ({ key: candKey(draft), draft, state: 'PROPOSED_NOT_RECORDED' }))
   return { failures, cards, mem, doc }
+}
+
+function workflowAttribution(active: EvaluationEvent[]) {
+  const available = active.some((e) => e.subject.kind === 'workflow')
+  return { available, note: available ? 'Workflow rankings come from workflow-attributed evidence only.' : 'No attributable workflow data yet: current mission records do not identify a workflow. Nothing is inferred.' }
 }
 
 export function buildSnapshot(log: LearningLog, now: Date, opts: { eventLimit?: number } = {}): Snapshot {
@@ -79,6 +86,7 @@ export function buildSnapshot(log: LearningLog, now: Date, opts: { eventLimit?: 
       proposals: view.proposals.length, decisions: view.decisions.length,
     },
     scores: cards.map((card) => ({ card, trend: trendOf(active, card, now), explanation: explainScore(card), drill: `score:${card.subject.kind}:${card.subject.id}:${card.taskClass}` })),
+    workflowAttribution: workflowAttribution(active),
     workflows: TASK_CLASSES.map((taskClass) => ({
       taskClass,
       ranking: rankWorkflows(active, taskClass, now).map((r) => ({ ...r, explanation: explainScore(r.card), drill: `score:workflow:${r.card.subject.id}:${taskClass}` })),

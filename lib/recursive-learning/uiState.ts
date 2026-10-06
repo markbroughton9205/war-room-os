@@ -24,7 +24,7 @@ export function buildLearningViewModel(env: ApiEnvelope) {
       })),
     },
     {
-      key: 'workflow-performance', title: 'Workflow Performance', empty: 'No workflow-attributed evidence yet (mission records do not attribute workflows; nothing is guessed).',
+      key: 'workflow-performance', title: 'Workflow Performance', empty: s.workflowAttribution.note,
       rows: s.workflows.flatMap((w) => w.ranking.map((r) => ({
         id: r.drill, title: `#${r.rank} ${r.card.subject.id} · ${w.taskClass}`,
         detail: `reliability ${fmt(r.card.score)} · latency ${fmt(r.card.latencyMs, 0)} · cost ${fmt(r.card.costUsd, 4)} · rollbacks ${r.card.rollbackCount}`,
