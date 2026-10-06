@@ -34,6 +34,49 @@ export type WrimEnvironmentPaths = {
     run000006ConfigPath: string
     run000006UnsignedConfigPath: string
     run000006CheckpointDir: string
+    run000007PreflightReportPath: string
+    run000007ConfigPath: string
+    run000007UnsignedConfigPath: string
+    run000007FilterManifestPath: string
+    run000007CheckpointDir: string
+    linuxVenvRoot: string
+    linuxVenvPython: string
+  /**
+   * Foundational remediation pass (Stage 3A corrective, foundational P1/P2, retention forensics, sovereign lab).
+   * These locations were referenced by status.ts, the run-wrim-*.mjs runners and their validations but never defined here.
+   * Verified against their consumers: the runners hand every report/output path to the Python scripts as an argument (so the name is
+   * chosen here and nothing else hardcodes it), sovereign-lab-report.json and foundational-root-cause.json match names the Python
+   * scripts and docs already use, and the two checkpoint directories are the runs the code names (WRIM1-RUN-000004 corrective,
+   * WRIM1-RUN-000005 P2). Layout follows the existing fields: reports and output directories under `root`, checkpoints under
+   * wrim-checkpoints/test-only.
+   */
+  stage3aCorrectiveCheckpointDir: string
+  stage3aCorrectiveDesignReportPath: string
+  stage3aCorrectiveReportPath: string
+  foundationalRootCauseReportPath: string
+  foundationalRemediationDesignReportPath: string
+  foundationalP1Dir: string
+  foundationalP1ReportPath: string
+  foundationalP1RefineDir: string
+  foundationalP1RefineReportPath: string
+  foundationalP1SovereignDir: string
+  foundationalP1SovereignReportPath: string
+  foundationalP2Dir: string
+  foundationalP2ReportPath: string
+  foundationalP2RecipeDir: string
+  foundationalP2RecipeReportPath: string
+  foundationalP2RootCauseDir: string
+  foundationalP2RootCauseReportPath: string
+  /** Checkpoint directory of the frozen P2 recipe run (WRIM1-RUN-000005). Never the recipe directory itself. */
+  foundationalP2TrainDir: string
+  foundationalP2TrainReportPath: string
+  p2NextARecipeDir: string
+  p2NextARecipeReportPath: string
+  retentionBreakForensicDir: string
+  retentionBreakForensicReportPath: string
+  retentionRepairExperimentsDir: string
+  retentionRepairExperimentsReportPath: string
+  sovereignLabReportPath: string
   manifestPath: string
   venvPython: string
   venvRoot: string
@@ -73,9 +116,43 @@ export function resolveWrimEnvironmentPaths(dataDirOverride?: string | null): Wr
     run000006ConfigPath: path.join(root, 'WRIM1-RUN-000006-TRAINING-CONFIG-000001.json'),
     run000006UnsignedConfigPath: path.join(root, 'WRIM1-RUN-000006-TRAINING-CONFIG-000001.unsigned.json'),
     run000006CheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000006'),
+    run000007PreflightReportPath: path.join(root, 'wrim1-run-000007-pretraining-gate.json'),
+    run000007ConfigPath: path.join(root, 'WRIM1-RUN-000007-TRAINING-CONFIG-000001.json'),
+    run000007UnsignedConfigPath: path.join(root, 'WRIM1-RUN-000007-TRAINING-CONFIG-000001.unsigned.json'),
+    run000007FilterManifestPath: path.join(root, 'WRIM1-RUN-000007-FILTER-MANIFEST-000001.json'),
+    run000007CheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000007'),
+    linuxVenvRoot: path.join(app.root, 'venvs', 'wrim-pytorch-linux'),
+    linuxVenvPython: path.join(app.root, 'venvs', 'wrim-pytorch-linux', 'bin', 'python'),
+    stage3aCorrectiveCheckpointDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000004'),
+    stage3aCorrectiveDesignReportPath: path.join(root, 'stage3a-corrective-design.json'),
+    stage3aCorrectiveReportPath: path.join(root, 'stage3a-corrective-report.json'),
+    foundationalRootCauseReportPath: path.join(root, 'foundational-root-cause.json'),
+    foundationalRemediationDesignReportPath: path.join(root, 'foundational-remediation-design.json'),
+    foundationalP1Dir: path.join(root, 'foundational-p1'),
+    foundationalP1ReportPath: path.join(root, 'foundational-p1-report.json'),
+    foundationalP1RefineDir: path.join(root, 'foundational-p1-refine'),
+    foundationalP1RefineReportPath: path.join(root, 'foundational-p1-refine-report.json'),
+    foundationalP1SovereignDir: path.join(root, 'foundational-p1-sovereign'),
+    foundationalP1SovereignReportPath: path.join(root, 'foundational-p1-sovereign-report.json'),
+    foundationalP2Dir: path.join(root, 'foundational-p2'),
+    foundationalP2ReportPath: path.join(root, 'foundational-p2-report.json'),
+    foundationalP2RecipeDir: path.join(root, 'foundational-p2-recipe'),
+    foundationalP2RecipeReportPath: path.join(root, 'foundational-p2-recipe-report.json'),
+    foundationalP2RootCauseDir: path.join(root, 'foundational-p2-root-cause'),
+    foundationalP2RootCauseReportPath: path.join(root, 'foundational-p2-root-cause-report.json'),
+    foundationalP2TrainDir: path.join(app.data, 'wrim-checkpoints', 'test-only', 'WRIM1-RUN-000005'),
+    foundationalP2TrainReportPath: path.join(root, 'foundational-p2-train-report.json'),
+    p2NextARecipeDir: path.join(root, 'p2-next-a-recipe'),
+    p2NextARecipeReportPath: path.join(root, 'p2-next-a-recipe-report.json'),
+    retentionBreakForensicDir: path.join(root, 'retention-break-forensic'),
+    retentionBreakForensicReportPath: path.join(root, 'retention-break-forensic-report.json'),
+    retentionRepairExperimentsDir: path.join(root, 'retention-repair-experiments'),
+    retentionRepairExperimentsReportPath: path.join(root, 'retention-repair-experiments-report.json'),
+    sovereignLabReportPath: path.join(root, 'sovereign-lab-report.json'),
     manifestPath: path.join(root, 'environment-manifest.json'),
     venvRoot,
-    venvPython: path.join(venvRoot, 'Scripts', 'python.exe'),
+    // The interpreter of the environment this machine builds: the Windows venv layout on Windows, the Linux venv (linuxVenvPython) elsewhere.
+    venvPython: process.platform === 'win32' ? path.join(venvRoot, 'Scripts', 'python.exe') : path.join(app.root, 'venvs', 'wrim-pytorch-linux', 'bin', 'python'),
   }
 }
 

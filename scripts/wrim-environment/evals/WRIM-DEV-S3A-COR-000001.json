@@ -1,0 +1,1351 @@
+{
+  "suite_id": "WRIM-DEV-S3A-COR-000001",
+  "suite_version": "1.0.0",
+  "created_at": "2026-09-13T21:40:00+00:00",
+  "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+  "development_only": true,
+  "evaluation_only": false,
+  "training_use": "FORBIDDEN",
+  "checkpoint_selection_allowed": true,
+  "final_eval_suite": false,
+  "replaces_cap_eval_0": false,
+  "n_items": 40,
+  "items": [
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-prose-01",
+      "category": "DEV_LONG_PROSE",
+      "prompt_text": "Pellwick quay-lamps were hooded for the herring run. Joss kept both palms on the wet rail and watched a blue crate bump the piling twice. He told himself he would wait until the crate bumped a third time before",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Pellwick"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entropy",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Quay continuation.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-prose-02",
+      "category": "DEV_LONG_PROSE",
+      "prompt_text": "The Sarnholt loft still smelled of cold pitch. Noll hid an unfinished tally under a split shingle and muttered that he would finish the line that began, we still owe",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Sarnholt"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Loft beat.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-prose-03",
+      "category": "DEV_LONG_PROSE",
+      "prompt_text": "\"The hatch is yours until first light,\" said Pell, not looking up. \"I did not ask for the hatch,\" Quill answered, and then added,",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Dialogue turn.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-prose-04",
+      "category": "DEV_LONG_PROSE",
+      "prompt_text": "By late watch the Quellmere yard had gone pewter. The last barrow left a wet groove that filled from below. When the chain-pin dropped, it only meant",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Quellmere"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Yard dusk.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-prose-05",
+      "category": "DEV_LONG_PROSE",
+      "prompt_text": "On the Ibbotreach sill: a bent awl, a coil of red marline, and a river-stone with a notch. The stone, unlike the marline, did not",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Ibbotreach"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Still life.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-sem-01",
+      "category": "DEV_SEMANTIC",
+      "prompt_text": "Keep the same quay. Joss stayed at Pellwick after the lamps were hooded. The herring boats had gone. He counted slow bumps of the blue crate and decided that if a lantern showed on the south bollard he would",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Pellwick"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Topic persistence.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-sem-02",
+      "category": "DEV_SEMANTIC",
+      "prompt_text": "Stay with the Sarnholt loft. Noll sat under the split shingle with the unfinished tally. Pitch ticked as it cooled. Before he slept he told himself he would",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Sarnholt"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Loft persistence.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-sem-03",
+      "category": "DEV_SEMANTIC",
+      "prompt_text": "Continue the Quellmere night notice in plain sentences. Wet barrows stand on edge. Eight barrows fill one sled. Clerks must not open a sealed hatch at Lowcinder. The next paragraph explains why sealed hatches stay closed during",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Quellmere"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Notice persistence.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-sem-04",
+      "category": "DEV_SEMANTIC",
+      "prompt_text": "Keep Gantspool in view. Heat pooled under the tarps because the flue-cap was jammed. The posted slip went on to describe how a clerk should",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Gantspool"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Yard persistence.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-sem-05",
+      "category": "DEV_SEMANTIC",
+      "prompt_text": "Do not change the river. At Ibbotreach the notched stone stayed on the sill while the marline slipped. The next sentences must remain about that sill, because",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "track_entity": "Ibbotreach"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "entity_track"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Sill persistence.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-rep-01",
+      "category": "DEV_REPETITION",
+      "prompt_text": "Describe the Lowcinder close in several different sentences. Mention the Gantspool flue, the quay chain, and the iron pin once each, then invent new duties. After the pin is hung, the clerk still has to",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128,
+        256
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint",
+        "entropy"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Avoid one-word loop.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-rep-02",
+      "category": "DEV_REPETITION",
+      "prompt_text": "Name distinct quay tools in ordinary sentences without repeating the same tool word over and over. The first tool is a bent awl. The second is red marline. After those, the clerk should mention",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Avoid noun loop.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-rep-03",
+      "category": "DEV_REPETITION",
+      "prompt_text": "Count upward in words from one to six inside a short notice, then continue in new sentences about Pellwick quay. one two three",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Avoid numeral stall.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-rep-04",
+      "category": "DEV_REPETITION",
+      "prompt_text": "Advance the scene with new nouns. Do not recycle the last phrase. At Lowcinder the flue-cap still needed",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "No copy loop.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-rep-05",
+      "category": "DEV_REPETITION",
+      "prompt_text": "Give four separate night tasks as full sentences. None of the sentences may be only the word pin. Task one:",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 128,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Four tasks.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-json-01",
+      "category": "DEV_JSON",
+      "prompt_text": "Return a single JSON record. Field names must be quay_tag and crate_mass. Open with a brace: {",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "quay_tag",
+          "crate_mass"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_required_keys"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Two-key object.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-json-02",
+      "category": "DEV_JSON",
+      "prompt_text": "Return a JSON array holding three short tool names as strings, then halt. Open with a bracket: [",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "json_type": "array"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_array_len_3"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Array of 3.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-json-03",
+      "category": "DEV_JSON",
+      "prompt_text": "Return JSON whose hatch_ok value is true or false and whose slip value is null. Open: {",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "hatch_ok",
+          "slip"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_bool_null"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Bool and null.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-json-04",
+      "category": "DEV_JSON",
+      "prompt_text": "Finish only this JSON record and then stop: {\"quay_tag\": \"P1\", \"crate_mass\":",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "quay_tag",
+          "crate_mass"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse_prefix_repair",
+        "json_required_keys"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Prefix repair.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-json-05",
+      "category": "DEV_JSON",
+      "prompt_text": "Return one nested JSON record shaped like {\"hatch\":{\"inner_latch\":true}} and then stop.\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "hatch"
+        ],
+        "nested_key": "inner_latch"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "json_parse",
+        "json_nested_outer"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Nested.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-kv-01",
+      "category": "DEV_LIST_KV",
+      "prompt_text": "Use colon lines only. Fill both labels with any short values:\nquay_tag:\ncrate_mass:\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "quay_tag",
+          "crate_mass"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "key_value_lines"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Two KV lines.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-kv-02",
+      "category": "DEV_LIST_KV",
+      "prompt_text": "Dash-prefixed quay tools, exactly three lines:\n- ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_lines": 3
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "list_lines"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Bullet list.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-kv-03",
+      "category": "DEV_LIST_KV",
+      "prompt_text": "Print one CSV record with three cells: quay_tag, crate_mass, hatch_ok.\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_fields": 3
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "csv_row"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "CSV row.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-kv-04",
+      "category": "DEV_LIST_KV",
+      "prompt_text": "Complete this label in colon form, then halt.\nlane_id:",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_keys": [
+          "lane_id"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "key_value_lines"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Single key.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-kv-05",
+      "category": "DEV_LIST_KV",
+      "prompt_text": "Under this CSV header write one data line only:\nquay_tag,crate_mass\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "min_fields": 2
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "csv_row"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Header plus row.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-code-01",
+      "category": "DEV_CODE",
+      "prompt_text": "def tally_pellwick(n):\n    # return n sleds if n is a whole number of eights, else 0\n    ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "return"
+        ],
+        "forbid_substrings": [
+          "TOOL=",
+          "<|tool"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "code_has_return",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Unique function.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-code-02",
+      "category": "DEV_CODE",
+      "prompt_text": "pairs = [(3, 4), (8, 1), (5, 0)]\nclosed = [\n    a * b for (a, b) in pairs if a < 7\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "]"
+        ],
+        "forbid_substrings": [
+          "```",
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "code_closes_bracket",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Close list.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-code-03",
+      "category": "DEV_CODE",
+      "prompt_text": "# remain in python; never open markdown fences\nquay_ready = True\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "```",
+          "TOOL=",
+          "<|tool"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "No fence.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-code-04",
+      "category": "DEV_CODE",
+      "prompt_text": "def crate_dry(mass):\n    if mass <= 0:\n        return False\n    ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "must_contain_any": [
+          "return"
+        ],
+        "forbid_substrings": [
+          "TOOL="
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "code_has_return",
+        "no_tool_markup"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Branch.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-code-05",
+      "category": "DEV_CODE",
+      "prompt_text": "print(\"pellwick-ok\")\n",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "forbid_substrings": [
+          "TOOL=",
+          "<|assistant",
+          "function_call"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "no_tool_markup",
+        "not_empty"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Print then source.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-inst-01",
+      "category": "DEV_INSTRUCTION",
+      "prompt_text": "Answer with a single English number-word and stop. How many eights are in forty? ",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "accepted_words": [
+          "five",
+          "Five",
+          "FIVE"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "exactly_one_word",
+        "accepted_word"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "One word five.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-inst-02",
+      "category": "DEV_INSTRUCTION",
+      "prompt_text": "Copy this quay stamp once, then halt: PELLWICK-QUAY-STAMP",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "span": "PELLWICK-QUAY-STAMP"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "contains_exact_span"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Exact stamp.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-inst-03",
+      "category": "DEV_INSTRUCTION",
+      "prompt_text": "Include the word marline and forbid the word Alice. The Ibbotreach sill still held",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "required_terms": [
+          "marline"
+        ],
+        "forbidden_terms": [
+          "Alice",
+          "alice"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "required_terms",
+        "forbidden_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Required/forbidden.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-inst-04",
+      "category": "DEV_INSTRUCTION",
+      "prompt_text": "Output the two steps in this order: first bank, then pin. Do not reverse them. After last watch the clerk must",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "ordered_terms": [
+          "bank",
+          "pin"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "ordered_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Order.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-inst-05",
+      "category": "DEV_INSTRUCTION",
+      "prompt_text": "Reply in at most four English words. Name the bollard material at Pellwick: timber",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "max_words": 4,
+        "required_terms": [
+          "timber"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "max_words",
+        "required_terms"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Length bound.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-fact-01",
+      "category": "DEV_FACTUAL",
+      "prompt_text": "In the Pellwick quay primer, a blue crate is labeled dry when it holds no standing water and sits on edge. The first handling rule for a dry crate is to",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Primer rule.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-fact-02",
+      "category": "DEV_FACTUAL",
+      "prompt_text": "Sarnholt sled math is fixed: eight dry crates fill one sled. If a clerk has forty crates, the number of complete sleds is",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "5",
+          "five"
+        ],
+        "arithmetic": "40/8=5"
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Local arithmetic.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-fact-03",
+      "category": "DEV_FACTUAL",
+      "prompt_text": "To close Lowcinder for the night: bank the Gantspool flue, latch the quay chain, then hang the iron pin on the inner peg. After the flue is banked, the next required action is to",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "latch",
+          "quay chain",
+          "chain"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Ordered close.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-fact-04",
+      "category": "DEV_FACTUAL",
+      "prompt_text": "Quellmere clerks count only whole sleds. Partial sleds are written as remainder crates, never as a fraction. Twenty-five crates at eight per sled should be recorded as",
+      "reference_type": "CONSTRAINT",
+      "reference_payload": {
+        "expected_token_substrings": [
+          "3",
+          "three",
+          "1",
+          "one"
+        ]
+      },
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "constraint_substring_any"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Remainder.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    },
+    {
+      "suite_id": "WRIM-DEV-S3A-COR-000001",
+      "suite_version": "1.0.0",
+      "item_id": "dev-fact-05",
+      "category": "DEV_FACTUAL",
+      "prompt_text": "A sealed Lowcinder tin is quiet if it holds no dye. Quiet tins must lie on their side. A tin standing upright on the quay chain is therefore",
+      "reference_type": "NONE",
+      "reference_payload": null,
+      "generation_mode": "greedy_argmax",
+      "max_new_tokens": 32,
+      "eval_lengths": [
+        32,
+        128
+      ],
+      "scoring_functions": [
+        "greedy_32",
+        "fingerprint"
+      ],
+      "hard_integrity_checks": [
+        "finite_logits"
+      ],
+      "notes": "Quiet tin.",
+      "authorship": "Authored synthetic DEVELOPMENT_ONLY stems in training domains (long-form prose, topic persistence, repetition resistance, JSON, lists/CSV, code termination, instruction, factual continuity). Not sliced from WR-CORPUS-0 or WR-CORPUS-1. Not CAP-EVAL-0. Not DIAGNOSTIC-0. Not WRIM-EVAL-S3-000001. Not WRIM-EVAL-S3A-RET-000001. Not WRIM-EVAL-S3A-STRUCT-000001. Not WRIM-EVAL-S3A-ADJ-000001. Forbidden for training. Allowed for checkpoint selection only.",
+      "created_at": "2026-09-13T21:40:00+00:00",
+      "training_use": "FORBIDDEN",
+      "evaluation_only": false,
+      "development_only": true,
+      "checkpoint_selection_allowed": true,
+      "final_eval_suite": false
+    }
+  ]
+}

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
+import os from 'node:os'
 import { pythonImportable } from '@/lib/wr-tokenizer/nebula'
 
 export type NebulaMlStack = {
@@ -16,9 +17,14 @@ function probePython(): { exe: string | null; version: string | null } {
   const candidates = [
     process.env.WAR_ROOM_PYTHON?.trim(),
     'C:\\Users\\markb\\AppData\\Local\\Programs\\Python\\Python313\\python.exe',
+    // Linux: the WRIM pytorch venv this project already sets up (has numpy/torch), then a bare `python3` on PATH.
+    process.platform === 'linux' ? `${os.homedir()}/.local/share/war-room-os/venvs/wrim-pytorch-linux/bin/python` : undefined,
+    process.platform === 'linux' ? 'python3' : undefined,
   ].filter((x): x is string => Boolean(x))
   for (const exe of candidates) {
-    if (!fs.existsSync(exe)) continue
+    // A bare command name (no path separator, e.g. "python3") is resolved from PATH by execFileSync itself;
+    // existsSync only makes sense for an actual file path, and would always reject a bare command.
+    if (exe.includes('/') || exe.includes('\\')) { if (!fs.existsSync(exe)) continue }
     try {
       const out = execFileSync(exe, ['-c', 'import sys; print(sys.version.split()[0])'], {
         encoding: 'utf8',
@@ -68,7 +74,7 @@ export function probeNebulaMlStack(): NebulaMlStack {
   }
   let llamaCpp = false
   try {
-    execFileSync('where.exe', ['llama-cli'], { encoding: 'utf8', timeout: 3000, windowsHide: true })
+    execFileSync(process.platform === 'linux' ? 'which' : 'where.exe', ['llama-cli'], { encoding: 'utf8', timeout: 3000, windowsHide: true })
     llamaCpp = true
   } catch {
     llamaCpp = false

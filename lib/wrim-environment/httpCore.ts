@@ -54,6 +54,10 @@ export function tryHandleWrimEnvironmentHttp(
         json(res, 200, wrimEnvironmentStatusPayload(dataDir))
         return
       }
+      if (url.pathname === '/api/local/wrim-environment/lab' && (req.method || 'GET') === 'GET') {
+        json(res, 200, wrimEnvironmentStatusPayload(dataDir).wrim_lab)
+        return
+      }
       if (
         url.pathname === '/api/local/wrim-environment/train' ||
         url.pathname === '/api/local/wrim-environment/stage1' ||

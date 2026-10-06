@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import os from 'node:os'
 
 export type NebulaHardware = {
@@ -31,6 +32,25 @@ function wmicOrCim(command: string): string {
     }).trim()
   } catch {
     return ''
+  }
+}
+
+/** Linux-native CPU name (no PowerShell/CIM here): the model name line of /proc/cpuinfo. */
+function linuxCpuName(): string | null {
+  try {
+    const line = readFileSync('/proc/cpuinfo', 'utf8').split(/\r?\n/).find(l => l.startsWith('model name'))
+    return line ? line.split(':')[1]?.trim() || null : null
+  } catch {
+    return null
+  }
+}
+
+/** Linux-native GPU name: nvidia-smi is the same cross-platform binary already used below for VRAM, just asked for the name too. */
+function linuxGpuName(): string | null {
+  try {
+    return execFileSync('nvidia-smi', ['--query-gpu=name', '--format=csv,noheader'], { encoding: 'utf8', timeout: 10000 }).trim().split('\n')[0] || null
+  } catch {
+    return null
   }
 }
 
@@ -101,12 +121,12 @@ export function probeNebulaHardware(): NebulaHardware {
   const ramBytes = os.totalmem()
   return {
     platform: `${os.platform()} ${os.arch()} ${os.release()}`,
-    cpuName: cpu.Name ?? null,
+    cpuName: cpu.Name ?? (process.platform === 'linux' ? linuxCpuName() : null),
     cpuCores: cpu.NumberOfCores ?? os.cpus().length,
     cpuLogical: cpu.NumberOfLogicalProcessors ?? os.cpus().length,
     ramBytes,
     ramGiB: Math.round((ramBytes / (1024 ** 3)) * 100) / 100,
-    gpuName: gpu.Name ?? null,
+    gpuName: gpu.Name ?? (process.platform === 'linux' ? linuxGpuName() : null),
     gpuVramMiB,
     gpuDriver: gpu.DriverVersion ?? null,
     nvidiaSmi: nvidiaSmi ? 'present' : null,

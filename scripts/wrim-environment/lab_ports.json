@@ -1,0 +1,12 @@
+{
+  "bind": "127.0.0.1",
+  "forbidden": [3000, 3001, 3847, 3848, 11434],
+  "services": {
+    "aim": { "port": 43880, "role": "PRIMARY_WRIM_EXPERIMENT_EXPLORER" },
+    "tensorboard": { "port": 43881, "role": "LOW_LEVEL_LIVE_TRAINING_CURVES" },
+    "mlflow": { "port": 43882, "role": "WRIM_RUN_MODEL_LIFECYCLE_REGISTRY" },
+    "prometheus": { "port": 43883, "role": "LONG_RUN_MACHINE_SERVICE_TELEMETRY" },
+    "wrim_exporter": { "port": 43884, "role": "GPU_CPU_RAM_DISK_PROCESS_HEALTH" }
+  },
+  "notes": "Loopback only. War Room-managed subprocesses. No Windows auto-start services. No Grafana. No LAN bind."
+}
