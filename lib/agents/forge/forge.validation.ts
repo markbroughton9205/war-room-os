@@ -44,6 +44,17 @@ try {
   let refused = false; try { s.registerModel({ ...FIRST_POOL[0], lineage: { note: 'key sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123456789ABCDEF' } }) } catch { refused = true }
   check('F14_credential_like_content_refused', refused)
 } finally { rmSync(dir, { recursive: true, force: true }) }
+{
+  const { buildScorecard } = await import('./scorecard')
+  const A = (o: Partial<BenchmarkRecord>) => bench({ fixture: 'chat-sessions (x)', engineSha: 'e1', ...o })
+  const B = (o: Partial<BenchmarkRecord>) => bench({ fixture: 'task-board (x)', engineSha: 'e1', ...o })
+  const rows = buildScorecard([A({ verifierScore: { pass: 6, total: 12 }, completion: 'PARTIAL', repairs: 2 }), A({ verifierScore: { pass: 12, total: 12 }, repairs: 0 }), A({ verifierScore: { pass: 0, total: 12 }, completion: 'FAILED', repairs: 3, manualIntervention: true }), B({ verifierScore: { pass: 12, total: 12 } }), B({ modelRef: 'qwen2.5-coder:14b', historicalBaseline: true, verifierScore: 'UNKNOWN', completion: 'FAILED' }), B({ executor: 'test-double' })])
+  const a = rows.find((r) => r.fixture === 'chat-sessions')!, b = rows.find((r) => r.fixture === 'task-board' && r.model.includes('devstral'))!, q = rows.find((r) => r.model === 'qwen2.5-coder:14b')!
+  check('F23_scorecard_has_one_row_per_model_class_fixture_and_never_merges_fixtures_or_ranks_globally', rows.length === 3 && a.attempts === 3 && b.attempts === 1 && !('rank' in a))
+  check('F24_scorecard_numbers_are_computed_from_runs_completion_first_pass_retry_and_interventions', Math.abs((a.avgVerifierScore as number) - 0.5) < 1e-9 && a.completionRate === 1 / 3 && a.firstPassRate === 1 / 3 && a.retryRate === 2 / 3 && a.interventions === 1 && a.confidence === 'LOW')
+  check('F25_unknowns_stay_unknown_regressions_unmeasured_and_unknown_scores', a.regressions === 'UNKNOWN' && q.avgVerifierScore === 'UNKNOWN' && q.baseline && b.confidence === 'NONE')
+  check('F26_scripted_double_runs_are_excluded_from_the_scorecard', rows.every((r) => r.attempts >= 1) && !rows.some((r) => r.fixture === 'task-board' && r.model.includes('devstral') && r.attempts === 2))
+}
 await (async () => {
 // ---- Phase 9 wiring: real engineering runs become attributable evaluation events
 {
