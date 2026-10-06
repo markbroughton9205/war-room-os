@@ -13,6 +13,7 @@ import { deriveLedger } from './debugLedger'
 import { runCommand } from './runtime/commandRunner'
 import type { EngineeringTool } from '../types'
 import { AgentRegistry } from '../registry'
+import { parseEditReply } from './prompts'
 
 const { check, finish } = harness('AGENT_ENG_WORKFLOW_VALIDATION')
 const TOOLS: EngineeringTool[] = ['read_workspace', 'write_workspace', 'run_workspace_tests', 'run_typecheck', 'model_local', 'read_runtime_output']
@@ -239,6 +240,21 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   })
   const r3 = await runFeatureWorkflow(deps(z, m3), REQ)
   check('N29_a_file_the_model_wrongly_skipped_is_offered_as_a_repair_candidate_because_the_error_output_names_it', r3.status === 'COMPLETED' && analysed >= 1 && r3.filesChanged.includes('src/chatService.mjs') && deriveLedger(z.log, z.asg.id).repairs[0].filesEdited[0].path === 'src/chatService.mjs', `${r3.status} ${r3.reason}`)
+}
+
+// ---- 8. edit protocol (append / search-replace) parsing
+{
+  const cur = 'export function a() {\n  return 1\n}\n\nexport function b() {\n  return 2\n}\n'
+  const ap = parseEditReply('```append\nexport function c() { return 3 }\n```', cur)
+  const sr = parseEditReply('<<<<<<< SEARCH\n  return 2\n=======\n  return 22\n>>>>>>> REPLACE', cur)
+  const nf = parseEditReply('<<<<<<< SEARCH\nnot in the file\n=======\nx\n>>>>>>> REPLACE', cur)
+  const amb = parseEditReply('<<<<<<< SEARCH\n  return\n=======\nx\n>>>>>>> REPLACE', cur)
+  const nothing = parseEditReply('<<<<<<< SEARCH\n  return 2\n=======\n  return 2\n>>>>>>> REPLACE', cur)
+  const rewrite = parseEditReply('```js\nexport const z = 1\n```', cur)
+  const fresh = parseEditReply('```js\nexport const z = 1\n```', null)
+  check('N30_append_and_search_replace_edits_are_applied_to_the_current_file_and_everything_else_is_kept', ap.kind === 'code' && ap.mode === 'edits' && ap.content.includes('export function a()') && ap.content.includes('export function c()') && sr.kind === 'code' && sr.content.includes('return 22') && sr.content.includes('return 1'))
+  check('N31_unmatched_ambiguous_or_no_op_edits_are_refused_with_a_reason_never_guessed', nf.kind === 'invalid' && nf.reason.includes('not found') && amb.kind === 'invalid' && amb.reason.includes('times') && nothing.kind === 'invalid')
+  check('N32_full_rewrites_are_still_parsed_as_rewrites_for_the_compat_gate_and_new_files_as_new', rewrite.kind === 'code' && rewrite.mode === 'rewrite' && fresh.kind === 'code' && fresh.mode === 'new' && parseEditReply('NO_CHANGE', cur).kind === 'no_change')
 }
 void deriveAssignments; void AgentRegistry
 finish()

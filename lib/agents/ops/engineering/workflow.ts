@@ -4,7 +4,7 @@ import { acknowledgeCancel, completeAssignment, deriveAssignments, executionGate
 import { type EngineeringCodePlan, planFromCode } from './codePlanner'
 import { latestCheckpoint, planResume, runEffectOnce, saveCheckpoint, sha256 } from './continuity'
 import { MAX_REPAIR_ATTEMPTS, addEvidence, deriveLedger, markUndetermined, proposeHypothesis, recordFailure, recordRepair, recordValidation, authorizeRepair, parseToolOutput } from './debugLedger'
-import { ANALYST_SYSTEM, ENGINEER_SYSTEM, analystPrompt, featurePrompt, parseCodeReply, repairPrompt, type FileJob } from './prompts'
+import { ANALYST_SYSTEM, ENGINEER_SYSTEM, analystPrompt, featurePrompt, parseEditReply, repairPrompt, type FileJob } from './prompts'
 import type { CommandRecord, ModelClient, ModelResult } from './runtime/ports'
 import { runCommand } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
@@ -128,6 +128,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     const related = changedNow.flatMap((f) => (idx.files[f]?.imports ?? []).map((i) => i.resolved).filter((x): x is string => !!x))
     return [...new Set([...named, ...changedNow, ...related])].filter((p) => ws.exists(p)).slice(0, 6)
   }
+  const keepExportsFor = (path: string): string[] => {
+    if (!ws.exists(path)) return []
+    const idx = buildWorkspaceIndex(ws.root)
+    const f = idx.files[path]
+    return (f?.exports ?? []).filter((name) => Object.values(idx.files).some((o) => o.path !== path && o.imports.some((i) => i.resolved === path && (i.names.includes(name) || i.names.includes('*')))))
+  }
   /** Static API-compatibility gate: a rewrite may not delete an export that another file still imports. */
   const apiCompat = (path: string, content: string): string | null => {
     if (!ws.exists(path)) return null
@@ -193,8 +199,10 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const rr = await call(ENGINEER_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: hypText, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [] }))
       noteTokens(rr)
       if (!rr.ok) { attemptsNotes.push(`repair call failed: ${rr.detail}`); continue }
-      const pr = parseCodeReply(rr.text)
+      const pr = parseEditReply(rr.text, ws.read(file))
       if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); continue }
+      const compat = apiCompat(file, pr.content)
+      if (compat) { attemptsNotes.push(`repair rejected: ${compat}`); continue }
       const beforeHash = ws.hash(file)
       await writeFile(stepId, file, pr.content)
       repairs += 1
@@ -248,24 +256,23 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const notes = state.steps.filter((s) => s.status === 'DONE').map((s) => s.title)
       const lessons = deps.lessons?.({ plan, request: req.request }) ?? []
       let feedback = ''
-      let reply = await call(ENGINEER_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: notes }))
-      noteTokens(reply)
+      const askFile = async (extra: string[]) => { const r = await call(ENGINEER_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keepExportsFor(path) })); noteTokens(r); return r }
+      let reply = await askFile([])
+      let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 2 && reply.ok; rej++) {
-        const pre = parseCodeReply(reply.text)
-        if (pre.kind !== 'code') break
-        const problem = apiCompat(path, pre.content)
+        const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? apiCompat(path, parsedReply.content) : null
         if (!problem) break
         feedback = problem
         emit('REJECT', `${path}: ${problem}`)
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
         const bs = budgetStop(); if (bs) { failAssignment(log, assignmentId, actor, bs.reason, undefined, clock()); return bs }
-        reply = await call(ENGINEER_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, `YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`] }))
-        noteTokens(reply)
+        reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`])
+        parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
       }
       void feedback
-      if (reply.ok) { const last = parseCodeReply(reply.text); const still = last.kind === 'code' ? apiCompat(path, last.content) : null; if (still) { step.status = 'FAILED'; step.note = `rejected: ${still}`; checkpoint(); failAssignment(log, assignmentId, actor, `the model repeatedly produced a ${path} that ${still}`, undefined, clock()); return result('FAILED', `${path}: incompatible rewrite after 2 rejections`) } }
+      if (reply.ok) { const still = parsedReply.kind === 'code' ? apiCompat(path, parsedReply.content) : null; if (still) { step.status = 'FAILED'; step.note = `rejected: ${still}`; checkpoint(); failAssignment(log, assignmentId, actor, `the model repeatedly produced a ${path} that ${still}`, undefined, clock()); return result('FAILED', `${path}: incompatible rewrite after 2 rejections`) } }
       if (!reply.ok) { if (reply.detail.includes('cancel')) { const b = boundary(); if (b.stop) { checkpoint(); return b.stop } } step.status = 'FAILED'; step.note = `model call failed: ${reply.detail}`; checkpoint(); failAssignment(log, assignmentId, actor, `model call failed: ${reply.detail}`, undefined, clock()); return result('FAILED', `model call failed: ${reply.detail}`) }
-      const pr = parseCodeReply(reply.text)
+      const pr = parsedReply
       if (pr.kind === 'no_change') { step.status = 'SKIPPED'; step.note = 'model: NO_CHANGE needed for this file'; checkpoint(); emit('NO_CHANGE', path); continue }
       if (pr.kind === 'invalid') { step.status = 'FAILED'; step.note = `unusable reply: ${pr.reason}`; checkpoint(); failAssignment(log, assignmentId, actor, `model reply unusable for ${path}: ${pr.reason}`, undefined, clock()); return result('FAILED', `unusable reply for ${path}`) }
       await writeFile(step.id, path, pr.content)
