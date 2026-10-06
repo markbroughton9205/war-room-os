@@ -131,6 +131,8 @@ export function planFromCode(index: WorkspaceIndex, input: { request: string; ac
   const implSet = new Set(where.map((w) => w.path))
   const dependsOnIt: PlanFile[] = [...new Set(impl.flatMap((s) => index.dependents[s.f.path] ?? []))].filter((p) => !implSet.has(p) && index.files[p]?.kind === 'source').map((p) => toFile(get(index.files[p]), 'dependent', 'inspect')).slice(0, 12)
   for (const s of [...scored.values()].filter((x) => x.f.kind === 'source').sort((a, b) => b.score - a.score)) if (!implSet.has(s.f.path) && s.why.some((w) => w.kind === 'consumer') && !dependsOnIt.some((d) => d.path === s.f.path)) dependsOnIt.push(toFile(s, 'consumer', 'modify'))
+  // the page that hosts a consumer client script is part of the UI surface that must change with it
+  for (const c of [...dependsOnIt].filter((d) => d.role === 'consumer')) for (const host of index.dependents[c.path] ?? []) if (index.files[host]?.isHtml && !implSet.has(host) && !dependsOnIt.some((d) => d.path === host)) { const hs = get(index.files[host]); hs.why.push({ kind: 'consumer', file: host, detail: `loads ${c.path}` }); dependsOnIt.push(toFile(hs, 'consumer', 'modify')) }
 
   // naive keyword frequency baseline (what planning from request wording alone would do)
   const texts = new Map<string, string>()
@@ -187,11 +189,12 @@ export function planFromCode(index: WorkspaceIndex, input: { request: string; ac
       const files: Slice['files'] = [...where, ...dependsOnIt]
         .filter((w) => w.action === 'modify' && !!index.files[w.path] && layersOf(index.files[w.path]).includes(layer))
         .map((w) => ({ path: w.path, action: 'modify' as const, rationale: w.why[0]?.detail ?? 'depends on the changed behavior' }))
-      if (layer === 'tests') for (const t of testsToProve.filter((x) => x.proposedPath)) files.push({ path: t.proposedPath!, action: 'create' as const, rationale: t.why })
+      // new tests are proposed for code a worker can test directly; HTTP/UI layers are proven by runtime checks and acceptance criteria
+      if (layer === 'tests') for (const t of testsToProve.filter((x) => x.proposedPath && index.files[x.target] && !layersOf(index.files[x.target]).some((l) => l === 'api' || l === 'ui'))) files.push({ path: t.proposedPath!, action: 'create' as const, rationale: t.why })
       if (layer === 'tests') for (const t of testsToProve.filter((x) => x.existing)) if (!files.some((f) => f.path === t.existing)) files.push({ path: t.existing!, action: 'modify' as const, rationale: t.why })
       if (!files.length) continue
       const checks = [...(typecheck ? [typecheck] : files.filter((f) => /\.m?js$/.test(f.path)).map((f) => `node --check ${f.path}`)), ...(layer === 'tests' || layer === 'domain' || layer === 'api' ? testScripts.map((s) => `${index.pm} run ${s}`) : [])]
-      slices.push({ order: slices.length + 1, layer, title: `${layer}: ${files.map((f) => path.posix.basename(f.path)).join(', ')}`, files: dedupFiles(files), validation: checks })
+      slices.push({ order: slices.length + 1, layer, title: `${layer}: ${files.map((f) => path.posix.basename(f.path)).join(', ')}`, files: orderByDeps(dedupFiles(files), index), validation: checks })
     }
   }
 
@@ -213,6 +216,21 @@ export function planFromCode(index: WorkspaceIndex, input: { request: string; ac
     ranking: { evidence: where.map((w) => w.path), naiveKeywordFrequency: naive.map((n) => n.path), diverges: !!naive[0] && !!evidenceTop[0] && naive[0].path !== evidenceTop[0] },
     index: { fileCount: index.fileCount, truncated: index.truncated, builtAt: index.builtAt },
   }
+}
+/** Files that others in the same slice import come first. */
+function orderByDeps(files: Slice['files'], index: WorkspaceIndex): Slice['files'] {
+  const paths = new Set(files.map((f) => f.path))
+  const dependsOn = (p: string) => new Set((index.files[p]?.imports ?? []).map((i) => i.resolved).filter((x): x is string => !!x && paths.has(x)))
+  const out: Slice['files'] = []
+  const done = new Set<string>()
+  const visit = (f: Slice['files'][number], stack: Set<string>) => {
+    if (done.has(f.path) || stack.has(f.path)) return
+    stack.add(f.path)
+    for (const d of dependsOn(f.path)) { const df = files.find((x) => x.path === d); if (df) visit(df, stack) }
+    done.add(f.path); out.push(f)
+  }
+  for (const f of files) visit(f, new Set())
+  return out
 }
 const dedupFiles = (f: Slice['files']) => f.filter((x, i, a) => a.findIndex((y) => y.path === x.path && y.action === x.action) === i)
 

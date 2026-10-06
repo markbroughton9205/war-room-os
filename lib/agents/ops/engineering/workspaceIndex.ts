@@ -189,6 +189,13 @@ export function buildWorkspaceIndex(root: string): WorkspaceIndex {
     else if (rel.endsWith('.html')) {
       const e: FileEntry = { path: rel, kind: 'source', lines: text.split('\n').length, imports: [], nodeImports: [], decls: [], exports: [], hasJsx: false, isHtml: true, apiRefs: [], storageRefs: [], uses: Object.create(null), mentionText: text.toLowerCase().slice(0, 20_000), routeMethods: [] }
       for (const m of text.matchAll(/fetch\(\s*['"`](\/[^'"`?]*)/g)) e.apiRefs.push({ path: m[1], line: text.slice(0, m.index).split('\n').length, role: 'calls' })
+      // <script src="/app.js"> ties the page to its client script (resolved against the page's dir, the workspace root and public/)
+      for (const m of text.matchAll(/<script[^>]*\ssrc=["']([^"']+)["']/gi)) {
+        const src = m[1].replace(/^\//, '').split('?')[0]
+        const cands = [path.posix.join(path.posix.dirname(rel), src), src, `public/${src}`]
+        const hit = cands.find((c) => known.has(c))
+        if (hit) e.imports.push({ spec: m[1], resolved: hit, names: ['*'], line: text.slice(0, m.index).split('\n').length })
+      }
       files[rel] = e
     } else if (rel.endsWith('.sql')) {
       const e: FileEntry = { path: rel, kind: 'data', lines: text.split('\n').length, imports: [], nodeImports: [], decls: [], exports: [], hasJsx: false, isHtml: false, apiRefs: [], storageRefs: [{ path: rel, op: 'db', line: 1 }], uses: Object.create(null), mentionText: text.toLowerCase().slice(0, 5000), routeMethods: [] }

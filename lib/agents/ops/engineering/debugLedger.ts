@@ -151,7 +151,8 @@ export function detectWrongTest(cmd: CommandRecord, changedFiles: string[], inde
   const parsed = parseToolOutput(cmd.stdout, cmd.stderr)
   if (parsed.tests === 0 || parsed.vacuous) return { suspected: true, reason: parsed.tests === 0 ? 'the command executed 0 tests: it proves nothing' : 'the command executed no named tests (only whole files): it proves nothing' }
   if (!index || !changedFiles.length) return { suspected: false, reason: null }
-  const targets = cmd.argv.filter((a) => /\.(m?js|ts|tsx|cjs)$/.test(a))
+  // only workspace-relative test files can be judged; an absolute path is a harness-supplied end-to-end verification
+  const targets = cmd.argv.filter((a) => !a.startsWith('/') && /\.(m?js|ts|tsx|cjs)$/.test(a))
   if (!targets.length) return { suspected: false, reason: null } // a directory/script run: cannot judge by target
   const covered = changedFiles.some((f) => targets.some((t) => (index.testsFor[f] ?? []).includes(t) || t === f))
   return covered ? { suspected: false, reason: null } : { suspected: true, reason: `none of the targeted tests (${targets.join(', ')}) import any changed file (${changedFiles.join(', ')})` }
