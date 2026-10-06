@@ -14,6 +14,7 @@ import { runCommand } from './runtime/commandRunner'
 import type { EngineeringTool } from '../types'
 import { AgentRegistry } from '../registry'
 import { parseEditReply } from './prompts'
+import { captureLessons, lessonsFor, measureLessonEffect, learningReport, classifyFailure } from './lessons'
 
 const { check, finish } = harness('AGENT_ENG_WORKFLOW_VALIDATION')
 const TOOLS: EngineeringTool[] = ['read_workspace', 'write_workspace', 'run_workspace_tests', 'run_typecheck', 'model_local', 'read_runtime_output']
@@ -255,6 +256,34 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   check('N30_append_and_search_replace_edits_are_applied_to_the_current_file_and_everything_else_is_kept', ap.kind === 'code' && ap.mode === 'edits' && ap.content.includes('export function a()') && ap.content.includes('export function c()') && sr.kind === 'code' && sr.content.includes('return 22') && sr.content.includes('return 1'))
   check('N31_unmatched_ambiguous_or_no_op_edits_are_refused_with_a_reason_never_guessed', nf.kind === 'invalid' && nf.reason.includes('not found') && amb.kind === 'invalid' && amb.reason.includes('times') && nothing.kind === 'invalid')
   check('N32_full_rewrites_are_still_parsed_as_rewrites_for_the_compat_gate_and_new_files_as_new', rewrite.kind === 'code' && rewrite.mode === 'rewrite' && fresh.kind === 'code' && fresh.mode === 'new' && parseEditReply('NO_CHANGE', cur).kind === 'no_change')
+}
+
+// ---- 8. measurable learning: lesson captured from a real fixed failure -> retrieved on a later similar task -> effect measured
+{
+  const x = makeWorld(); let broke = false
+  const dup = CHAT_REFERENCE['src/chatService.mjs'] + '\nexport function validateMessage() { return 1 }\n'
+  const m1 = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/chatService.mjs' && !broke) { broke = true; return fenced(dup) }
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'validateMessage is declared twice in chatService.mjs (SyntaxError: already been declared)', file: 'src/chatService.mjs', differs: 'first attempt' })
+    if (c.kind === 'repair') return fenced(CHAT_REFERENCE['src/chatService.mjs'])
+    return good(c)
+  })
+  const r1 = await runFeatureWorkflow(deps(x, m1), REQ)
+  const made = captureLessons(x.log, x.asg.id, { taskClass: 'feature_implementation', executor: 'test-double' })
+  check('N33_a_really_fixed_failure_becomes_a_lesson_with_evidence_pointing_at_the_assignment_and_failure', r1.status === 'COMPLETED' && made.length >= 1 && made[0].cls === 'DUPLICATE_DECLARATION' && made[0].evidence.kind === 'FIXED_FAILURE' && !!made[0].evidence.failureId && made[0].evidence.assignmentId === x.asg.id)
+  check('N34_capture_is_idempotent_and_an_unfixed_or_unverified_failure_is_not_a_lesson', captureLessons(x.log, x.asg.id, { taskClass: 'feature_implementation', executor: 'test-double' }).length === 0 && classifyFailure('SyntaxError: Identifier \'x\' has already been declared') === 'DUPLICATE_DECLARATION')
+  // later similar task in the SAME durable log
+  const root2 = makeChatApp(path.join(tmp(), 'chat2'))
+  const asg2 = assign(x.log, draftFor(x.agent.id, 'mission-chat-2', CHAT_FEATURE.request + ' (second project)', { workspace: { id: 'chat-ws2', root: root2, kind: 'sandbox' }, limits: { maxSteps: 30, maxRuntimeMs: 600_000, maxModelCalls: 40, maxRetries: 3 } }), C, NOW).assignment
+  startAssignment(x.log, asg2.id, 'system:runner', NOW)
+  const got = lessonsFor(x.log, asg2.id, 'feature_implementation')
+  const m2 = new ScriptedModel(good)
+  const r2 = await runFeatureWorkflow({ ...deps(x, m2), assignmentId: asg2.id, ws: new Workspace(root2), finalVerification: makeIndependentVerification('v2', tmp(), 'verify.mjs', CHAT_VERIFY_SCRIPT, root2), lessons: () => got.texts }, REQ)
+  check('N35_the_lesson_is_retrieved_for_a_similar_later_task_and_reaches_the_model_prompt', got.ids.length >= 1 && got.texts.some((t) => t.includes('DUPLICATE_DECLARATION')) && m2.calls.filter((c) => c.kind === 'file').every((c) => c.prompt.includes('DUPLICATE_DECLARATION')) && r2.status === 'COMPLETED')
+  const eff = measureLessonEffect(x.log, asg2.id)
+  const rep = learningReport(x.log)
+  check('N36_effect_is_measured_per_class_the_class_did_not_recur_in_the_later_task_and_the_first_task_is_not_counted_as_a_use', eff.avoided >= 1 && eff.repeated === 0 && rep.byClass.DUPLICATE_DECLARATION.retrieved === 1 && rep.byClass.DUPLICATE_DECLARATION.avoided === 1 && measureLessonEffect(x.log, asg2.id).avoided === 0)
+  check('N37_a_lesson_is_never_retrieved_for_the_assignment_that_produced_it', lessonsFor(x.log, x.asg.id, 'feature_implementation').ids.length === 0)
 }
 void deriveAssignments; void AgentRegistry
 finish()

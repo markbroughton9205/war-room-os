@@ -259,6 +259,9 @@ export type DebugEntry =
   | { kind: 'VALIDATION'; failureId: string; repairId: string; argv: string[]; exitCode: number | null; testsRun: number | Unknown; outcome: 'ORIGINAL_FIXED' | 'SAME_FAILURE' | 'NEW_FAILURE' | 'VACUOUS' | 'WRONG_TEST_SUSPECTED'; signature: string | null; note: string }
   | { kind: 'UNDETERMINED'; failureId: string; reason: string; attempts: number }
 
+export type LessonClass = 'DUPLICATE_DECLARATION' | 'MISSING_EXPORT' | 'REMOVED_EXPORT' | 'ESM_COMMONJS_MIX' | 'MISSING_FILE' | 'SYNTAX' | 'ASSERTION' | 'OTHER'
+/** A correction learned from REAL evidence (a fixed failure or a gate rejection); never from narrative. */
+export type Lesson = { id: string; cls: LessonClass; taskClass: string; observation: string; correction: string; evidence: { assignmentId: string; failureId?: string; kind: 'FIXED_FAILURE' | 'GATE_REJECTION' }; at: string; executor: string }
 export type AgentOpsRecord =
   | { t: 'need'; rid: string; need: NeedRecord }
   | { t: 'agent'; rid: string; agent: AgentSpec }
@@ -277,6 +280,8 @@ export type AgentOpsRecord =
   | { t: 'checkpoint'; rid: string; assignmentId: string; seq: number; at: string; by: Actor; state: CheckpointState }
   | { t: 'effect'; rid: string; effect: EffectRecord }
   | { t: 'handoff'; rid: string; fromAssignment: string; toAssignment: string; at: string; by: Actor; reason: string; packet: HandoffPacket }
+  | { t: 'lesson'; rid: string; lesson: Lesson }
+  | { t: 'lessonUse'; rid: string; lessonId: string; assignmentId: string; at: string; kind: 'RETRIEVED' | 'AVOIDED' | 'REPEATED' | 'UNKNOWN'; note: string }
   | { t: 'debug'; rid: string; assignmentId: string; seq: number; at: string; entry: DebugEntry }
   | { t: 'feedback'; rid: string; runId: string; verdict: 'accepted' | 'corrected' | 'rejected'; usefulEscalation?: boolean; by: Actor; at: string; note: string }
   | { t: 'effectApproval'; rid: string; workerId: string; effects: ProtectedEffect[]; by: Actor; at: string; reason: string }
