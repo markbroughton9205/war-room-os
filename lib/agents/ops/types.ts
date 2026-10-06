@@ -22,6 +22,10 @@ export const SPECIALIZATIONS = [
   'documentation_synthesis',
   'operator_support',
   'incident_review',
+  // engineering specializations (Phase 10 continuation): grounded in assignments, not labels
+  'feature_implementation',
+  'defect_repair',
+  'test_authoring',
 ] as const
 export type Specialization = (typeof SPECIALIZATIONS)[number]
 
@@ -65,6 +69,8 @@ export type AgentSpec = {
   permissionScope: SafePermission[]
   memoryScope: MemoryScope[]
   ioContract: { input: string; output: string }
+  /** Engineering tools this agent may be assigned. Empty = cannot take engineering assignments. */
+  toolScope?: EngineeringTool[]
   escalationPath: string
   reviewProcess: string
   needId: string
@@ -152,6 +158,44 @@ export type Recommendation = {
   applied: false
 }
 
+/** Engineering tools an assignment may use. All are bounded local effects; none can reach protected effects. */
+export const ENGINEERING_TOOLS = ['read_workspace', 'write_workspace', 'run_workspace_tests', 'run_typecheck', 'model_local', 'read_runtime_output'] as const
+export type EngineeringTool = (typeof ENGINEERING_TOOLS)[number]
+
+export type AssignmentState = 'QUEUED' | 'RUNNING' | 'PAUSED' | 'BLOCKED' | 'CANCEL_REQUESTED' | 'STOPPING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'HANDED_OFF' | 'INTERRUPTED'
+export type CancelDisposition = 'STOPPED' | 'UNABLE_TO_SAFELY_INTERRUPT'
+export type AssignmentOutcome = {
+  validation: 'PASSED' | 'FAILED' | 'UNKNOWN'
+  summary: string
+  artifacts: string[]
+  executor: { provider: string; model: string } | Unknown
+  tokens: number | Unknown
+  latencyMs: number | Unknown
+  retries: number
+}
+export type Assignment = {
+  id: string
+  /** Same key = same logical work: a second assign returns the first instead of duplicating it. */
+  idempotencyKey: string
+  agentId: string
+  parentMission: { id: string; title: string }
+  taskClass: string
+  capabilities: string[]
+  objective: string
+  expectedOutputs: string[]
+  completionConditions: string[]
+  workspace: { id: string; root: string; kind: 'sandbox' | 'project' } | null
+  tools: EngineeringTool[]
+  limits: { maxSteps: number; maxRuntimeMs: number; maxModelCalls: number; maxRetries: number }
+  dependencies: string[]
+  createdBy: Actor
+  createdAt: string
+}
+export type AssignmentEventKind =
+  | 'STARTED' | 'PAUSED' | 'RESUMED' | 'BLOCKED' | 'UNBLOCKED'
+  | 'CANCEL_REQUESTED' | 'CANCEL_ACKNOWLEDGED' | 'CANCELLED' | 'CANCEL_UNSAFE'
+  | 'COMPLETED' | 'FAILED' | 'HANDED_OFF' | 'INTERRUPTED'
+
 export type AgentOpsRecord =
   | { t: 'need'; rid: string; need: NeedRecord }
   | { t: 'agent'; rid: string; agent: AgentSpec }
@@ -165,6 +209,8 @@ export type AgentOpsRecord =
   | { t: 'schedulerGlobal'; rid: string; enabled: boolean; by: Actor; at: string; reason: string }
   | { t: 'schedClaim'; rid: string; claimId: string; workerId: string; slotMs: number; dueAt: string; instanceId: string; at: string; collapsedIntervals: number }
   | { t: 'schedDecision'; rid: string; workerId: string; at: string; decision: 'RUN' | 'SKIP'; reason: string; nextEligibleAt: string | null; claimId?: string }
+  | { t: 'assignment'; rid: string; assignment: Assignment }
+  | { t: 'assignmentEvent'; rid: string; assignmentId: string; kind: AssignmentEventKind; by: Actor; at: string; reason: string; outcome?: AssignmentOutcome; disposition?: CancelDisposition; stopReason?: string; handoffTo?: string; blocker?: string }
   | { t: 'feedback'; rid: string; runId: string; verdict: 'accepted' | 'corrected' | 'rejected'; usefulEscalation?: boolean; by: Actor; at: string; note: string }
   | { t: 'effectApproval'; rid: string; workerId: string; effects: ProtectedEffect[]; by: Actor; at: string; reason: string }
   | { t: 'scope'; rid: string; agentId: string; proposalId: string; permissionScope: SafePermission[]; memoryScope: MemoryScope[]; by: Actor; at: string }
