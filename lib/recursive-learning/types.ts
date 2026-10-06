@@ -49,6 +49,16 @@ export type EvaluationEventInput = {
   errorClass?: string
   note?: string
   source: { kind: string; ref: string }
+  /** Ingestion provenance (adapters). Absent for hand-recorded events. */
+  provenance?: EventProvenance
+}
+
+export type EventProvenance = {
+  adapter: string
+  /** True when the event was reconstructed from historical receipts rather than observed live. */
+  backfilled: boolean
+  /** Path/identifier of the durable source record (never its contents). */
+  sourcePath?: string
 }
 
 export type EvaluationEvent = {
@@ -64,6 +74,7 @@ export type EvaluationEvent = {
   errorClass?: string
   note?: string
   source: { kind: string; ref: string }
+  provenance?: EventProvenance
   /** Set when normalization overrode the reported outcome (e.g. failed validation cannot be SUCCESS). */
   coercions: string[]
   reportedOutcome: EvalOutcome

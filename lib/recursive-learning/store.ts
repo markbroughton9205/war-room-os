@@ -34,6 +34,29 @@ export class LearningLog {
     return event
   }
 
+  /**
+   * Idempotent batch ingestion: events whose id already exists are skipped (never duplicated); invalid events are
+   * rejected individually without aborting the batch. Reads the log once.
+   */
+  recordEvents(inputs: EvaluationEventInput[], now: Date = new Date()): { inserted: EvaluationEvent[]; duplicates: number; rejected: { index: number; reason: string }[] } {
+    const known = new Set(this.view().events.map((e) => e.id))
+    const inserted: EvaluationEvent[] = []
+    const rejected: { index: number; reason: string }[] = []
+    let duplicates = 0
+    inputs.forEach((input, index) => {
+      try {
+        const event = createEvaluationEvent(input, now)
+        if (known.has(event.id)) { duplicates += 1; return }
+        known.add(event.id)
+        inserted.push(event)
+      } catch (err) {
+        rejected.push({ index, reason: err instanceof Error ? err.message : 'invalid event' })
+      }
+    })
+    if (inserted.length > 0) appendFileSync(this.file, inserted.map((event) => JSON.stringify({ t: 'event', event })).join('\n') + '\n', 'utf8')
+    return { inserted, duplicates, rejected }
+  }
+
   /** Marks evidence as superseded (excluded from scoring) while keeping it retrievable. */
   supersede(eventId: string, reason: string, supersededBy?: string, now: Date = new Date()): void {
     const v = this.view()

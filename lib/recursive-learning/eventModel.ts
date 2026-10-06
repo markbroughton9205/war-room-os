@@ -47,6 +47,7 @@ export function createEvaluationEvent(input: EvaluationEventInput, now: Date = n
     errorClass: input.errorClass,
     note: input.note,
     source: { ...input.source },
+    ...(input.provenance ? { provenance: { ...input.provenance } } : {}),
     coercions,
     reportedOutcome: input.outcome,
   }

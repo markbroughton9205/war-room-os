@@ -154,6 +154,10 @@ export async function transitionMission(mission: FoundryMissionRecord, next: Fou
     await releaseTerminalMissionClaims(mission)
   }
   await saveMission(mission)
+  if (next === 'COMPLETE' || next === 'FAILED') {
+    // Phase 9 learning evidence: fire-and-forget; never gates or fails the mission transition.
+    void import('@/lib/recursive-learning/ingestion/live').then((m) => m.ingestMissionOutcomeSafe(mission)).catch(() => undefined)
+  }
 }
 
 export function summarizeContext(mission: FoundryMissionRecord): FoundryMissionRecord['context'] {
