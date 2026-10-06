@@ -196,6 +196,58 @@ export type AssignmentEventKind =
   | 'CANCEL_REQUESTED' | 'CANCEL_ACKNOWLEDGED' | 'CANCELLED' | 'CANCEL_UNSAFE'
   | 'COMPLETED' | 'FAILED' | 'HANDED_OFF' | 'INTERRUPTED'
 
+export type StepStatus = 'PENDING' | 'ACTIVE' | 'DONE' | 'FAILED' | 'SKIPPED'
+export type CheckpointStep = { id: string; title: string; status: StepStatus; layer?: string; files: string[]; note?: string }
+export type FileChange = { path: string; beforeHash: string | null; afterHash: string; stepId: string }
+export type ValidationRecord = { stepId?: string; command: string; status: 'PASSED' | 'FAILED' | 'UNAVAILABLE'; at: string; outputHash: string; summary: string }
+export type CheckpointState = {
+  objective: string
+  acceptanceCriteria: string[]
+  steps: CheckpointStep[]
+  currentStepId: string | null
+  fileChanges: FileChange[]
+  artifacts: string[]
+  validations: ValidationRecord[]
+  blockers: string[]
+  failureReason?: string
+  /** Keys of consequential actions already completed (never repeated blindly). */
+  effectsDone: string[]
+  /** Approaches/commands that failed or must not be repeated, with the reason. */
+  doNotRepeat: { key: string; reason: string }[]
+  dependencies: string[]
+  workspace: { id: string; root: string; kind: string; gitHead: string | Unknown; baselineTreeHash: string | Unknown; baselineFileHashes: Record<string, string> | Unknown }
+  stopReason?: string
+}
+export type EffectRecord = {
+  assignmentId: string
+  key: string
+  kind: 'file_write' | 'command' | 'model_call' | 'test_run'
+  /** Consequential effects are never re-executed once DONE; non-consequential ones (tests, type checks) are re-run on current state. */
+  consequential: boolean
+  summary: string
+  status: 'STARTED' | 'DONE' | 'FAILED'
+  at: string
+  fileChanges?: FileChange[]
+  result?: { exitCode?: number | null; outputHash?: string; summary?: string }
+}
+
+export type HandoffPacket = {
+  objective: string
+  acceptanceCriteria: string[]
+  attempted: string[]
+  changed: { path: string; beforeHash: string | null; afterHash: string }[]
+  succeeded: string[]
+  failed: string[]
+  doNotRepeat: { key: string; reason: string }[]
+  remaining: string[]
+  stopReason: string
+  blockers: string[]
+  validations: { command: string; status: string; summary: string }[]
+  workspace: CheckpointState['workspace']
+  consequentialActionsDone: string[]
+  lessonsApplied?: string[]
+}
+
 export type AgentOpsRecord =
   | { t: 'need'; rid: string; need: NeedRecord }
   | { t: 'agent'; rid: string; agent: AgentSpec }
@@ -211,6 +263,9 @@ export type AgentOpsRecord =
   | { t: 'schedDecision'; rid: string; workerId: string; at: string; decision: 'RUN' | 'SKIP'; reason: string; nextEligibleAt: string | null; claimId?: string }
   | { t: 'assignment'; rid: string; assignment: Assignment }
   | { t: 'assignmentEvent'; rid: string; assignmentId: string; kind: AssignmentEventKind; by: Actor; at: string; reason: string; outcome?: AssignmentOutcome; disposition?: CancelDisposition; stopReason?: string; handoffTo?: string; blocker?: string }
+  | { t: 'checkpoint'; rid: string; assignmentId: string; seq: number; at: string; by: Actor; state: CheckpointState }
+  | { t: 'effect'; rid: string; effect: EffectRecord }
+  | { t: 'handoff'; rid: string; fromAssignment: string; toAssignment: string; at: string; by: Actor; reason: string; packet: HandoffPacket }
   | { t: 'feedback'; rid: string; runId: string; verdict: 'accepted' | 'corrected' | 'rejected'; usefulEscalation?: boolean; by: Actor; at: string; note: string }
   | { t: 'effectApproval'; rid: string; workerId: string; effects: ProtectedEffect[]; by: Actor; at: string; reason: string }
   | { t: 'scope'; rid: string; agentId: string; proposalId: string; permissionScope: SafePermission[]; memoryScope: MemoryScope[]; by: Actor; at: string }
