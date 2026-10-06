@@ -96,12 +96,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
 
   // ---- helpers
   const budgetLeft = () => modelCalls < limits.maxModelCalls && Date.now() - t0 < limits.maxRuntimeMs
-  const call = async (system: string, prompt: string, json = false): Promise<ModelResult> => {
+  const call = async (system: string, prompt: string, json = false, sampling: { temperature?: number; seed?: number } = {}): Promise<ModelResult> => {
     if (!deps.tools.includes('model_local')) return { ok: false, detail: 'model_local not granted', executor: 'UNKNOWN' }
     modelCalls += 1
     const ac = new AbortController()
     const poll = setInterval(() => { const g = executionGate(log, assignmentId); if (!g.proceed && g.reason !== 'OK') ac.abort() }, 400)
-    try { const r = await deps.model.generate({ system, prompt, json, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }); return r } finally { clearInterval(poll) }
+    try { const r = await deps.model.generate({ system, prompt, json, ...sampling, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }); return r } finally { clearInterval(poll) }
   }
   const noteTokens = (r: ModelResult) => { if (r.ok) { executor = r.executor; tokens = tokens === 'UNKNOWN' || r.outputTokens === 'UNKNOWN' ? 'UNKNOWN' : tokens + r.outputTokens + (r.promptTokens === 'UNKNOWN' ? 0 : r.promptTokens); if (r.promptTokens === 'UNKNOWN') tokens = 'UNKNOWN' } }
   type Gate = { stop: WorkflowResult | null }
@@ -315,7 +315,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       let feedback = ''
       const keep = keepExportsFor(path)
       const mode = chooseMode(job.exists, job.current.split('\n').length, keep)
-      const askFile = async (extra: string[]) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode })); noteTokens(r); return r }
+      const askFile = async (extra: string[], retry = 0) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}); noteTokens(r); return r }
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 2 && reply.ok; rej++) {
@@ -325,7 +325,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         emit('REJECT', `${path}: ${problem}`)
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
         const bs = budgetStop(); if (bs) { failAssignment(log, assignmentId, actor, bs.reason, undefined, clock()); return bs }
-        reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`])
+        reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`, `THE REJECTED REPLY (do NOT repeat it):\n${reply.text.slice(0, 700)}`], rej + 1)
         parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
       }
       void feedback
