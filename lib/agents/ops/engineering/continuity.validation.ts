@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 /** Phase 10 continuation: checkpoints, consequential-action ledger, reconciliation, handoff, resume. Run: pnpm run validate:agent-eng-continuity */
 import { harness, engWorld, addAgent, draftFor, passed, C, NOW } from './engtestkit'
 import { AgentOpsLog } from '../log'
@@ -36,7 +37,12 @@ const seq2 = saveCheckpoint(w.log, asg.id, cpState(), 'system:r', NOW)
 check('L01_checkpoints_are_sequenced_latest_wins_and_history_is_kept', seq1 === 1 && seq2 === 2 && latestCheckpoint(w.log, asg.id)!.seq === 2 && checkpointHistory(w.log, asg.id).map((h) => h.done).join() === '1,2')
 check('L02_checkpoint_contains_the_required_engineering_state', (() => { const s = latestCheckpoint(w.log, asg.id)!.state; return !!s.objective && s.acceptanceCriteria.length === 1 && s.steps.length === 4 && s.currentStepId === 's3' && s.fileChanges.length === 2 && s.validations.length === 1 && s.effectsDone.length === 2 && s.doNotRepeat.length === 1 && s.workspace.gitHead === 'UNKNOWN' && s.workspace.root === '/tmp/ws1' })())
 const bad = (fn: () => unknown) => { try { fn(); return 'none' } catch (e) { return e instanceof ContinuityError ? e.code : 'other:' + (e as Error).message.slice(0, 40) } }
-check('L03_unauthorized_actor_unknown_assignment_oversized_and_secret_checkpoints_are_refused', bad(() => saveCheckpoint(w.log, asg.id, cpState(), 'agent:self', NOW)) === 'NOT_AUTHORIZED' && bad(() => saveCheckpoint(w.log, 'nope', cpState(), 'system:r', NOW)) === 'UNKNOWN_ASSIGNMENT' && bad(() => saveCheckpoint(w.log, asg.id, cpState({ validations: Array.from({ length: 121 }, () => cpState().validations[0]) }), 'system:r', NOW)) === 'INVALID' && bad(() => saveCheckpoint(w.log, asg.id, cpState({ failureReason: 'key sk-abcdefghijklmnopqrstuvwxyz123456 leaked' }), 'system:r', NOW)).startsWith('other:'))
+check('L03_unauthorized_actor_unknown_assignment_and_oversized_checkpoints_are_refused', bad(() => saveCheckpoint(w.log, asg.id, cpState(), 'agent:self', NOW)) === 'NOT_AUTHORIZED' && bad(() => saveCheckpoint(w.log, 'nope', cpState(), 'system:r', NOW)) === 'UNKNOWN_ASSIGNMENT' && bad(() => saveCheckpoint(w.log, asg.id, cpState({ validations: Array.from({ length: 121 }, () => cpState().validations[0]) }), 'system:r', NOW)) === 'INVALID')
+// credential-like text is REDACTED before it is persisted (it is never stored, and it does not abort the assignment); a checkpoint with only secret text still saves
+const secretSeq = saveCheckpoint(w.log, asg.id, cpState({ failureReason: 'key sk-abcdefghijklmnopqrstuvwxyz123456 leaked' }), 'system:r', NOW)
+check('L03b_credential_like_checkpoint_text_is_redacted_never_persisted', !readFileSync(w.log.file, 'utf8').includes('sk-abcdefghijklmnopqrstuvwxyz123456') && latestCheckpoint(w.log, asg.id)!.state.failureReason!.includes('[REDACTED]') && secretSeq === 3)
+// keep the sequence of the following checks stable: make the secret-bearing checkpoint identical to the previous one again
+saveCheckpoint(w.log, asg.id, cpState(), 'system:r', NOW)
 
 // ---- consequential-action ledger
 let runs = 0
@@ -97,6 +103,6 @@ check('L20_retired_successor_refused_and_write_handoff_to_another_agent_needs_a_
 const crash = engWorld(); const ca = addAgent(crash, 'agent-crash'); const ct = assign(crash.log, draftFor(ca.id, 'mc', 'crash me'), C, NOW).assignment; startAssignment(crash.log, ct.id, 'system:r', NOW); saveCheckpoint(crash.log, ct.id, cpState(), 'system:r', NOW); interruptAssignment(crash.log, ct.id, 'system:recovery', 'process restarted', NOW)
 const resumed = continueAssignment(crash.log, ct.id, ca.id, 'system:recovery', 'resume after restart', NOW)
 check('L21_same_agent_resumes_an_interrupted_assignment_from_its_checkpoint_after_restart', resumed.created && deriveAssignments(new AgentOpsLog(crash.dir)).assignments.get(ct.id)!.state === 'INTERRUPTED' && deriveAssignments(new AgentOpsLog(crash.dir)).assignments.get(resumed.assignmentId)!.state === 'QUEUED' && resumed.packet.remaining.length > 0)
-check('L22_continuity_state_survives_process_restart', (() => { const re = new AgentOpsLog(w.dir); return latestCheckpoint(re, asg.id)!.seq === 2 && effectStatus(re, asg.id, 'write:a.txt').state === 'DONE' && !!handoffFor(re, cont.assignmentId) })())
+check('L22_continuity_state_survives_process_restart', (() => { const re = new AgentOpsLog(w.dir); return latestCheckpoint(re, asg.id)!.seq === 4 && effectStatus(re, asg.id, 'write:a.txt').state === 'DONE' && !!handoffFor(re, cont.assignmentId) })())
 void bad
 finish()
