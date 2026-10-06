@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(__dirname, '..')
-const outDir = path.join(repoRoot, '.next')
+const outDir = path.join(repoRoot, process.env.WAR_ROOM_NEXT_DIST_DIR || '.next')
 const outFile = path.join(outDir, 'build-meta.json')
 
 function git(args) {
