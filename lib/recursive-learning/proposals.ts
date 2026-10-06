@@ -108,7 +108,7 @@ export function buildDoctrineProposals(findings: FailureFinding[], minCount = 5)
     .map((f) => ({
       kind: 'DOCTRINE_CHANGE' as const,
       title: `Doctrine review: ${f.errorClass} on ${f.taskClass}`,
-      summary: `${f.count} recurrences. ${f.report.recommendedMitigation}. Requires Commander review; no change is applied automatically.`,
+      summary: `${f.count} recurrences. Proposed mitigation: ${f.report.recommendedMitigation}. Requires Commander review; no change is applied automatically.`,
       evidenceEventIds: f.evidenceEventIds,
       contradictoryEventIds: f.contradictingSuccessIds,
       confidence: 'UNKNOWN' as const,
