@@ -264,20 +264,20 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const rr = await call(modeR === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: hypText, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: modeR }))
       noteTokens(rr)
       if (!rr.ok) { attemptsNotes.push(`repair call failed: ${rr.detail}`); continue }
-      let pr = parseEditReply(rr.text, ws.read(file))
+      let pr = parseEditReply(rr.text, ws.read(file), file)
       if (pr.kind !== 'code' && budgetLeft()) {
         // the command is failing, so NO_CHANGE / an unusable reply is not an answer: ask once more, with the refusal reason and a full rewrite allowed
         const why = pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE is not valid: the failing command above proves a change is needed'
         const rr2 = await call(ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: `${hypText}\nYOUR PREVIOUS REPLY WAS REJECTED: ${why}`, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: 'rewrite' }))
         noteTokens(rr2)
-        if (rr2.ok) pr = parseEditReply(rr2.text, ws.read(file))
+        if (rr2.ok) pr = parseEditReply(rr2.text, ws.read(file), file)
       }
       if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); continue }
       let compat = gateProblem(file, pr.content)
       if (compat && budgetLeft()) {
         const rr3 = await call(ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: `${hypText}\nYOUR PREVIOUS REPLY WAS REJECTED BEFORE IT WAS WRITTEN: ${compat}`, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: 'rewrite' }))
         noteTokens(rr3)
-        const p3 = rr3.ok ? parseEditReply(rr3.text, ws.read(file)) : null
+        const p3 = rr3.ok ? parseEditReply(rr3.text, ws.read(file), file) : null
         if (p3 && p3.kind === 'code') { pr = p3; compat = gateProblem(file, pr.content) }
       }
       if (compat) { attemptsNotes.push(`repair rejected: ${compat}`); state.doNotRepeat.push({ key: `reject:${file}:repair${attempt}`, reason: compat }); continue }
@@ -356,7 +356,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const mode = chooseMode(job.exists, job.current.split('\n').length, keep)
       const askFile = async (extra: string[], retry = 0) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}); noteTokens(r); return r }
       let reply = await askFile([])
-      let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
+      let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 2 && reply.ok; rej++) {
         const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : null
         if (!problem) break
@@ -365,7 +365,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
         const bs = budgetStop(); if (bs) { failAssignment(log, assignmentId, actor, bs.reason, undefined, clock()); return bs }
         reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`, `THE REJECTED REPLY (do NOT repeat it):\n${reply.text.slice(0, 700)}`], rej + 1)
-        parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null) : { kind: 'invalid', reason: 'model call failed' }
+        parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       }
       void feedback
       if (reply.ok) { const skippedFiles = new Set(state.steps.filter((x) => x.status === 'SKIPPED').flatMap((x) => x.files)) // a skipped step's file may be the true defect: let evidence-driven repair find it rather than failing here

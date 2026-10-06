@@ -1,3 +1,4 @@
+import { deepRedact } from './redact'
 import { createHash } from 'node:crypto'
 import type { AgentOpsLog } from '../log'
 import { isCommander, isSystem } from '../lifecycle'
@@ -52,7 +53,7 @@ export const debugEntries = (log: AgentOpsLog, assignmentId: string) => entries(
 function append(log: AgentOpsLog, assignmentId: string, entry: DebugEntry, by: Actor, now: Date) {
   if (!isCommander(by) && !isSystem(by)) throw new DebugError('NOT_AUTHORIZED', 'the debug ledger is written by a Commander or a system runner')
   if (!deriveAssignments(log).assignments.has(assignmentId)) throw new DebugError('UNKNOWN', `unknown assignment: ${assignmentId}`)
-  return log.withLock(() => { const seq = entries(log, assignmentId).length + 1; log.append({ t: 'debug', assignmentId, seq, at: now.toISOString(), entry }); return seq })
+  return log.withLock(() => { const seq = entries(log, assignmentId).length + 1; log.append({ t: 'debug', assignmentId, seq, at: now.toISOString(), entry: deepRedact(entry) }); return seq })
 }
 
 export type LedgerView = {

@@ -1,3 +1,4 @@
+import { deepRedact } from './redact'
 import { createHash } from 'node:crypto'
 import type { AgentOpsLog } from '../log'
 import { isCommander, isSystem } from '../lifecycle'
@@ -28,7 +29,7 @@ export function saveCheckpoint(log: AgentOpsLog, assignmentId: string, state: Ch
   if (bf !== 'UNKNOWN' && Object.keys(bf).length > MAX_TRACKED_FILES) throw new ContinuityError('INVALID', `baseline file hashes capped at ${MAX_TRACKED_FILES}; use UNKNOWN`)
   return log.withLock(() => {
     const seq = log.view().records.filter((r) => r.t === 'checkpoint' && r.assignmentId === assignmentId).length + 1
-    log.append({ t: 'checkpoint', assignmentId, seq, at: now.toISOString(), by, state })
+    log.append({ t: 'checkpoint', assignmentId, seq, at: now.toISOString(), by, state: deepRedact(state) })
     return seq
   })
 }
@@ -53,7 +54,7 @@ export function effectStatus(log: AgentOpsLog, assignmentId: string, key: string
 const effectRid = (a: string, key: string, status: string, n: number) => `effect:${a}:${sha256(key).slice(0, 16)}:${status}:${n}`
 function appendEffect(log: AgentOpsLog, e: EffectRecord) {
   const n = log.view().records.filter((r) => r.t === 'effect' && r.effect.assignmentId === e.assignmentId && r.effect.key === e.key).length
-  log.append({ t: 'effect', rid: effectRid(e.assignmentId, e.key, e.status, n), effect: e })
+  log.append({ t: 'effect', rid: effectRid(e.assignmentId, e.key, e.status, n), effect: deepRedact(e) })
 }
 export const beginEffect = (log: AgentOpsLog, assignmentId: string, key: string, d: Pick<EffectRecord, 'kind' | 'consequential' | 'summary'> & { fileChanges?: FileChange[] }, now = new Date()) =>
   appendEffect(log, { assignmentId, key, kind: d.kind, consequential: d.consequential, summary: d.summary.slice(0, 300), status: 'STARTED', at: now.toISOString(), ...(d.fileChanges ? { fileChanges: d.fileChanges } : {}) })
@@ -185,7 +186,7 @@ export function continueAssignment(log: AgentOpsLog, fromId: string, toAgentId: 
   if (toAgentId !== a.agentId && a.tools.includes('write_workspace') && !isCommander(by)) throw new ContinuityError('NOT_AUTHORIZED', 'handing write access to a different agent requires a Commander')
   const objective = `${a.objective}\n\n[continuation of ${a.id}: ${reason.slice(0, 200)}]`
   const res = assign(log, { ...a, idempotencyKey: keyFor(a.parentMission.id, a.taskClass, `continue:${fromId}:${toAgentId}`), agentId: toAgentId, objective: objective.slice(0, 1990), dependencies: [] }, isCommander(by) ? by : a.createdBy, now)
-  if (res.created) log.append({ t: 'handoff', fromAssignment: fromId, toAssignment: res.assignment.id, at: now.toISOString(), by, reason: reason.slice(0, 300), packet })
+  if (res.created) log.append({ t: 'handoff', fromAssignment: fromId, toAssignment: res.assignment.id, at: now.toISOString(), by, reason: reason.slice(0, 300), packet: deepRedact(packet) })
   return { assignmentId: res.assignment.id, created: res.created, packet }
 }
 export function handoffFor(log: AgentOpsLog, toAssignmentId: string) {

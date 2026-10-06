@@ -1,3 +1,4 @@
+import { mergeAppend } from './editMerge'
 import type { EngineeringCodePlan } from './codePlanner'
 import { planContextForModel } from './codePlanner'
 
@@ -105,7 +106,7 @@ export function parseCodeReply(text: string): { kind: 'code'; content: string } 
  * Parse a worker reply against the CURRENT file: edits (append / search-replace) are applied and validated; a full fenced block
  * is treated as a rewrite (still subject to the API-compat gate). Unmatched or ambiguous SEARCH text is refused, never guessed.
  */
-export function parseEditReply(text: string, current: string | null): { kind: 'code'; content: string; mode: 'rewrite' | 'edits' | 'new' } | { kind: 'no_change' } | { kind: 'invalid'; reason: string } {
+export function parseEditReply(text: string, current: string | null, rel = 'file.mjs'): { kind: 'code'; content: string; mode: 'rewrite' | 'edits' | 'new' } | { kind: 'no_change' } | { kind: 'invalid'; reason: string } {
   const t = text.trim()
   if (t === 'NO_CHANGE' || t === '`NO_CHANGE`') return { kind: 'no_change' }
   const blocks = [...t.matchAll(/<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g)]
@@ -119,7 +120,7 @@ export function parseEditReply(text: string, current: string | null): { kind: 'c
       if (n > 1) return { kind: 'invalid', reason: `SEARCH text appears ${n} times; include more surrounding lines so it is unique` }
       out = out.replace(search, () => b[2])
     }
-    for (const a of appends) out = out.replace(/\s*$/, '\n\n') + a[1].replace(/\s+$/, '') + '\n'
+    for (const a of appends) out = mergeAppend(rel, out, a[1].replace(/\s+$/, '')).content
     if (out === current) return { kind: 'invalid', reason: 'the edits change nothing' }
     return { kind: 'code', content: out, mode: 'edits' }
   }

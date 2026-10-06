@@ -378,5 +378,20 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const r = await runFeatureWorkflow(deps(x, model, { finalVerification: x.verification }), REQ)
   check('N45_a_test_that_writes_state_passes_on_every_re_run_because_runs_are_hermetic_and_the_workspace_stays_clean', r.status === 'COMPLETED' && r.repairs === 0 && !x.ws.exists('data/leak.txt'), `${r.status} ${r.reason} repairs=${r.repairs} leaked=${x.ws.exists('data/leak.txt')}`)
 }
+// ---- 14. credential-LIKE text in a model-written file or in command output must not abort real work, and must never be persisted
+{
+  const FAKE = 'abcd1234efgh5678ijkl'
+  const T = `import test from 'node:test'\nimport assert from 'node:assert'\n// fixture: token = "${FAKE}"\ntest('fails on purpose so the file is read as evidence', () => { assert.strictEqual(1, 2) })\n`
+  const x = makeWorld({ limits: { maxRetries: 3 } })
+  const model = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'test/messageStore.test.mjs') return fenced(T)
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: `the fixture line token = "${FAKE}" is irrelevant; the new test asserts 1 equals 2 which can never hold`, file: 'test/messageStore.test.mjs', differs: 'first attempt' })
+    if (c.kind === 'repair') return fenced(T.replace('assert.strictEqual(1, 2)', 'assert.strictEqual(1, 1)'))
+    return good(c)
+  })
+  const r = await runFeatureWorkflow(deps(x, model, { finalVerification: x.verification }), REQ)
+  const raw = (await import('node:fs')).readFileSync(x.log.file, 'utf8')
+  check('N46_credential_like_text_is_redacted_before_it_is_persisted_and_the_assignment_is_not_aborted_by_it', r.status === 'COMPLETED' && !raw.includes(FAKE) && raw.includes('[REDACTED]'), `${r.status} ${r.reason} persisted=${raw.includes(FAKE)}`)
+}
 void deriveAssignments; void AgentRegistry
 finish()
