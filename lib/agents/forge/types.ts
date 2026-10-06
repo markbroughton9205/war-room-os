@@ -37,6 +37,8 @@ export type BenchmarkRecord = {
   modelRef: string
   executor: string
   fixture: string
+  /** short git SHA of the engine code the run executed against */
+  engineSha?: string
   at: string
   taskClass: TaskClass
   verifierScore: { pass: number; total: number } | 'UNKNOWN'

@@ -12,6 +12,8 @@ import { detectNeed } from '../need'
 import { NEED_CRITERIA, type EngineeringTool } from '../types'
 import { assign, deriveAssignments, keyFor, startAssignment } from './assignments'
 import { CHAT_FEATURE, CHAT_VERIFY_SCRIPT, makeChatApp } from './chatFixture'
+import { TASK_FEATURE, TASK_VERIFY_SCRIPT, makeTaskApp } from './taskFixture'
+import { execFileSync } from 'node:child_process'
 import { latestCheckpoint } from './continuity'
 import { deriveLedger, debugSummary } from './debugLedger'
 import { OllamaModelClient } from './runtime/ollamaModel'
@@ -22,14 +24,20 @@ import { Workspace } from './runtime/workspaceFs'
 import { runFeatureWorkflow } from './workflow'
 import type { ModelClient, ModelResult } from './runtime/ports'
 
+// Fixture selection (identical engine, policy and verifier semantics for both): FIXTURE=chat (default) | task
+const FIXTURE = process.env.FIXTURE === 'task' ? 'task' : 'chat'
+const FX = FIXTURE === 'task'
+  ? { id: 'task-board', label: 'task-board (TASK_FEATURE, independent 12-check verifier)', feature: TASK_FEATURE, verify: TASK_VERIFY_SCRIPT, make: makeTaskApp, mission: 'mission-task-board', title: 'Persistent task board' }
+  : { id: 'chat-sessions', label: 'chat-sessions (CHAT_FEATURE, independent 12-check verifier)', feature: CHAT_FEATURE, verify: CHAT_VERIFY_SCRIPT, make: makeChatApp, mission: 'mission-chat-sessions', title: 'Persistent chat sessions' }
+const engineSha = (() => { try { return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: process.cwd() }).toString().trim() } catch { return 'UNKNOWN' } })()
 const outDir = process.argv[2]
 const modelName = process.argv[3] ?? 'qwen2.5-coder:14b'
 if (!outDir) throw new Error('usage: e2eRealModel.ts <outDir> [model]')
 mkdirSync(outDir, { recursive: true })
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
-const wsRoot = path.join(os.homedir(), 'WarRoomProjects', 'p10-acceptance', `chat-${stamp}`)
+const wsRoot = path.join(os.homedir(), 'WarRoomProjects', 'p10-acceptance', `${FX.id}-${stamp}`)
 mkdirSync(wsRoot, { recursive: true })
-makeChatApp(wsRoot)
+FX.make(wsRoot)
 const dataDir = path.join(outDir, `agent-ops-${stamp}`)
 const log = new AgentOpsLog(dataDir)
 const reg = new AgentRegistry(log)
@@ -39,7 +47,7 @@ const need = detectNeed({ title: 'Bootstrap engineering executor', evidence: NEE
 reg.recordNeed(need)
 const spec = reg.propose(need.id, { id: 'agent-eng-generalist', name: 'Foundry engineering generalist', purpose: 'implement bounded multi-layer features', specialization: 'feature_implementation', riskCeiling: 'moderate', permissionScope: ['read_repo', 'write_own_reports'], memoryScope: ['project_knowledge', 'agent_operational'], ioContract: { input: 'assignment', output: 'validated changes' }, escalationPath: 'commander', reviewProcess: 'Commander reviews outcomes', toolScope: TOOLS })
 reg.transition(spec.id, 'APPROVED', C, 'acceptance bootstrap approval'); reg.transition(spec.id, 'ACTIVE', C, 'acceptance bootstrap activation')
-const { assignment } = assign(log, { idempotencyKey: keyFor('mission-chat-sessions', 'feature_implementation', CHAT_FEATURE.request), agentId: spec.id, parentMission: { id: 'mission-chat-sessions', title: 'Persistent chat sessions' }, taskClass: 'feature_implementation', capabilities: ['feature_implementation'], objective: CHAT_FEATURE.request, expectedOutputs: ['working persistent sessions across storage, service, API and UI', 'passing tests'], completionConditions: ['independent verification passes', 'existing tests pass'], workspace: { id: 'chat-acceptance', root: wsRoot, kind: 'sandbox' }, tools: TOOLS, limits: { maxSteps: 40, maxRuntimeMs: 25 * 60_000, maxModelCalls: 60, maxRetries: 5 }, dependencies: [] }, C)
+const { assignment } = assign(log, { idempotencyKey: keyFor(FX.mission, 'feature_implementation', FX.feature.request), agentId: spec.id, parentMission: { id: FX.mission, title: FX.title }, taskClass: 'feature_implementation', capabilities: ['feature_implementation'], objective: FX.feature.request, expectedOutputs: ['working persistent sessions across storage, service, API and UI', 'passing tests'], completionConditions: ['independent verification passes', 'existing tests pass'], workspace: { id: 'chat-acceptance', root: wsRoot, kind: 'sandbox' }, tools: TOOLS, limits: { maxSteps: 40, maxRuntimeMs: 25 * 60_000, maxModelCalls: 60, maxRetries: 5 }, dependencies: [] }, C)
 startAssignment(log, assignment.id, 'system:engineering-runner')
 
 const real = new OllamaModelClient(modelName)
@@ -52,16 +60,16 @@ const traced: ModelClient = {
     return r
   },
 }
-const verification = makeIndependentVerification('independent chat-session verification', path.join(outDir, `verifier-${stamp}`), 'verify.mjs', CHAT_VERIFY_SCRIPT, wsRoot)
+const verification = makeIndependentVerification(`independent ${FX.id} verification`, path.join(outDir, `verifier-${stamp}`), 'verify.mjs', FX.verify, wsRoot)
 console.log(`workspace: ${wsRoot}\nmodel: ${modelName}\nassignment: ${assignment.id}`)
 const t0 = Date.now()
 let peakGpu: number | 'UNKNOWN' = 'UNKNOWN', peakRam: number | 'UNKNOWN' = 'UNKNOWN'
 const sampler = setInterval(() => { const g = gpuUsedMiB(), r = ramUsedMiB(); if (typeof g === 'number' && (peakGpu === 'UNKNOWN' || g > peakGpu)) peakGpu = g; if (typeof r === 'number' && (peakRam === 'UNKNOWN' || r > peakRam)) peakRam = r }, 3000)
-const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, onEvent: (e) => console.log(`[${e.kind}] ${e.detail}`) }, { request: CHAT_FEATURE.request, acceptance: CHAT_FEATURE.acceptance, hints: CHAT_FEATURE.hints })
+const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, onEvent: (e) => console.log(`[${e.kind}] ${e.detail}`) }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
 const v = deriveAssignments(log).assignments.get(assignment.id)!
 const finalVerify = await verification.run()
 const report = {
-  stamp, model: modelName, workspace: wsRoot, assignmentId: assignment.id, wallMs: Date.now() - t0,
+  stamp, fixture: FX.id, engineSha, model: modelName, workspace: wsRoot, assignmentId: assignment.id, wallMs: Date.now() - t0,
   result, assignmentState: v.state, outcome: v.outcome, stopReason: v.stopReason ?? null,
   independentVerificationNow: { exitCode: finalVerify.exitCode, summary: finalVerify.stdout.split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ') },
   checkpoint: latestCheckpoint(log, assignment.id)?.state.steps.map((s) => `${s.id} ${s.status} ${s.files[0] ?? ''}${s.note ? ' — ' + s.note : ''}`),
@@ -74,6 +82,6 @@ writeFileSync(path.join(outDir, `report-${stamp}.json`), JSON.stringify(report, 
   const pass = Number(/# pass (\d+)/.exec(report.independentVerificationNow.summary)?.[1]), total = Number(/# tests (\d+)/.exec(report.independentVerificationNow.summary)?.[1])
   const CHAT_CHECKS = 12 // the independent verifier's check count; "verification could not complete" means none of them could pass
   const score = /could not complete/.test(report.independentVerificationNow.summary) ? { pass: 0, total: CHAT_CHECKS } : Number.isFinite(pass) && Number.isFinite(total) && total > 0 ? { pass, total } : ('UNKNOWN' as const)
-  new ForgeStore().recordBenchmark({ modelRef: modelName, executor: `ollama:${modelName}`, fixture: 'chat-sessions (CHAT_FEATURE, independent 12-check verifier)', at: new Date().toISOString(), taskClass: 'complete_feature', verifierScore: score, completion: result.status === 'COMPLETED' && score !== 'UNKNOWN' && score.pass === score.total ? 'COMPLETED' : result.status === 'BLOCKED' ? 'BLOCKED' : score !== 'UNKNOWN' && score.pass > 2 ? 'PARTIAL' : 'FAILED', modelCalls: result.modelCalls, repairs: result.repairs, retries: 'UNKNOWN', regressions: 'UNKNOWN', elapsedMs: report.wallMs, manualIntervention: false, contextTokens: 8192, ramMiB: peakRam, vramMiB: peakGpu, rootCause: result.status === 'COMPLETED' ? undefined : result.reason, evidencePath: path.join(outDir, `report-${stamp}.json`), historicalBaseline: process.argv[4] === 'baseline' })
+  new ForgeStore().recordBenchmark({ modelRef: modelName, executor: `ollama:${modelName}`, fixture: FX.label, engineSha, at: new Date().toISOString(), taskClass: 'complete_feature', verifierScore: score, completion: result.status === 'COMPLETED' && score !== 'UNKNOWN' && score.pass === score.total ? 'COMPLETED' : result.status === 'BLOCKED' ? 'BLOCKED' : score !== 'UNKNOWN' && score.pass > 2 ? 'PARTIAL' : 'FAILED', modelCalls: result.modelCalls, repairs: result.repairs, retries: 'UNKNOWN', regressions: 'UNKNOWN', elapsedMs: report.wallMs, manualIntervention: false, contextTokens: 8192, ramMiB: peakRam, vramMiB: peakGpu, rootCause: result.status === 'COMPLETED' ? undefined : result.reason, evidencePath: path.join(outDir, `report-${stamp}.json`), historicalBaseline: process.argv[4] === 'baseline' })
 }
 console.log(JSON.stringify({ status: result.status, reason: result.reason, modelCalls: result.modelCalls, repairs: result.repairs, tokens: result.tokens, files: result.filesChanged, verify: report.independentVerificationNow, wallS: Math.round(report.wallMs / 1000) }, null, 1))
