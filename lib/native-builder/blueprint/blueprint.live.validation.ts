@@ -228,9 +228,9 @@ async function main() {
     const tools = materializeTools(blueprintRoots().tools), tf = tools['wr-bundle-build.mjs'].path; fs.appendFileSync(tf, '// tampered\n'); const tools2 = materializeTools(blueprintRoots().tools)
     check('tampered_tool_script_is_replaced_by_pinned_content', tools2['wr-bundle-build.mjs'].path === tf && sha(fs.readFileSync(tf)) === tools2['wr-bundle-build.mjs'].sha256, 'materialization verifies and rewrites')
     const apiSrc = fs.readFileSync(path.join(repoRoot(), 'lib/native-builder/blueprint/liveApi.ts'), 'utf8')
-    const routes = ['', 'import', '[id]', '[id]/preview', '[id]/approve', '[id]/run', '[id]/pause', '[id]/resume', '[id]/cancel', '[id]/reconcile', '[id]/restore', '[id]/receipts', '[id]/status', '[id]/dependencies'].map(r => path.join(repoRoot(), 'app/api/foundry/blueprints', r, 'route.ts'))
+    const routes = ['', 'import', '[id]', '[id]/preview', '[id]/approve', '[id]/run', '[id]/pause', '[id]/resume', '[id]/cancel', '[id]/reconcile', '[id]/restore', '[id]/verify', '[id]/receipts', '[id]/status', '[id]/dependencies'].map(r => path.join(repoRoot(), 'app/api/foundry/blueprints', r, 'route.ts'))
     check('all_routes_exist_and_delegate_to_gated_handlers', routes.every(f => fs.existsSync(f) && fs.readFileSync(f, 'utf8').includes("@/lib/native-builder/blueprint/liveApi")), `${routes.length} routes`)
-    const mutating = ['handleImport', 'handleApprove', 'handleRun', 'handlePause', 'handleResume', 'handleCancel', 'handleReconcile', 'handleRestore']
+    const mutating = ['handleVerify', 'handleImport', 'handleApprove', 'handleRun', 'handlePause', 'handleResume', 'handleCancel', 'handleReconcile', 'handleRestore']
     check('mutating_handlers_require_csrf_and_commander', mutating.every(h => new RegExp(`export const ${h} = \\(req: Request[^)]*\\) => withActor\\(req, true`).test(apiSrc)) && apiSrc.includes('requireCommanderSessionFacts') && apiSrc.includes('x-wr-blueprints') && apiSrc.includes('assertLocalMutationOrigin'), 'withActor(req, true, …) on every mutating verb')
 
     // ---- L13 UI truthfulness (pure view model used by /war-room/engineering/blueprints)

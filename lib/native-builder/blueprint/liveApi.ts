@@ -215,6 +215,9 @@ export const handleReconcile = (req: Request, rawId: string) => withActor(req, t
   return { execId: id, recovery: await a.rt.broker.recoverRun(a.handle, id, action, ctx) }
 })
 
+/** Re-verifies the recorded build/package artifacts against disk (read-only on artifacts; records one VERIFICATION receipt). Tampering turns the affected stages UNUSABLE. */
+export const handleVerify = (req: Request, rawId: string) => withActor(req, true, async a => { const id = needId(rawId); await ctxFor(a, id); const v = await a.rt.broker.verifyArtifacts(a.handle, id); return { execId: id, verification: { build: v.build ?? null, package: v.package ?? null, receiptId: v.receiptId ?? null }, current: v.current } })
+
 export const handleRestore = (req: Request, rawId: string) => withActor(req, true, async a => { const id = needId(rawId), ctx = await ctxFor(a, id); return { execId: id, recovery: await a.rt.broker.recoverRun(a.handle, id, 'RESTORE', ctx) } })
 
 export const handleReceipts = (req: Request, rawId: string) => withActor(req, false, async a => {

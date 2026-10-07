@@ -155,6 +155,7 @@ export function FoundryBlueprintsPanel() {
                 <button data-testid="bp-resume" disabled={busy} onClick={() => act('Resume', `${API}/${sel}/resume`)} className="px-2 py-1 text-xs bg-gray-700">Resume</button>
                 <button data-testid="bp-cancel" disabled={busy} onClick={() => act('Cancel', `${API}/${sel}/cancel`, { reason: 'Commander cancel' })} className="px-2 py-1 text-xs bg-red-800">Cancel</button>
                 <button data-testid="bp-reconcile" disabled={busy} onClick={() => act('Reconcile', `${API}/${sel}/reconcile`, { action: 'RECONCILE' })} className="px-2 py-1 text-xs bg-gray-700">Reconcile</button>
+                <button data-testid="bp-verify" disabled={busy} onClick={() => act('Verify artifacts', `${API}/${sel}/verify`)} className="px-2 py-1 text-xs bg-gray-700">Verify artifacts</button>
                 <button data-testid="bp-restore" disabled={busy} onClick={() => act('Restore', `${API}/${sel}/restore`)} className="px-2 py-1 text-xs bg-gray-700">Restore</button>
               </div>
             </Section>
@@ -168,7 +169,7 @@ export function FoundryBlueprintsPanel() {
             </Section>
 
             <Section id="artifacts" title="ARTIFACTS">
-              <p data-testid="bp-art-verification" className="text-xs text-gray-300 mb-1">Verification: {arts.verification}</p>
+              <p data-testid="bp-art-verification" className="text-xs text-gray-300 mb-1">Verification: {arts.verification} (as last recorded; use Verify artifacts to re-check the files on disk)</p>
               {arts.rows.length === 0 && <p className="text-xs text-gray-400">No artifacts recorded (nothing built/packaged, or UNKNOWN).</p>}
               <table className="text-xs w-full"><tbody>{arts.rows.map((a, i) => <tr key={i} data-testid="bp-artifact"><td className="pr-2">{a.stage}</td><td className="pr-2 break-all">{a.name}</td><td className="pr-2">{short(a.sha256)}</td><td className="pr-2">{a.bytes} B</td><td className="pr-2">run {a.runId.slice(0, 10)}</td><td className="font-bold">{a.verification}</td></tr>)}</tbody></table>
             </Section>
