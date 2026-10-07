@@ -117,8 +117,8 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const x = makeWorld()
   let broke = false
   const model = new ScriptedModel((c) => {
-    if (c.kind === 'file' && c.path === 'src/chatService.mjs' && !broke) { broke = true; return fenced(CHAT_REFERENCE['src/chatService.mjs'].replace('export function createSession(name) {', 'export function createSession(name) {{{')) }
-    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'createSession has a stray brace that makes the module fail to parse (see SyntaxError)', file: 'src/chatService.mjs', differs: 'first attempt' })
+    if (c.kind === 'file' && c.path === 'src/chatService.mjs' && !broke) { broke = true; return fenced(CHAT_REFERENCE['src/chatService.mjs'] + '\nreturn 1\n') } // an illegal top-level return: the static syntax gate accepts it, node --check does not
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'createSession declares dup twice which makes the module fail to parse (see SyntaxError)', file: 'src/chatService.mjs', differs: 'first attempt' })
     if (c.kind === 'repair') return fenced(CHAT_REFERENCE['src/chatService.mjs'])
     return good(c)
   })
@@ -240,7 +240,7 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
     return good(c)
   })
   const r3 = await runFeatureWorkflow(deps(z, m3), REQ)
-  check('N29_a_file_the_model_wrongly_skipped_is_offered_as_a_repair_candidate_because_the_error_output_names_it', r3.status === 'COMPLETED' && analysed >= 1 && r3.filesChanged.includes('src/chatService.mjs') && deriveLedger(z.log, z.asg.id).repairs[0].filesEdited[0].path === 'src/chatService.mjs', `${r3.status} ${r3.reason}`)
+  check('N29_a_file_the_model_wrongly_skipped_is_offered_as_a_repair_candidate_because_the_error_output_names_it', r3.status === 'COMPLETED' && analysed === 0 /* the structured evidence names the module; no analyst guess is needed */ && r3.filesChanged.includes('src/chatService.mjs') && deriveLedger(z.log, z.asg.id).repairs[0].filesEdited[0].path === 'src/chatService.mjs', `${r3.status} ${r3.reason}`)
 }
 
 // ---- 8. edit protocol (append / search-replace) parsing
@@ -261,7 +261,7 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
 // ---- 8. measurable learning: lesson captured from a real fixed failure -> retrieved on a later similar task -> effect measured
 {
   const x = makeWorld(); let broke = false
-  const dup = CHAT_REFERENCE['src/chatService.mjs'].replace('export function createSession(name) {', 'export function createSession(name) {{{')
+  const dup = CHAT_REFERENCE['src/chatService.mjs'] + '\nreturn 1\n'
   const m1 = new ScriptedModel((c) => {
     if (c.kind === 'file' && c.path === 'src/chatService.mjs' && !broke) { broke = true; return fenced(dup) }
     if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'createSession has a stray brace so chatService.mjs fails to parse (SyntaxError)', file: 'src/chatService.mjs', differs: 'first attempt' })
@@ -349,7 +349,7 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
 }
 // ---- 12. repeated hypotheses: acting twice on the same cause is refused; one different hypothesis is requested, else UNDETERMINED early
 {
-  const brk = CHAT_REFERENCE['src/chatService.mjs'].replace('export function createSession(name) {', 'export function createSession(name) {{{')
+  const brk = CHAT_REFERENCE['src/chatService.mjs'] + '\nreturn 1\n'
   const x = makeWorld({ limits: { maxRetries: 5 } }); let analysed = 0, repairsAsked = 0
   const m1 = new ScriptedModel((c) => {
     if (c.kind === 'file' && c.path === 'src/chatService.mjs') return fenced(brk)
@@ -456,4 +456,27 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   check('N53_a_page_that_lacks_the_element_ids_its_client_scripts_read_is_rejected_and_the_retry_names_the_ids', r2.status === 'COMPLETED' && k === 2 && !!retry && /missing elements that its client scripts read/.test(retry.prompt), `${r2.status} k=${k}`)
 }
 void deriveAssignments; void AgentRegistry
+// ---- 16. structured-evidence repair: failed check -> implicated route/symbol -> explicit hypothesis -> before/after comparison; refuted hypotheses are never repeated; two refutations escalate
+{
+  const buggyServer = CHAT_REFERENCE['server.mjs'].replaceAll("send(res, 404, { error: 'session not found' })", "send(res, 400, { error: 'session not found' })")
+  const noop = (c: ScriptCtx) => { const m = /CURRENT CONTENT:\n```\n([\s\S]*?)\n```/.exec(c.prompt); return m ? fenced(m[1]) : null }
+  const fixes = (c: ScriptCtx) => (c.path === 'server.mjs' ? fenced(CHAT_REFERENCE['server.mjs']) : noop(c))
+  const filePhase = (c: ScriptCtx) => (c.kind === 'file' && c.path === 'server.mjs' ? fenced(buggyServer) : good(c))
+  const x = makeWorld(); const ev: string[] = []
+  const primary = new ScriptedModel((c) => (c.kind === 'repair' ? noop(c) : filePhase(c)))
+  const esc = new ScriptedModel((c) => (c.kind === 'repair' ? fixes(c) : null))
+  const r = await runFeatureWorkflow(deps(x, primary, { escalation: { label: 'esc-model', model: esc }, onEvent: (e) => ev.push(`${e.kind} ${e.detail}`) }), REQ)
+  const refuted = r.repairTrace!.filter((t) => t.outcome === 'REFUTED' || t.outcome === 'NO_EDIT')
+  check('N54_the_failing_check_is_mapped_to_explicit_hypotheses_and_each_attempt_acts_on_a_different_one', r.repairTrace!.length >= 3 && new Set(r.repairTrace!.map((t) => t.key)).size === r.repairTrace!.length && r.repairTrace![0].key.startsWith('status:') && /unknown session ids/.test(r.repairTrace![0].checkName), JSON.stringify(r.repairTrace!.map((t) => `${t.key}:${t.outcome}`)))
+  check('N55_a_repair_that_leaves_the_same_check_failure_unchanged_is_recorded_REFUTED_with_before_and_after_signatures', refuted.length === 2 && refuted.every((t) => t.before === t.after && t.before.length > 0), JSON.stringify(refuted.map((t) => t.outcome)))
+  check('N56_after_two_refuted_hypotheses_the_context_depth_and_the_model_escalate_and_the_switch_is_recorded_not_silent', r.escalations!.length === 1 && r.escalations![0].modelBefore !== r.escalations![0].modelAfter && r.escalations![0].modelAfter === 'esc-model' && r.escalations![0].contextDepth === 1 && ev.some((e) => e.startsWith('ESCALATE') && e.includes('esc-model')), JSON.stringify(r.escalations))
+  const last = r.repairTrace!.at(-1)!
+  check('N57_the_escalated_attempt_fixes_the_target_check_and_the_outcome_difference_is_recorded', r.status === 'COMPLETED' && last.model === 'esc-model' && last.contextDepth === 1 && last.outcome === 'TARGET_FIXED' && /TARGET_FIXED/.test(r.escalations![0].outcomeAfter ?? '') && refuted.every((t) => t.model !== 'esc-model'), `${r.status} ${r.reason}`)
+  check('N58_the_escalated_prompt_carries_the_deterministic_evidence_and_the_refuted_list', esc.calls.some((c) => c.kind === 'repair' && c.prompt.includes('ENGINE EVIDENCE') && c.prompt.includes('REFUTED HYPOTHESES') && /status:map|status:raise/.test(c.prompt)))
+  const y = makeWorld(); const ev2: string[] = []
+  const solo = new ScriptedModel((c) => (c.kind === 'repair' ? (c.prompt.includes('HYPOTHESIS TO ACT ON NOW (status:inline') ? fixes(c) : noop(c)) : filePhase(c)))
+  const r2 = await runFeatureWorkflow(deps(y, solo, { onEvent: (e) => ev2.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('N59_without_an_escalation_model_the_context_still_escalates_and_the_model_is_never_switched_silently', r2.status === 'COMPLETED' && r2.escalations!.length === 1 && r2.escalations![0].modelBefore === r2.escalations![0].modelAfter && ev2.some((e) => /no escalation model configured/.test(e)), JSON.stringify(r2.escalations))
+}
+
 finish()

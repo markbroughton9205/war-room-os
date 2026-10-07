@@ -55,7 +55,7 @@ const need = detectNeed({ title: 'Bootstrap engineering executor', evidence: NEE
 reg.recordNeed(need)
 const spec = reg.propose(need.id, { id: 'agent-eng-generalist', name: 'Foundry engineering generalist', purpose: 'implement bounded multi-layer features', specialization: 'feature_implementation', riskCeiling: 'moderate', permissionScope: ['read_repo', 'write_own_reports'], memoryScope: ['project_knowledge', 'agent_operational'], ioContract: { input: 'assignment', output: 'validated changes' }, escalationPath: 'commander', reviewProcess: 'Commander reviews outcomes', toolScope: TOOLS })
 reg.transition(spec.id, 'APPROVED', C, 'acceptance bootstrap approval'); reg.transition(spec.id, 'ACTIVE', C, 'acceptance bootstrap activation')
-const { assignment } = assign(log, { idempotencyKey: keyFor(FX.mission, 'feature_implementation', FX.feature.request), agentId: spec.id, parentMission: { id: FX.mission, title: FX.title }, taskClass: 'feature_implementation', capabilities: ['feature_implementation'], objective: FX.feature.request, expectedOutputs: ['working persistent sessions across storage, service, API and UI', 'passing tests'], completionConditions: ['independent verification passes', 'existing tests pass'], workspace: { id: 'chat-acceptance', root: wsRoot, kind: 'sandbox' }, tools: TOOLS, limits: { maxSteps: 40, maxRuntimeMs: 25 * 60_000, maxModelCalls: 60, maxRetries: 5 }, dependencies: [] }, C)
+const { assignment } = assign(log, { idempotencyKey: keyFor(FX.mission, 'feature_implementation', FX.feature.request), agentId: spec.id, parentMission: { id: FX.mission, title: FX.title }, taskClass: 'feature_implementation', capabilities: ['feature_implementation'], objective: FX.feature.request, expectedOutputs: ['working persistent sessions across storage, service, API and UI', 'passing tests'], completionConditions: ['independent verification passes', 'existing tests pass'], workspace: { id: 'chat-acceptance', root: wsRoot, kind: 'sandbox' }, tools: TOOLS, limits: { maxSteps: 40, maxRuntimeMs: 25 * 60_000, maxModelCalls: 60, maxRetries: Number(process.env.MAX_RETRIES ?? 8) }, dependencies: [] }, C)
 startAssignment(log, assignment.id, 'system:engineering-runner')
 
 const real = new OllamaModelClient(modelName)
@@ -68,6 +68,9 @@ const traced: ModelClient = {
     return r
   },
 }
+// Optional escalation model (ESCALATION_MODEL=<installed ollama model>): used only after two refuted repair hypotheses; every switch is recorded in result.escalations.
+const escalationName = process.env.ESCALATION_MODEL
+const escalation = escalationName ? { label: escalationName, model: ((): ModelClient => { const e = new OllamaModelClient(escalationName); return { async generate(input) { const t1 = Date.now(); const r = await e.generate(input); appendFileSync(trace, JSON.stringify({ at: new Date().toISOString(), ms: Date.now() - t1, escalation: escalationName, promptChars: input.prompt.length, ok: r.ok, ...(r.ok ? { reply: r.text } : { detail: r.detail }) }) + '\n'); return r } } })() } : undefined
 const verification = makeIndependentVerification(`independent ${FX.id} verification`, path.join(outDir, `verifier-${stamp}`), 'verify.mjs', FX.verify, wsRoot)
 console.log(`workspace: ${wsRoot}\nmodel: ${modelName}\nassignment: ${assignment.id}`)
 // Optional lesson retrieval (LESSON_STORE=<dir> of previously harvested lessons). Off by default; control runs never see lessons.
@@ -85,7 +88,7 @@ const t0 = Date.now()
 let peakGpu: number | 'UNKNOWN' = 'UNKNOWN', peakRam: number | 'UNKNOWN' = 'UNKNOWN'
 const sampler = setInterval(() => { const g = gpuUsedMiB(), r = ramUsedMiB(); if (typeof g === 'number' && (peakGpu === 'UNKNOWN' || g > peakGpu)) peakGpu = g; if (typeof r === 'number' && (peakRam === 'UNKNOWN' || r > peakRam)) peakRam = r }, 3000)
 const evCount: Record<string, number> = {}
-const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => { evCount[e.kind] = (evCount[e.kind] ?? 0) + 1; console.log(`[${e.kind}] ${e.detail}`) } }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
+const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(escalation ? { escalation } : {}), ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => { evCount[e.kind] = (evCount[e.kind] ?? 0) + 1; console.log(`[${e.kind}] ${e.detail}`) } }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
 const v = deriveAssignments(log).assignments.get(assignment.id)!
 const finalVerify = await verification.run()
 const lessonEffect = lessonStoreDir ? measureLessonEffect(log, assignment.id) : null

@@ -11,7 +11,11 @@ import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 import { collisionFacts, isCollisionProblem } from './collision'
 import { quarantineTests } from './testContract'
-import { undefinedNames, routeShadowing, domIds, missingDomIds } from './staticGates'
+import { undefinedNames, routeFindings, routeTable, contractRouteProblems, statusReachability, syntaxProblems, legacyStateDrift, domIds, missingDomIds } from './staticGates'
+import { persistenceProblems, persistenceProbe, wantsPersistence, type PersistenceProbe } from './persistenceContract'
+import { buildEvidence, renderEvidence } from './failureEvidence'
+import { startupProbe } from './startupProbe'
+import { storageEnvVars } from './persistenceContract'
 import { seedFromHandoff } from './successor'
 
 export type FeatureRequest = { request: string; acceptance: string[]; hints?: string[] }
@@ -30,12 +34,18 @@ export type WorkflowDeps = {
   onEvent?: (e: WorkflowEvent) => void
   /** Stop after N completed steps (used by crash/restart tests and acceptance to simulate process death). */
   crashAfterSteps?: number
+  /** Model to escalate to (already installed, permissive) after two materially distinct repair hypotheses were refuted. Never switched silently: every switch is an ESCALATE event and a result record. */
+  escalation?: { label: string; model: ModelClient }
 }
+export type RepairTraceEntry = { step: string; label: string; attempt: number; check: number | null; checkName: string; key: string; hypothesis: string; files: string[]; model: string; contextDepth: 0 | 1; before: string; after: string; outcome: 'TARGET_FIXED' | 'CHANGED' | 'REFUTED' | 'NO_EDIT' }
+export type EscalationRecord = { step: string; attempt: number; reason: string; modelBefore: string; modelAfter: string; contextDepth: 1; outcomeAfter?: string }
 export type WorkflowResult = {
   status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'PAUSED' | 'CONFLICT' | 'BLOCKED' | 'CRASHED'
   reason: string
   modelCalls: number
   quarantinedTests?: number
+  repairTrace?: RepairTraceEntry[]
+  escalations?: EscalationRecord[]
   repairs: number
   filesChanged: string[]
   stepsDone: number
@@ -58,13 +68,18 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   let executor: WorkflowResult['executor'] = 'UNKNOWN'
   let repairs = 0
   let quarantined = 0
+  const trace: RepairTraceEntry[] = []
+  const escalations: EscalationRecord[] = []
+  let activeModel: ModelClient = deps.model
   let stepsDone = 0
   const changed = new Set<string>()
   const emit = (kind: string, detail: string) => deps.onEvent?.({ at: clock().toISOString(), kind, detail })
-  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => ({ status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, stepsDone, tokens, latencyMs: Date.now() - t0, executor })
+  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => ({ status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, repairTrace: trace, escalations, stepsDone, tokens, latencyMs: Date.now() - t0, executor })
 
   // ---- state: resume from the latest checkpoint when one exists
   const baselineSnap = ws.snapshot()
+  const baselineText: Record<string, string> = {}
+  for (const p of Object.keys(baselineSnap).filter((x) => /\.(m?js|html?)$/.test(x) && !/node_modules/.test(x)).slice(0, 80)) baselineText[p] = ws.read(p)
   const prior = latestCheckpoint(log, assignmentId)
   let state: CheckpointState
   let plan: EngineeringCodePlan
@@ -117,7 +132,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     modelCalls += 1
     const ac = new AbortController()
     const poll = setInterval(() => { const g = executionGate(log, assignmentId); if (!g.proceed && g.reason !== 'OK') ac.abort() }, 400)
-    try { const r = await deps.model.generate({ system, prompt, json, ...sampling, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }); return r } finally { clearInterval(poll) }
+    try { const r = await activeModel.generate({ system, prompt, json, ...sampling, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }); return r } finally { clearInterval(poll) }
   }
   const noteTokens = (r: ModelResult) => { if (r.ok) { executor = r.executor; tokens = tokens === 'UNKNOWN' || r.outputTokens === 'UNKNOWN' ? 'UNKNOWN' : tokens + r.outputTokens + (r.promptTokens === 'UNKNOWN' ? 0 : r.promptTokens); if (r.promptTokens === 'UNKNOWN') tokens = 'UNKNOWN' } }
   type Gate = { stop: WorkflowResult | null }
@@ -180,6 +195,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   }
   /** Every static gate a reply must pass BEFORE it is written. */
   const gateProblem = (path: string, content: string, ignoreModules: Set<string> = new Set()): string | null => {
+    const syn = syntaxProblems(path, content)
+    if (syn.length) return `your version has a syntax error and the program would not start: ${syn.join('; ')}. Return the complete, syntactically valid file.`
     const dups = /\.m?[jt]sx?$/.test(path) ? topLevelDuplicates(path, content) : []
     if (dups.length) {
       const imported = dups.filter((n) => new RegExp(`import\\s*\\{[^}]*\\b${n}\\b[^}]*\\}`).test(content))
@@ -199,8 +216,24 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         const where = fresh.map((n) => { const f = Object.values(idx.files).find((x) => x.path !== path && x.exports.includes(n)); return f ? `${n} is exported by ${f.path} (add: import { ${n} } from '<relative path to ${f.path}>')` : `${n} is not exported by any workspace file (declare it or do not call it)` })
         return `your version uses names that are never declared or imported, which fails at run time with "is not defined": ${where.join('; ')}.`
       }
-      const shadow = routeShadowing(path, content).filter((s) => !routeShadowing(path, before).some((b) => b.literal === s.literal))
-      if (shadow.length) return `route shadowing: ${shadow.map((s) => `${s.literal} (line ${s.literalLine}) is registered after the prefix route ${s.prefix} (line ${s.prefixLine}), which matches it first`).join('; ')}. Register every literal route BEFORE any prefix or id route.`
+      const dispatcher = /createServer\s*\(/.test(content) || routeTable(content).length >= 3
+      if (dispatcher) {
+        const hadF = new Set(routeFindings(path, before).map((f) => `${f.kind}|${f.hidden}`))
+        const found = routeFindings(path, content).filter((f) => !hadF.has(`${f.kind}|${f.hidden}`))
+        if (found.length) return `route conflict: ${found.map((f) => f.kind === 'DUPLICATE' ? `${f.hidden} is registered twice (lines ${f.hidingLine} and ${f.hiddenLine})` : `${f.hidden} (line ${f.hiddenLine}) is never reached: ${f.hiding} (line ${f.hidingLine}) matches it first [${f.kind === 'PREFIX_SHADOWS' ? 'broad prefix route' : 'parameter route'}]`).join('; ')}. Register every specific route BEFORE any prefix or parameter route that also matches it.`
+        const clients = Object.keys(ws.snapshot()).filter((f) => /^public\/.+\.js$/.test(f)).map((f) => ws.read(f))
+        const cp = contractRouteProblems(path, content, req.acceptance, clients)
+        if (cp.length) return `the server does not serve what the acceptance contract requires: ${cp.join('; ')}. Add or fix exactly these routes (method and path as written in the contract).`
+        const files = { ...Object.fromEntries(Object.keys(ws.snapshot()).filter((f) => /\.m?js$/.test(f)).map((f) => [f, ws.read(f)])), [path]: content }
+        const lost = statusReachability(files, req.acceptance)
+        if (lost.length) return `the acceptance contract requires HTTP ${lost.join(', ')} but nothing in the code can ever respond with it. A generic catch that always answers one status hides it: raise errors that carry their status (for example err.status) and answer with that status.`
+      }
+      const drift = legacyStateDrift(path, before, content)
+      if (drift.length) return `existing exports changed which data they use: ${drift.map((d) => `${d.fn}() used ${d.was} and now uses the NEW state ${d.now}`).join('; ')}. Existing endpoints must keep their own behaviour and data: leave ${drift.map((d) => d.fn).join(', ')} using ${drift[0].was} and add NEW functions for the new feature.`
+      const snap = Object.fromEntries(Object.keys(ws.snapshot()).filter((f) => /\.m?js$/.test(f) && !/^(test|node_modules|public)\//.test(f)).map((f) => [f, ws.read(f)]))
+      const hadP = new Set(persistenceProblems(snap, req.acceptance))
+      const pp = persistenceProblems({ ...snap, [path]: content }, req.acceptance).filter((x) => !hadP.has(x))
+      if (pp.length) return `persistence contract: ${pp.join('; ')}`
     }
     if (/\.html?$/.test(path)) {
       const ids = [...new Set(Object.keys(ws.snapshot()).filter((f) => /\.m?js$/.test(f) && !/^(test|src|node_modules)\//.test(f) && f !== 'server.mjs').flatMap((f) => domIds(ws.read(f))))]
@@ -247,92 +280,160 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const hypTokens = (t: string) => new Set(t.toLowerCase().match(/[a-z0-9_]+/g) ?? [])
   /** Near-identical wording (token Jaccard >= 0.6) means the analyst re-proposed a cause that was already acted on without fixing the failure. */
   const sameHypothesis = (a: string, b: string) => { const A = hypTokens(a), B = hypTokens(b); let i = 0; for (const x of A) if (B.has(x)) i += 1; return A.size > 0 && B.size > 0 && i / (A.size + B.size - i) >= 0.6 }
-  /** The evidence-driven repair loop for ONE failing command. Returns true when the ORIGINAL failure is fixed. */
+  const sourceFiles = (): Record<string, string> => Object.fromEntries(Object.keys(ws.snapshot()).filter((p) => /\.(m?js|html?)$/.test(p) && !/node_modules/.test(p)).map((p) => [p, ws.read(p)]))
+  const modelLabel = (m: ModelClient): string => (m === deps.model ? (executor === 'UNKNOWN' ? 'primary' : executor.model) : deps.escalation && m === deps.escalation.model ? deps.escalation.label : 'unknown')
+  const probeRecord = (pr: PersistenceProbe): CommandRecord => {
+    const body = pr.verdict === 'FAIL' ? `not ok 1 - persistence round trip survives a restart\n  message: ${pr.detail}\n# tests 1\n# pass 0\n# fail 1\n` : `ok 1 - persistence round trip survives a restart\n# tests 1\n# pass 1\n# fail 0\n`
+    return { argv: ['persistence-probe'], cwd: ws.root, exitCode: pr.verdict === 'FAIL' ? 1 : 0, timedOut: false, stdout: body, stderr: '', durationMs: 0, startedAt: clock().toISOString(), outputHash: sha256(body) }
+  }
+  const runProbe = async (): Promise<PersistenceProbe> => persistenceProbe(ws.root, req.acceptance, Object.keys(ws.snapshot()))
+  /**
+   * The evidence-driven repair loop for ONE failing command. Returns true when the ORIGINAL failure is fixed.
+   * failed check -> implicated route/symbol/storage path (failureEvidence) -> ordered, falsifiable hypotheses -> ONE hypothesis acted on per attempt
+   * -> the original reproducer is re-run and the SAME check's failure is compared before/after: unchanged = REFUTED (never repeated), changed = progress.
+   * Two refuted, materially distinct hypotheses escalate the context depth (and the model, when an escalation model is configured).
+   * When the output is not a structured check list (or the failing step is a model-written test), the analyst-driven path below is used.
+   */
   const debugLoop = async (failedCmd: CommandRecord, candidates: string[], stepId: string, label: string, rerunOriginal: () => Promise<CommandRecord> = () => runCheck(failedCmd.argv), confine?: string[]): Promise<boolean> => {
     let cmd = failedCmd
     let rec = recordFailure(log, assignmentId, cmd, actor, clock())
     const attemptsNotes: string[] = confine ? ['The implementation already PASSED the independent acceptance verification. The failing test is the suspect: fix the TEST file so it matches the real behaviour; do not change implementation files.'] : []
     const triedFiles = new Set<string>()
     const priorHyps: string[] = []
+    const tried = new Map<string, { outcome: 'REFUTED' | 'CHANGED'; times: number; why: string }>()
+    let refutedRun = 0
+    let escalatedHere: EscalationRecord | null = null
+    const canTry = (k: string) => { const t = tried.get(k); return !t || (t.outcome === 'CHANGED' && t.times < 2) }
     // Per-failure budget is MAX_REPAIR_ATTEMPTS; a repair that STRICTLY REDUCES the number of failing checks is progress and opens a fresh failure record
     // for the remainder (its own evidence discipline). The assignment's maxRetries ceiling bounds the total, and strictly-decreasing failures cannot loop.
     const totalCap = Math.max(1, limits.maxRetries), perCap = Math.min(MAX_REPAIR_ATTEMPTS, totalCap)
+    try {
     for (let attempt = 1, total = 0; attempt <= perCap && total < totalCap; attempt++, total++) {
       const b = boundary(); if (b.stop) throw Object.assign(new Error('STOP'), { stop: b.stop })
       const bs = budgetStop(); if (bs) throw Object.assign(new Error('STOP'), { stop: bs })
       const out = `${cmd.stdout}\n${cmd.stderr}`
       const evCmd = addEvidence(log, assignmentId, rec.failureId, { kind: /\.m?js$/.test(cmd.argv.at(-1) ?? '') && cmd.argv[1] === '--check' ? 'type_diagnostic' : 'test_result', ref: `${cmd.argv.join(' ')}#attempt${attempt}`, content: out, summary: `${label} failed (exit ${cmd.exitCode}): ${out.split('\n').filter((l) => /Error|not ok|✖|fail/i.test(l)).slice(0, 2).join(' | ').slice(0, 220) || 'see output'}` }, actor, clock())
-      const cand = candidatesFromOutput(out, candidates.filter((c) => ws.exists(c))).filter((c) => !confine || confine.includes(c))
-      const evFiles = cand.map((c) => addEvidence(log, assignmentId, rec.failureId, { kind: 'file_read', ref: c, content: ws.read(c), summary: `current content of ${c}` }, actor, clock()))
-      const ar = await call(ANALYST_SYSTEM, analystPrompt({ failureOutput: out, candidates: cand.map((c) => ({ path: c, text: ws.read(c) })), prior: attemptsNotes }), true)
-      noteTokens(ar)
-      if (!ar.ok) { attemptsNotes.push(`analysis call failed: ${ar.detail}`); continue }
-      let parsed: { hypothesis?: string; file?: string; differs?: string } = {}
-      try { parsed = JSON.parse(ar.text) } catch { parsed = {} }
-      let hypText = (parsed.hypothesis ?? '').trim()
-      if (!hypText) { attemptsNotes.push('analysis returned no hypothesis'); continue }
-      if (priorHyps.some((p) => sameHypothesis(p, hypText)) && budgetLeft()) {
-        // the same cause was already acted on and the failure persists: ask once for a DIFFERENT cause before spending another repair
-        const again = await call(ANALYST_SYSTEM, analystPrompt({ failureOutput: out, candidates: cand.map((c) => ({ path: c, text: ws.read(c) })), prior: [...attemptsNotes, `REPEATED HYPOTHESIS REJECTED: "${hypText.slice(0, 220)}" was already acted on and the failure persists. Propose a DIFFERENT cause (another file or another mechanism), grounded in the failing output.`] }), true, { temperature: 0.5, seed: 7 + attempt })
-        noteTokens(again)
-        let p2: { hypothesis?: string; file?: string; differs?: string } = {}
-        try { p2 = again.ok ? JSON.parse(again.text) : {} } catch { p2 = {} }
-        const h2 = (p2.hypothesis ?? '').trim()
-        if (!h2 || priorHyps.some((p) => sameHypothesis(p, h2))) {
-          attemptsNotes.push('analyst repeated an already-acted-on hypothesis even when asked for a different one')
-          markUndetermined(log, assignmentId, rec.failureId, 'the analyst could only re-propose an already-acted-on cause; no new hypothesis exists to act on', actor, clock())
-          state.doNotRepeat.push({ key: `failure:${rec.failureId}`, reason: `${label}: no new hypothesis available; cause UNDETERMINED` })
-          return false
+      const probe = !confine && wantsPersistence(req.acceptance) && /persist|surviv|restart/i.test(out) ? await runProbe().catch(() => null) : null
+      const startup = !confine && /could not complete|server exited|did not start/i.test(out) ? await startupProbe(ws.root, Object.fromEntries(storageEnvVars(req.acceptance).map((v) => [v, `${v}.json`]))).catch(() => null) : null
+      const ev = confine || !/^not ok \d+ - /m.test(out) ? null : buildEvidence({ output: out, acceptance: req.acceptance, files: sourceFiles(), baseline: baselineText, probe, startupOutput: startup && !startup.started ? startup.output : undefined })
+      const nextH = ev?.queue.find((h) => canTry(h.key)) ?? null
+      const refutedList = [...tried].filter(([, t]) => t.outcome === 'REFUTED').map(([key, t]) => ({ key, why: t.why }))
+      // escalation: two materially distinct hypotheses were acted on and refuted
+      const depth: 0 | 1 = refutedRun >= 2 ? 1 : 0
+      if (depth === 1 && !escalatedHere) {
+        const before = modelLabel(activeModel)
+        if (deps.escalation && activeModel === deps.model) activeModel = deps.escalation.model
+        escalatedHere = { step: stepId, attempt, reason: `${refutedRun} materially distinct hypotheses were refuted (${refutedList.map((r) => r.key).join(', ')})`, modelBefore: before, modelAfter: modelLabel(activeModel), contextDepth: 1 }
+        escalations.push(escalatedHere)
+        emit('ESCALATE', `${label}: context depth 0 -> 1${activeModel !== deps.model ? `, model ${before} -> ${modelLabel(activeModel)}` : ' (no escalation model configured; the model is unchanged)'}; ${escalatedHere.reason}`)
+      }
+      const implicatedFiles = (h: { files: string[] } | null) => [...new Set([...(h?.files ?? []), ...candidatesFromOutput(out, candidates.filter((c) => ws.exists(c)))])].filter((c) => ws.exists(c) && !/^test\//.test(c) && (!confine || confine.includes(c)))
+      let hypText = '', key = '', targets: string[] = [], parsed: { hypothesis?: string; file?: string; differs?: string } = {}
+      let cand: string[] = []
+      let evidenceText = ''
+      if (nextH) {
+        hypText = nextH.statement; key = nextH.key
+        targets = nextH.files.filter((f) => ws.exists(f))
+        if (!targets.length) targets = implicatedFiles(nextH).slice(0, 1)
+        cand = implicatedFiles(nextH)
+        evidenceText = renderEvidence(ev!, nextH, refutedList)
+        for (const f of cand) addEvidence(log, assignmentId, rec.failureId, { kind: 'file_read', ref: f, content: ws.read(f), summary: `current content of ${f}` }, actor, clock())
+      } else {
+        cand = candidatesFromOutput(out, candidates.filter((c) => ws.exists(c))).filter((c) => !confine || confine.includes(c))
+        for (const c of cand) addEvidence(log, assignmentId, rec.failureId, { kind: 'file_read', ref: c, content: ws.read(c), summary: `current content of ${c}` }, actor, clock())
+        const ar = await call(ANALYST_SYSTEM, analystPrompt({ failureOutput: out, candidates: cand.map((c) => ({ path: c, text: ws.read(c) })), prior: attemptsNotes }), true)
+        noteTokens(ar)
+        if (!ar.ok) { attemptsNotes.push(`analysis call failed: ${ar.detail}`); continue }
+        try { parsed = JSON.parse(ar.text) } catch { parsed = {} }
+        hypText = (parsed.hypothesis ?? '').trim()
+        if (!hypText) { attemptsNotes.push('analysis returned no hypothesis'); continue }
+        if (priorHyps.some((p) => sameHypothesis(p, hypText)) && budgetLeft()) {
+          // the same cause was already acted on and the failure persists: ask once for a DIFFERENT cause before spending another repair
+          const again = await call(ANALYST_SYSTEM, analystPrompt({ failureOutput: out, candidates: cand.map((c) => ({ path: c, text: ws.read(c) })), prior: [...attemptsNotes, `REPEATED HYPOTHESIS REJECTED: "${hypText.slice(0, 220)}" was already acted on and the failure persists. Propose a DIFFERENT cause (another file or another mechanism), grounded in the failing output.`] }), true, { temperature: 0.5, seed: 7 + attempt })
+          noteTokens(again)
+          let p2: { hypothesis?: string; file?: string; differs?: string } = {}
+          try { p2 = again.ok ? JSON.parse(again.text) : {} } catch { p2 = {} }
+          const h2 = (p2.hypothesis ?? '').trim()
+          if (!h2 || priorHyps.some((p) => sameHypothesis(p, h2))) {
+            attemptsNotes.push('analyst repeated an already-acted-on hypothesis even when asked for a different one')
+            markUndetermined(log, assignmentId, rec.failureId, 'the analyst could only re-propose an already-acted-on cause; no new hypothesis exists to act on', actor, clock())
+            state.doNotRepeat.push({ key: `failure:${rec.failureId}`, reason: `${label}: no new hypothesis available; cause UNDETERMINED` })
+            return false
+          }
+          hypText = h2; parsed = p2
         }
-        hypText = h2; parsed = p2
+        priorHyps.push(hypText)
+        key = `analyst:${priorHyps.length}`
+        targets = [cand.includes(parsed.file ?? '') ? parsed.file! : cand[0]].filter(Boolean)
       }
-      priorHyps.push(hypText)
-      const file = cand.includes(parsed.file ?? '') ? parsed.file! : cand[0]
+      if (!targets.length) { attemptsNotes.push('no implicated file could be identified'); continue }
       const lastHyp = [...deriveLedger(log, assignmentId).hypotheses.entries()].filter(([, h]) => h.failureId === rec.failureId && h.status !== 'REFUTED').at(-1)
-      const hid = proposeHypothesis(log, assignmentId, rec.failureId, { statement: hypText, supporting: [evCmd.id, ...evFiles.map((e) => e.id).slice(0, 2)], ...(lastHyp && attempt > 1 ? { revisionOf: lastHyp[0], whyRevised: `attempt ${attempt - 1} did not fix it; new failure output recorded as ${evCmd.id}` } : {}) }, actor, clock())
-      const diff = attempt > 1 ? (parsed.differs && parsed.differs !== 'first attempt' ? parsed.differs : `attempt ${attempt} targets ${file} using the new failure output`) : null
-      const gate = authorizeRepair(log, assignmentId, rec.failureId, { hypothesisId: hid, newEvidence: attempt > 1 ? [evCmd.id] : [], differsFromPrevious: diff, files: [file] })
+      const hid = proposeHypothesis(log, assignmentId, rec.failureId, { statement: `${nextH ? `[${key}] ` : ''}${hypText}`.slice(0, 600), supporting: [evCmd.id], ...(lastHyp && attempt > 1 ? { revisionOf: lastHyp[0], whyRevised: `attempt ${attempt - 1} did not fix it; new failure output recorded as ${evCmd.id}` } : {}) }, actor, clock())
+      const diff = attempt > 1 ? (parsed.differs && parsed.differs !== 'first attempt' ? parsed.differs : `attempt ${attempt} acts on ${key} (${targets.join(', ')}) using the new failure output`) : null
+      const gate = authorizeRepair(log, assignmentId, rec.failureId, { hypothesisId: hid, newEvidence: attempt > 1 ? [evCmd.id] : [], differsFromPrevious: diff, files: targets })
       if (!gate.ok) { attemptsNotes.push(`repair blocked: ${gate.reason}`); markUndetermined(log, assignmentId, rec.failureId, gate.reason, actor, clock()); state.doNotRepeat.push({ key: `failure:${rec.failureId}`, reason: `${label}: ${gate.reason}; cause UNDETERMINED` }); return false }
-      const keepR = keepExportsFor(file)
-      const modeR = chooseMode(true, ws.read(file).split('\n').length, keepR)
-      const rr = await call(modeR === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: hypText, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: modeR }))
-      noteTokens(rr)
-      if (!rr.ok) { attemptsNotes.push(`repair call failed: ${rr.detail}`); continue }
-      let pr = parseEditReply(rr.text, ws.read(file), file)
-      if (pr.kind !== 'code' && budgetLeft()) {
-        // the command is failing, so NO_CHANGE / an unusable reply is not an answer: ask once more, with the refusal reason and a full rewrite allowed
-        const why = pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE is not valid: the failing command above proves a change is needed'
-        const rr2 = await call(ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: `${hypText}\nYOUR PREVIOUS REPLY WAS REJECTED: ${why}`, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: 'rewrite' }))
-        noteTokens(rr2)
-        if (rr2.ok) pr = parseEditReply(rr2.text, ws.read(file), file)
+      emit('HYPOTHESIS', `${label}: attempt ${attempt} acts on ${key} -> ${targets.join(', ')}`)
+      const written: string[] = []
+      for (const file of targets.slice(0, 2)) {
+        const keepR = keepExportsFor(file)
+        const modeR = chooseMode(true, ws.read(file).split('\n').length, keepR)
+        const relatedN = depth === 1 ? 5 : 3, relatedCap = depth === 1 ? 9000 : 3000
+        const related = [...cand.filter((c) => c !== file).map((c) => ({ path: c, text: ws.read(c) })), ...relatedFor(file, [...changed])].filter((r, i, a) => a.findIndex((x) => x.path === r.path) === i).slice(0, relatedN)
+        const mk = (extra: string, mode: 'edits' | 'rewrite') => repairPrompt({ failureOutput: out, hypothesis: `${hypText}${targets.length > 1 ? `\n(This fix spans ${targets.join(' and ')}; you are editing ${file} now${written.length ? `; already changed: ${written.join(', ')}` : ''}.)` : ''}${extra}`, file, current: ws.read(file), related, request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode, evidence: evidenceText, relatedCap })
+        const rr = await call(modeR === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, mk('', modeR === 'edits' ? 'edits' : 'rewrite'))
+        noteTokens(rr)
+        if (!rr.ok) { attemptsNotes.push(`repair call failed: ${rr.detail}`); continue }
+        let pr = parseEditReply(rr.text, ws.read(file), file)
+        if (pr.kind !== 'code' && budgetLeft()) {
+          // the command is failing, so NO_CHANGE / an unusable reply is not an answer: ask once more, with the refusal reason and a full rewrite allowed
+          const why = pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE is not valid: the failing command above proves a change is needed'
+          const rr2 = await call(ENGINEER_REWRITE_SYSTEM, mk(`\nYOUR PREVIOUS REPLY WAS REJECTED: ${why}`, 'rewrite'))
+          noteTokens(rr2)
+          if (rr2.ok) pr = parseEditReply(rr2.text, ws.read(file), file)
+        }
+        if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); continue }
+        let compat = gateProblem(file, pr.content)
+        if (compat && budgetLeft()) {
+          const rr3 = await call(ENGINEER_REWRITE_SYSTEM, mk(`\nYOUR PREVIOUS REPLY WAS REJECTED BEFORE IT WAS WRITTEN: ${compat}`, 'rewrite'))
+          noteTokens(rr3)
+          const p3 = rr3.ok ? parseEditReply(rr3.text, ws.read(file), file) : null
+          if (p3 && p3.kind === 'code') { pr = p3; compat = gateProblem(file, pr.content) }
+        }
+        if (compat) { attemptsNotes.push(`repair rejected: ${compat}`); state.doNotRepeat.push({ key: `reject:${file}:repair${attempt}`, reason: compat }); continue }
+        const beforeHash = ws.hash(file)
+        await writeFile(stepId, file, pr.content)
+        triedFiles.add(file); written.push(file)
+        repairs += 1
+        attemptsNotes.push(`attempt ${attempt}: ${hypText.slice(0, 120)} (edited ${file}${beforeHash === ws.hash(file) ? ', no effective change' : ''})`)
       }
-      if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); continue }
-      let compat = gateProblem(file, pr.content)
-      if (compat && budgetLeft()) {
-        const rr3 = await call(ENGINEER_REWRITE_SYSTEM, repairPrompt({ failureOutput: out, hypothesis: `${hypText}\nYOUR PREVIOUS REPLY WAS REJECTED BEFORE IT WAS WRITTEN: ${compat}`, file, current: ws.read(file), related: relatedFor(file, [...changed]).slice(0, 3), request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode: 'rewrite' }))
-        noteTokens(rr3)
-        const p3 = rr3.ok ? parseEditReply(rr3.text, ws.read(file), file) : null
-        if (p3 && p3.kind === 'code') { pr = p3; compat = gateProblem(file, pr.content) }
+      const sigBefore = nextH && ev ? ev.signatureOf(nextH.check) : ''
+      if (!written.length) {
+        if (nextH) { tried.set(key, { outcome: 'REFUTED', times: 1, why: 'no usable, gate-passing edit could be produced for it' }); refutedRun += 1; trace.push({ step: stepId, label, attempt, check: nextH.check, checkName: ev!.checks.find((c) => c.n === nextH.check)?.name ?? '', key, hypothesis: hypText.slice(0, 240), files: [], model: modelLabel(activeModel), contextDepth: depth, before: sigBefore, after: sigBefore, outcome: 'NO_EDIT' }) }
+        continue
       }
-      if (compat) { attemptsNotes.push(`repair rejected: ${compat}`); state.doNotRepeat.push({ key: `reject:${file}:repair${attempt}`, reason: compat }); continue }
-      const beforeHash = ws.hash(file)
-      await writeFile(stepId, file, pr.content)
-      triedFiles.add(file)
-      repairs += 1
-      const newHash = ws.hash(file)!
-      const repair = recordRepair(log, assignmentId, rec.failureId, { hypothesisId: hid, filesEdited: [{ path: file, afterHash: newHash }], rationale: hypText, differsFromPrevious: diff, newEvidence: attempt > 1 ? [evCmd.id] : [] }, actor, clock())
-      attemptsNotes.push(`attempt ${attempt}: ${hypText.slice(0, 120)} (edited ${file}${beforeHash === newHash ? ', no effective change' : ''})`)
+      const repair = recordRepair(log, assignmentId, rec.failureId, { hypothesisId: hid, filesEdited: written.map((f) => ({ path: f, afterHash: ws.hash(f)! })), rationale: hypText, differsFromPrevious: diff, newEvidence: attempt > 1 ? [evCmd.id] : [] }, actor, clock())
       const rerun = await rerunOriginal()
       const v = recordValidation(log, assignmentId, rec.failureId, repair.repairId, rerun, { changedFiles: [...changed], index: buildWorkspaceIndex(ws.root) }, actor, clock())
       state.validations.push({ stepId, command: rerun.argv.join(' '), status: v.outcome === 'ORIGINAL_FIXED' ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: rerun.outputHash, summary: v.note.slice(0, 200) })
       checkpoint()
       emit('REPAIR', `${label}: attempt ${attempt} -> ${v.outcome}`)
+      if (nextH && ev) {
+        const evAfter = buildEvidence({ output: `${rerun.stdout}\n${rerun.stderr}`, acceptance: req.acceptance, files: sourceFiles(), baseline: baselineText })
+        const still = evAfter.checks.some((c) => c.n === nextH.check)
+        const sigAfter = still ? evAfter.signatureOf(nextH.check) : ''
+        const outcome: RepairTraceEntry['outcome'] = v.outcome === 'ORIGINAL_FIXED' || !still ? 'TARGET_FIXED' : sigAfter !== sigBefore ? 'CHANGED' : 'REFUTED'
+        if (outcome === 'REFUTED') { tried.set(key, { outcome: 'REFUTED', times: 1, why: `the failure of check ${nextH.check} was identical after the repair (${written.join(', ')})` }); refutedRun += 1 }
+        else if (outcome === 'CHANGED') tried.set(key, { outcome: 'CHANGED', times: (tried.get(key)?.times ?? 0) + 1, why: 'failure changed' })
+        trace.push({ step: stepId, label, attempt, check: nextH.check, checkName: ev.checks.find((c) => c.n === nextH.check)?.name ?? '', key, hypothesis: hypText.slice(0, 240), files: written, model: modelLabel(activeModel), contextDepth: depth, before: sigBefore, after: sigAfter, outcome })
+        emit('HYPOTHESIS_RESULT', `${key}: ${outcome}`)
+        if (escalatedHere && !escalatedHere.outcomeAfter) escalatedHere.outcomeAfter = `${outcome} (${modelLabel(activeModel)}, depth ${depth})`
+      } else if (v.outcome === 'SAME_FAILURE') { refutedRun += 1 }
       if (v.outcome === 'ORIGINAL_FIXED') return true
       const before = parseToolOutput(cmd.stdout, cmd.stderr).fail, after = parseToolOutput(rerun.stdout, rerun.stderr).fail
       if (v.outcome === 'NEW_FAILURE' && rerun.exitCode !== 0 && after < before) {
         attemptsNotes.push(`progress: failing checks ${before} -> ${after}; continuing on the remaining failure`)
         emit('PROGRESS', `${label}: failing checks ${before} -> ${after}`)
-        cmd = rerun; rec = recordFailure(log, assignmentId, cmd, actor, clock()); attempt = 0; triedFiles.clear(); priorHyps.length = 0
+        cmd = rerun; rec = recordFailure(log, assignmentId, cmd, actor, clock()); attempt = 0; triedFiles.clear(); priorHyps.length = 0; refutedRun = 0
         continue
       }
       cmd = rerun
@@ -340,6 +441,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     markUndetermined(log, assignmentId, rec.failureId, 'repair attempts exhausted without fixing the original failure', actor, clock())
     state.doNotRepeat.push({ key: `failure:${rec.failureId}`, reason: `${label}: ${MAX_REPAIR_ATTEMPTS} evidence-based repairs failed; cause UNDETERMINED` })
     return false
+    } finally { activeModel = deps.model }
   }
 
   // ---- execute steps
@@ -352,6 +454,14 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       state.currentStepId = step.id; step.status = 'ACTIVE'; checkpoint()
       if (step.id === 'accept') {
         const fv = deps.finalVerification!
+        // advisory pre-check: a storage round trip on the real module (create -> read -> fresh process -> read) BEFORE the independent verification is spent on it
+        if (wantsPersistence(req.acceptance)) {
+          const pr = await runProbe().catch(() => null)
+          if (pr) {
+            emit('PERSISTENCE_PROBE', `${pr.verdict}: ${pr.detail.slice(0, 200)}`)
+            if (pr.verdict === 'FAIL') await debugLoop(probeRecord(pr), [...changed].filter((f) => !/^test\//.test(f)), step.id, 'storage round-trip probe', async () => probeRecord(await runProbe()))
+          }
+        }
         const run = await fv.run()
         state.validations.push({ stepId: 'accept', command: fv.argv.join(' '), status: run.exitCode === 0 ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: run.outputHash, summary: fv.label })
         if (run.exitCode !== 0) {

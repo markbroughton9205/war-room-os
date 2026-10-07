@@ -54,12 +54,22 @@ If the output does not establish a cause, say so in hypothesis and still choose 
 
 export type FileJob = { path: string; layer: string; exists: boolean; current: string; role: 'feature' | 'test' }
 
+/** HTTP statuses and routes the acceptance contract spells out, restated as a checklist for the layer that must implement them. */
+export function statusContract(acceptance: string[], layer: string): string {
+  if (layer !== 'api' && layer !== 'domain') return ''
+  const codes = acceptance.filter((a) => /\b[1-5]\d\d\b/.test(a))
+  const routes = acceptance.filter((a) => /\b(GET|POST|PUT|PATCH|DELETE)\s+\//.test(a))
+  if (!codes.length && !routes.length) return ''
+  return ['CONTRACT CHECKLIST (the independent verifier checks exactly these):', ...routes.map((r) => `- route: ${r}`), ...codes.filter((c) => !routes.includes(c)).map((c) => `- status: ${c}`), '- every route and every status above must be reachable: register specific routes before prefix/parameter routes, and let errors carry their own status (a catch-all that always answers 400 can never produce 404 or 409).'].join('\n')
+}
+
 export function featurePrompt(input: { request: string; acceptance: string[]; plan: EngineeringCodePlan; job: FileJob; related: { path: string; text: string }[]; lessons: string[]; priorNotes: string[]; keepExports?: string[]; mode?: EditMode }): string {
   const rel = input.related.map((r) => `--- ${r.path} ---\n${r.text}`).join('\n\n')
   return [
     `TASK: ${input.request}`,
     `ACCEPTANCE CRITERIA:\n${input.acceptance.map((a) => `- ${a}`).join('\n')}`,
     `PLAN (from code evidence):\n${planContextForModel(input.plan, 1500)}`,
+    statusContract(input.acceptance, input.job.layer),
     input.lessons.length ? `LESSONS FROM EARLIER WORK (apply them):\n${input.lessons.map((l) => `- ${l}`).join('\n')}` : '',
     input.priorNotes.length ? `ALREADY DONE IN THIS FEATURE:\n${input.priorNotes.map((n) => `- ${n}`).join('\n')}` : '',
     rel ? `RELATED CODE (use these exact names and signatures):\n${rel}` : '',
@@ -80,13 +90,14 @@ export function analystPrompt(input: { failureOutput: string; candidates: { path
   ].filter(Boolean).join('\n\n')
 }
 
-export function repairPrompt(input: { failureOutput: string; hypothesis: string; file: string; current: string; related: { path: string; text: string }[]; request: string; lessons: string[]; mode?: EditMode }): string {
+export function repairPrompt(input: { failureOutput: string; hypothesis: string; file: string; current: string; related: { path: string; text: string }[]; request: string; lessons: string[]; mode?: EditMode; evidence?: string; relatedCap?: number }): string {
   return [
     `FEATURE: ${input.request}`,
     input.lessons.length ? `LESSONS (apply them):\n${input.lessons.map((l) => `- ${l}`).join('\n')}` : '',
     `FAILED COMMAND OUTPUT (real, trimmed):\n${input.failureOutput.slice(-2000)}`,
+    input.evidence ?? '',
     `HYPOTHESIS (grounded in that output): ${input.hypothesis}`,
-    input.related.length ? `RELATED CODE:\n${input.related.map((r) => `--- ${r.path} ---\n${r.text.slice(0, 3000)}`).join('\n\n')}` : '',
+    input.related.length ? `RELATED CODE:\n${input.related.map((r) => `--- ${r.path} ---\n${r.text.slice(0, input.relatedCap ?? 3000)}`).join('\n\n')}` : '',
     `FILE TO FIX: ${input.file}\nCURRENT CONTENT:\n\`\`\`\n${input.current}\n\`\`\``,
     input.mode === 'rewrite' ? `Fix the cause. Reply with the complete corrected content of ${input.file} in one fenced block.` : `Fix the cause with the smallest change. Reply with edits for ${input.file} (append and/or search/replace blocks), not a rewrite.`,
   ].filter(Boolean).join('\n\n')
