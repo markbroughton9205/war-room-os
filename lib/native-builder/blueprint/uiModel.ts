@@ -27,8 +27,8 @@ export function claimRows(projection: unknown, lineage: unknown): ClaimRow[] {
   const yn = (v: unknown): 'YES' | 'NO' => (v === true ? 'YES' : 'NO')
   return [
     { key: 'sourceValidated', label: 'Source validated', value: 'sourceValidated' in p ? yn(p.sourceValidated) : 'UNKNOWN' },
-    { key: 'built', label: 'Built (verified)', value: hasLineage ? yn(l.built) : 'UNKNOWN' },
-    { key: 'packaged', label: 'Packaged (verified)', value: hasLineage ? yn(l.packaged) : 'UNKNOWN' },
+    { key: 'built', label: 'Bundled by wr-bundle-build (verified; NOT the desktop build)', value: hasLineage ? yn(l.built) : 'UNKNOWN' },
+    { key: 'packaged', label: 'Packed by wr-bundle-pack (verified; NOT a production package)', value: hasLineage ? yn(l.packaged) : 'UNKNOWN' },
     { key: 'installed', label: 'Installed', value: 'NO' },
     { key: 'taskComplete', label: 'Task / mission / assignment complete', value: 'NO' },
   ]
@@ -47,6 +47,7 @@ export function stageRows(lineage: unknown): StageRow[] {
 export type ArtifactRow = { stage: string; name: string; path: string; sha256: string; bytes: string; runId: string; verification: string }
 export function artifactRows(artifacts: unknown): { rows: ArtifactRow[]; verification: string } {
   const a = obj(artifacts), stages = obj(a.stages), ver = obj(a.verification)
+  if (a.unavailable === true) return { rows: [], verification: 'UNAVAILABLE' }
   const rows: ArtifactRow[] = []
   for (const stage of ['build', 'package']) {
     const s = obj(stages[stage]); const v = obj(ver[stage]); const vs = !Object.keys(ver).length ? 'NOT_VERIFIED' : v.ok === true ? 'VERIFIED' : v.ok === false ? `FAILED (${(Array.isArray(v.problems) ? (v.problems as Json[]).map(p => str(p.code)).join(', ') : 'unknown')})` : 'UNKNOWN'
@@ -56,3 +57,12 @@ export function artifactRows(artifacts: unknown): { rows: ArtifactRow[]; verific
 }
 
 export const writeCapableLabel = (authority: unknown): string => { const a = obj(authority), w = obj(a.assignment); return w.writeCapable === true ? 'write-capable' : w.writeCapable === false ? 'NOT write-capable' : 'UNKNOWN' }
+
+export type DepRow = { name: string; version: string; state: string; approved: string; reasons: string }
+/** Reads describeDependencies(): {plan, verification:{deps[]}, approvals{name@version}}. Missing data is UNKNOWN, never "none". */
+export function dependencyRows(deps: unknown): { rows: DepRow[]; plan: string } {
+  const d = obj(deps), v = obj(d.verification), ap = obj(d.approvals)
+  const rows = (Array.isArray(v.deps) ? (v.deps as Json[]) : []).map(x => ({ name: str(x.name), version: str(x.version), state: str(x.state), approved: `${str(x.name)}@${str(x.version)}` in ap ? (ap[`${str(x.name)}@${str(x.version)}`] === true ? 'APPROVED' : 'NOT_APPROVED') : 'UNKNOWN', reasons: Array.isArray(x.reasons) ? (x.reasons as unknown[]).map(String).join(', ') : '' }))
+  return { rows, plan: str(obj(d.plan).status) }
+}
+export const recoveryLabel = (v: unknown): string => { const o = obj(v); if (o.unavailable === true) return 'UNKNOWN (recovery view unavailable)'; if (!v) return 'none recorded'; const bits = ['build', 'package'].map(k => { const c = obj(o[k]); return c.classification ? `${k}:${String(c.classification)}` : null }).filter(Boolean); return bits.length ? bits.join(' ') : 'none recorded' }

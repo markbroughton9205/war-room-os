@@ -55,7 +55,7 @@ export function buildBlueprintRuntime(overrides: { leaseTtlMs?: number; now?: ()
     pipeline: kit.pipeline,
     dependencies: verifier,
   }
-  const broker = createBroker({ brokerId: BLUEPRINT_BROKER_ID, control, evidenceRoot: roots.evidence, host, leaseBacking, now: overrides.now, leaseTtlMs: overrides.leaseTtlMs ?? 120_000, approvalTtlMs: 15 * 60_000, checkTimeoutMs: 60_000 })
+  const broker = createBroker({ brokerId: BLUEPRINT_BROKER_ID, control, evidenceRoot: roots.evidence, host, leaseBacking, isSessionLive: isLocalCommanderSessionLive, now: overrides.now, leaseTtlMs: overrides.leaseTtlMs ?? 120_000, approvalTtlMs: 15 * 60_000, checkTimeoutMs: 60_000 })
   const background = new Map<string, BackgroundRun>()
   return { roots, control, store, verifier, kit, bridge, missions, host, broker, background, leaseBacking }
 }

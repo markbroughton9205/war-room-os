@@ -166,7 +166,13 @@ export const handlePreview = (req: Request, rawId: string) => withActor(req, fal
 })
 
 export const handleApprove = (req: Request, rawId: string) => withActor(req, true, async a => {
-  const id = needId(rawId), ctx = await ctxFor(a, id)
+  const id = needId(rawId), ctx = await ctxFor(a, id), body = await readBody(req).catch(() => ({} as Record<string, unknown>))
+  // The Commander approves what they SAW: the UI must send the exact digests it rendered; any difference from the server's current values refuses (409) and nothing is approved.
+  const exp = body.expected && typeof body.expected === 'object' ? (body.expected as Record<string, unknown>) : null
+  if (!exp) throw http(400, 'EXPECTED_REQUIRED', 'Approval must state the exact package digest and bound inputs that were shown.')
+  const before = a.rt.broker.approvalState(a.handle, id) as { packageDigest?: string; current?: Record<string, string | null> }
+  const mismatch = [['packageDigest', before.packageDigest], ...['baseIdentity', 'checkBinding', 'ownership', 'pipeline'].map(k => [k, before.current?.[k] ?? null])].filter(([k, v]) => (exp[k as string] ?? null) !== (v ?? null)).map(([k]) => k)
+  if (mismatch.length) throw http(409, 'APPROVAL_VIEW_STALE', `What was shown no longer matches the current state (${mismatch.join(', ')}). Reload, review, and approve again.`)
   const projection = a.rt.broker.approve(a.handle, id, ctx)
   return { execId: id, projection, approval: a.rt.broker.approvalState(a.handle, id) }
 })
@@ -215,9 +221,9 @@ export const handleReceipts = (req: Request, rawId: string) => withActor(req, fa
   const id = needId(rawId); await ctxFor(a, id)
   let coreReceipt: unknown = null; try { coreReceipt = a.rt.broker.getReceipt(a.handle, id) } catch (e) { coreReceipt = { unavailable: e instanceof BlueprintError ? describeError(e) : { code: 'EXECUTION_FAILED' } } }
   let lineage: unknown = null; try { lineage = await a.rt.broker.lineage(a.handle, id) } catch { lineage = null }
-  let recovery: unknown = null; try { recovery = (a.rt.broker.recoverAll(a.handle) as { execId: string }[]).find(r => r.execId === id) ?? null } catch { recovery = null }
-  let stageRecovery: unknown = null; try { stageRecovery = (await a.rt.broker.recoverStages(a.handle) as { execId: string }[]).find(r => r.execId === id) ?? null } catch { stageRecovery = null }
-  let artifacts: unknown = null; try { artifacts = a.rt.broker.artifactManifest(a.handle, id) } catch { artifacts = null }
+  let recovery: unknown = null; try { recovery = (a.rt.broker.recoverAll(a.handle) as { execId: string }[]).find(r => r.execId === id) ?? null } catch { recovery = { unavailable: true } }
+  let stageRecovery: unknown = null; try { stageRecovery = (await a.rt.broker.recoverStages(a.handle) as { execId: string }[]).find(r => r.execId === id) ?? null } catch { stageRecovery = { unavailable: true } }
+  let artifacts: unknown = null; try { artifacts = a.rt.broker.artifactManifest(a.handle, id) } catch { artifacts = { unavailable: true } }
   return { execId: id, coreReceipt, lineage, runRecovery: recovery, stageRecovery, stageRuns: a.rt.broker.stageRuns(a.handle, id), artifacts }
 })
 

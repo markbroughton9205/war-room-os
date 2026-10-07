@@ -23,9 +23,10 @@ import { BlueprintError } from './base.mjs'
 import { blueprintEventToEvaluationInputs } from './livePhase9'
 import { buildBlueprintRuntime, type BlueprintRuntime } from './liveRuntime'
 import { blueprintRoots } from './liveRoots'
-import { approvalView, artifactRows, claimRows } from './uiModel'
+import { approvalView, artifactRows, claimRows, dependencyRows, recoveryLabel } from './uiModel'
 import { liveBaseIdentity, refreshBlueprintWorkspace } from './liveWorkspaces'
 import { materializeTools } from './liveBuild'
+import { findInputSymlink } from './artifacts.mjs'
 import { configureSandboxEnv, createSandboxRoot, fixturePackage, git, seedBlueprintSandbox, FIXTURE_A0, FIXTURE_A1, type SeedResult } from './testkit'
 
 type CaseResult = { name: string; pass: boolean; detail: string }
@@ -185,6 +186,26 @@ async function main() {
     check('recovery_rebuilds_once_after_reconcile', rec.ran[0].attempt === 2 && rec.ran.every((x: any) => x.status === 'PASSED') && rec.claims.built === true && rec.claims.packaged === true, JSON.stringify(rec.ran))
     done(s10)
 
+    // ---- L10b review regressions: symlink refusal, approval-view inputs, revocation during a running stage
+    const s12 = await seedBlueprintSandbox(sb, { name: 'ws-symlink' }); const r12 = await ready(rt, s12); rt.broker.approve(r12.h, r12.id, r12.ctx); await rt.broker.execute(r12.h, r12.id, r12.ctx)
+    const outside = path.join(sb.root, 'outside-secret.txt'); fs.writeFileSync(outside, 'SECRET-OUTSIDE\n'); fs.symlinkSync(outside, path.join(s12.workspaceRoot, 'src/leak.mjs'))
+    const symCode = await code(() => rt.broker.advanceStages(r12.h, r12.id, r12.ctx))
+    check('symlink_under_build_inputs_refused', ['INPUT_SYMLINK', 'APPROVAL_STALE', 'SOURCE_CHANGED'].includes(symCode) && !fs.existsSync(path.join(blueprintRoots().control, 'broker/build/runs', `${r12.id}.build.1/out/bundle.mjs`)), `refused before any build output exists (${symCode})`)
+    const direct = findInputSymlink(s12.workspaceRoot, ['src'])
+    check('symlink_finder_detects_it', direct === 'src/leak.mjs' && findInputSymlink(s12.workspaceRoot, ['nothing']) === null, String(direct))
+    done(s12)
+    const s13 = await seedBlueprintSandbox(sb, { name: 'ws-view-binding' }); const r13 = await ready(rt, s13); const pre = rt.broker.approvalState(r13.h, r13.id)
+    check('approval_view_inputs_available_before_approval', pre.approved === false && /^[a-f0-9]{64}$/.test(pre.packageDigest) && !!pre.current.baseIdentity && !!pre.current.checkBinding && !!pre.current.ownership && !!pre.current.pipeline, 'the exact digests the UI must echo back are exposed pre-approval')
+    done(s13)
+    const live3 = store.login(PASSWORD); if (!live3.ok) throw new Error('login3 failed')
+    const keep = { ...facts }; Object.assign(facts, { sessionId: live3.auth.session.session_id, authenticatedAt: Date.parse(live3.auth.session.created_at), expiresAt: Date.parse(live3.auth.session.expires_at) })
+    const rtRev = rtOf({ buildArgs: ['--sleep=2500'] }), s14 = await seedBlueprintSandbox(sb, { name: 'ws-revoke' }); const r14 = await ready(rtRev, s14); rtRev.broker.approve(r14.h, r14.id, r14.ctx); await rtRev.broker.execute(r14.h, r14.id, r14.ctx)
+    const adv14 = rtRev.broker.advanceStages(r14.h, r14.id, r14.ctx)
+    for (let i = 0; i < 100 && !rtRev.broker.stageRuns(r14.h, r14.id).some((x: any) => x.state === 'RUNNING'); i++) await sleep(50)
+    store.logout(live3.auth.token)
+    const ran14 = await adv14.then((x: any) => x, (e: any) => ({ err: e.code }))
+    check('session_revoked_mid_stage_stops_build', (ran14 as any).claims?.built === false && !(ran14 as any).ran?.some((x: any) => x.status === 'PASSED'), JSON.stringify((ran14 as any).ran ?? ran14).slice(0, 200))
+    Object.assign(facts, keep); done(s14)
     // ---- L11 base identity accessor: stable across own writes, distinguishes commit/worktree/copy/installed runtime
     const s11 = await seedBlueprintSandbox(sb, { name: 'ws-identity' }), id0 = readWorkspaceBaseIdentity({ workspaceId: s11.workspaceId, root: s11.workspaceRoot })
     fs.writeFileSync(path.join(s11.workspaceRoot, 'src/a.mjs'), 'export const a = 99\n'); fs.writeFileSync(path.join(s11.workspaceRoot, 'src/new.mjs'), 'x\n')
@@ -213,6 +234,7 @@ async function main() {
     // ---- L13 UI truthfulness (pure view model used by /war-room/engineering/blueprints)
     check('ui_stale_approval_demands_new_approval', approvalView({ approved: true, usable: false, stale: ['baseIdentity'] }).label === 'STALE' && approvalView({ approved: true, usable: false, stale: ['baseIdentity'] }).mustReapprove === true && approvalView(undefined).label === 'UNKNOWN', 'STALE shown, new approval required, missing data is UNKNOWN')
     check('ui_claims_never_overclaim', claimRows({ claims: { sourceValidated: true } }, null).find(c => c.key === 'built')?.value === 'UNKNOWN' && claimRows({ claims: { sourceValidated: true } }, { claims: { built: true, packaged: false } }).find(c => c.key === 'packaged')?.value === 'NO' && claimRows({}, null).filter(c => ['installed', 'taskComplete'].includes(c.key)).every(c => c.value === 'NO'), 'built/packaged only from lineage; installed/complete always NO')
+    check('ui_dependency_and_recovery_views_truthful', dependencyRows({ plan: { status: 'BLOCKED' }, verification: { deps: [{ name: 'a', version: '1.0.0', state: 'UNAPPROVED', reasons: ['NOT_APPROVED'] }] }, approvals: { 'a@1.0.0': false } }).rows[0]?.approved === 'NOT_APPROVED' && dependencyRows(undefined).rows.length === 0 && recoveryLabel({ unavailable: true }).startsWith('UNKNOWN') && recoveryLabel(null) === 'none recorded' && artifactRows({ unavailable: true }).verification === 'UNAVAILABLE', 'dependency states shown; failed recovery view is UNKNOWN, not none')
     check('ui_artifacts_show_unverified_and_failed', artifactRows({ stages: { build: { entries: [{ name: 'b', path: 'bundle.mjs', sha256: 'x', bytes: 1, runId: 'r' }] } }, verification: null }).rows[0]?.verification === 'NOT_VERIFIED' && artifactRows({ stages: { build: { entries: [{ path: 'p' }] } }, verification: { build: { ok: false, problems: [{ code: 'ARTIFACT_HASH_MISMATCH' }] } } }).rows[0]?.verification.startsWith('FAILED'), 'unverified and tampered artifacts are not hidden')
   } finally {
     try { fs.rmSync(sb.root, { recursive: true, force: true }) } catch { /* best effort */ }

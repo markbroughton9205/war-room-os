@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { approvalView, artifactRows, claimRows, stageRows, writeCapableLabel, type Json } from '@/lib/native-builder/blueprint/uiModel'
+import { approvalView, artifactRows, claimRows, dependencyRows, recoveryLabel, stageRows, writeCapableLabel, type Json } from '@/lib/native-builder/blueprint/uiModel'
 
 const API = '/api/foundry/blueprints'
 const HDR = { 'content-type': 'application/json', 'x-wr-blueprints': '1' }
@@ -68,6 +68,9 @@ export function FoundryBlueprintsPanel() {
   const preview = j(detail?.preview), changes = (Array.isArray(preview.changes) ? preview.changes : []) as Json[]
   const lineage = detail?.lineage, arts = artifactRows(detail?.artifacts ?? receipts?.artifacts)
   const state = s(proj.state), bound = j(approval.bound), current = j(approval.current)
+  const shownDigest = (approval.packageDigest ?? bound.packageDigest ?? preview.digest ?? proj.normalizedHash) as string | undefined
+  const expected = { packageDigest: shownDigest ?? null, baseIdentity: current.baseIdentity ?? null, checkBinding: current.checkBinding ?? null, ownership: current.ownership ?? null, pipeline: current.pipeline ?? null }
+  const deps = dependencyRows(detail?.dependencies), notClaimed = (Array.isArray(j(lineage).notClaimed) ? (j(lineage).notClaimed as string[]) : [])
   const runs = (Array.isArray(detail?.stageRuns) ? detail?.stageRuns : []) as Json[]
 
   return (
@@ -109,7 +112,11 @@ export function FoundryBlueprintsPanel() {
               <p className="text-xs text-amber-300 mb-1">{s(preview.limits)}</p>
               {changes.length === 0 && !detail.previewError && <p className="text-xs text-gray-400">No changes listed.</p>}
               <table className="text-xs w-full"><tbody>{changes.map((c, i) => <tr key={i} data-testid="bp-change"><td className="pr-2">{s(c.operation)}</td><td className="pr-2 break-all">{s(c.path)}</td><td className="pr-2 text-gray-400">{short(c.beforeHash)} → {short(c.afterHash)}</td></tr>)}</tbody></table>
-              <p className="text-xs mt-2 text-gray-300">Dependencies: {(Array.isArray(detail.dependencies) ? (detail.dependencies as Json[]) : (Array.isArray(j(detail.dependencies).items) ? (j(detail.dependencies).items as Json[]) : [])).map(d => `${s(d.name)}@${s(d.version)} [${s(d.status ?? d.state)}]`).join(', ') || 'none declared / UNKNOWN'}</p>
+              <div data-testid="bp-deps" className="text-xs mt-2 text-gray-300">Dependencies (plan {deps.plan}; approving a dependency never installs it):
+                {deps.rows.length === 0 && <span> none declared, or UNKNOWN</span>}
+                {deps.rows.map(d => <div key={`${d.name}@${d.version}`} data-testid="bp-dep" className="flex gap-2 items-center"><span>{d.name}@{d.version}</span><b>{d.state}</b><span>{d.approved}</span><span className="text-gray-400">{d.reasons}</span>
+                  {d.approved !== 'APPROVED' && <button data-testid="bp-dep-approve" disabled={busy} onClick={() => act('Approve dependency', `${API}/${sel}/dependencies`, { name: d.name, version: d.version, reason: 'Commander approved this exact declared dependency' })} className="px-1 bg-emerald-800">Approve</button>}
+                  {d.approved === 'APPROVED' && <button data-testid="bp-dep-revoke" disabled={busy} onClick={() => act('Revoke dependency', `${API}/${sel}/dependencies`, { name: d.name, version: d.version, action: 'revoke' })} className="px-1 bg-gray-700">Revoke</button>}</div>)}</div>
             </Section>
 
             <Section id="authority" title="AUTHORITY">
@@ -129,13 +136,14 @@ export function FoundryBlueprintsPanel() {
                   <div>approved by {s(j(approval.approvedBy).actorId)} (session {s(j(approval.approvedBy).sessionId)})</div></div>}
                 {(state === 'PREVIEWED' || av.mustReapprove) && <label className="block text-xs mt-2"><input data-testid="bp-confirm" type="checkbox" checked={confirm} onChange={e => setConfirm(e.target.checked)} /> I approve exactly this content (digest {short(bound.packageDigest ?? preview.digest ?? proj.normalizedHash)}) with the authority shown above.</label>}
                 <div className="mt-2 flex gap-2 flex-wrap">
-                  <button data-testid="bp-approve" disabled={busy || !confirm || !(state === 'PREVIEWED' || av.mustReapprove)} onClick={() => act('Approve', `${API}/${sel}/approve`)} className="px-2 py-1 text-xs bg-emerald-700 disabled:opacity-40">Approve</button>
+                  <button data-testid="bp-approve" disabled={busy || !confirm || !(state === 'PREVIEWED' || av.mustReapprove)} onClick={() => act('Approve', `${API}/${sel}/approve`, { expected })} className="px-2 py-1 text-xs bg-emerald-700 disabled:opacity-40">Approve</button>
                 </div>
               </div>
             </Section>
 
             <Section id="execution" title="EXECUTION">
               <div data-testid="bp-claims">{claimRows(proj, lineage).map(c => <Row key={c.key} k={c.label} v={<span data-testid={`bp-claim-${c.key}`}>{c.value}</span>} />)}</div>
+              {notClaimed.length > 0 && <p data-testid="bp-notclaimed" className="text-xs text-amber-300 mt-1">NOT claimed: {notClaimed.join(', ')}</p>}
               <table className="text-xs w-full mt-2"><tbody>{stageRows(lineage).map(r => <tr key={r.stage} data-testid={`bp-stage-${r.stage}`}><td className="pr-2">{r.stage}</td><td className="pr-2 font-bold">{r.status}</td><td className="text-gray-400">{r.note}</td></tr>)}</tbody></table>
               {runs.map((r, i) => <div key={i} data-testid="bp-run" className="text-xs mt-1 text-gray-300">{s(r.stage)} attempt {s(r.attempt)}: {s(r.state)} · process {s(r.processState)}{r.elapsedMs != null ? ` · ${s(r.elapsedMs)}ms` : ''}{r.progress ? ` · ${s(r.progress)}` : ''}</div>)}
               {!!detail.lineageError && <p className="text-xs text-red-300">Lineage unavailable — {s(j(detail.lineageError).code)}</p>}
@@ -155,7 +163,7 @@ export function FoundryBlueprintsPanel() {
               {!receipts || receipts.loadError ? <p className="text-xs text-red-300">Receipts unavailable — {s(j(receipts?.loadError).code)}</p> : (<>
                 <Row k="chain" v={s(j(j(receipts.lineage).chain).ok === true ? 'INTACT' : j(receipts.lineage).chain ? 'BROKEN' : 'UNKNOWN')} />
                 <ul className="text-xs mt-1">{((Array.isArray(j(receipts.lineage).history) ? j(receipts.lineage).history : Array.isArray(j(j(receipts.lineage).lineage).history) ? j(j(receipts.lineage).lineage).history : []) as Json[]).map((h, i) => <li key={i} data-testid="bp-receipt">{s(h.id)} · {s(h.kind)} · {s(h.status)}{h.broken ? ' · BROKEN' : ''}</li>)}</ul>
-                <Row k="run recovery" v={s(j(receipts.runRecovery).classification ?? j(receipts.runRecovery).status ?? 'none')} /><Row k="stage recovery" v={s(receipts.stageRecovery ? JSON.stringify(receipts.stageRecovery).slice(0, 160) : 'none')} />
+                <Row k="run recovery" v={recoveryLabel(receipts.runRecovery)} /><Row k="stage recovery" v={<span data-testid="bp-stage-recovery">{recoveryLabel(receipts.stageRecovery)}</span>} />
               </>)}
             </Section>
 
