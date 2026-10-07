@@ -57,6 +57,12 @@ export type BenchmarkRecord = {
   rootCause?: string
   evidencePath?: string
   historicalBaseline?: boolean
+  /** Primary reliability metric: the workflow itself finished and validated (distinct from the verifier passing on the left-behind workspace). */
+  workflowCompleted?: boolean
+  verifierPass?: boolean
+  failureClass?: string
+  editRejections?: number
+  quarantinedTests?: number
 }
 export type ForgeRecord =
   | ({ type: 'model'; rid: string; at: string } & ModelEntry)

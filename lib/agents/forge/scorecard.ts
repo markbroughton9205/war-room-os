@@ -12,6 +12,11 @@ export type ScorecardRow = {
   avgVerifierScore: number | 'UNKNOWN' // mean pass fraction over attempts with a known score
   bestVerifierScore: number | 'UNKNOWN'
   completionRate: number // COMPLETED with full score and no manual intervention
+  /** PRIMARY: share of runs whose workflow itself finished and validated (records predating the field: workflow COMPLETED inferred from completion). */
+  workflowCompletionRate: number
+  /** share of runs whose left-behind workspace scored full marks on the independent verifier, whether or not the workflow finished */
+  verifierPassRate: number
+  failureClasses: Record<string, number>
   firstPassRate: number // completed with 0 repairs
   avgRepairs: number
   retryRate: number // share of attempts needing >=1 repair round
@@ -45,7 +50,10 @@ export function buildScorecard(records: BenchmarkRecord[], opts: { sinceIso?: st
     return {
       model, taskClass: taskClass as TaskClass, fixture, engines: [...new Set(rs.map((r) => r.engineSha ?? 'UNKNOWN'))], baseline: rs.every((r) => !!r.historicalBaseline), attempts: n,
       scores: rs.map(frac), avgVerifierScore: known.length ? mean(known) : ('UNKNOWN' as const), bestVerifierScore: known.length ? Math.max(...known) : ('UNKNOWN' as const),
-      completionRate: completed.length / n, firstPassRate: completed.filter((r) => r.repairs === 0).length / n, avgRepairs: mean(rs.map((r) => r.repairs)), retryRate: rs.filter((r) => r.repairs > 0).length / n,
+      completionRate: completed.length / n,
+      workflowCompletionRate: rs.filter((r) => r.workflowCompleted ?? r.completion === 'COMPLETED').length / n,
+      verifierPassRate: rs.filter((r) => r.verifierPass ?? (r.verifierScore !== 'UNKNOWN' && r.verifierScore.pass === r.verifierScore.total)).length / n,
+      failureClasses: rs.reduce<Record<string, number>>((m, r) => { const k = r.failureClass ?? (r.completion === 'COMPLETED' ? 'NONE' : 'UNCLASSIFIED'); m[k] = (m[k] ?? 0) + 1; return m }, {}), firstPassRate: completed.filter((r) => r.repairs === 0).length / n, avgRepairs: mean(rs.map((r) => r.repairs)), retryRate: rs.filter((r) => r.repairs > 0).length / n,
       regressions: regs.every((x) => typeof x === 'number') ? (regs as number[]).reduce((a, c) => a + c, 0) : ('UNKNOWN' as const),
       avgElapsedMs: mean(rs.map((r) => r.elapsedMs)), interventions: rs.filter((r) => r.manualIntervention).length, peakVramMiB: vr.length ? Math.max(...vr) : ('UNKNOWN' as const),
       confidence: (n >= 5 ? 'MODERATE' : n >= 3 ? 'LOW' : 'NONE') as ScorecardRow['confidence'], confidenceNote: `${n} attempt(s) on one fixture${n < 5 ? '; too few to separate skill from sampling variance' : ''}`,
@@ -55,6 +63,6 @@ export function buildScorecard(records: BenchmarkRecord[], opts: { sinceIso?: st
 
 export function renderScorecard(rows: ScorecardRow[]): string {
   const pct = (v: number | 'UNKNOWN') => (v === 'UNKNOWN' ? 'UNKNOWN' : `${Math.round(v * 100)}%`)
-  const head = '| model | class | fixture | n | avg score | best | completion | first-pass | retry | regressions | avg time | interventions | peak VRAM | confidence |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'
-  return [head, ...rows.map((r) => `| ${r.model}${r.baseline ? ' (BASELINE)' : ''} | ${r.taskClass} | ${r.fixture} | ${r.attempts} | ${pct(r.avgVerifierScore)} | ${pct(r.bestVerifierScore)} | ${pct(r.completionRate)} | ${pct(r.firstPassRate)} | ${pct(r.retryRate)} | ${r.regressions} | ${Math.round(r.avgElapsedMs / 1000)}s | ${r.interventions} | ${r.peakVramMiB === 'UNKNOWN' ? 'UNKNOWN' : `${r.peakVramMiB} MiB`} | ${r.confidence} |`)].join('\n')
+  const head = '| model | class | fixture | n | avg score | best | WORKFLOW_COMPLETED | VERIFIER_PASS | first-pass | retry | regressions | avg time | interventions | peak VRAM | confidence |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|'
+  return [head, ...rows.map((r) => `| ${r.model}${r.baseline ? ' (BASELINE)' : ''} | ${r.taskClass} | ${r.fixture} | ${r.attempts} | ${pct(r.avgVerifierScore)} | ${pct(r.bestVerifierScore)} | ${pct(r.workflowCompletionRate)} | ${pct(r.verifierPassRate)} | ${pct(r.firstPassRate)} | ${pct(r.retryRate)} | ${r.regressions} | ${Math.round(r.avgElapsedMs / 1000)}s | ${r.interventions} | ${r.peakVramMiB === 'UNKNOWN' ? 'UNKNOWN' : `${r.peakVramMiB} MiB`} | ${r.confidence} |`)].join('\n')
 }

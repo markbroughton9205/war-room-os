@@ -82,5 +82,20 @@ await (async () => {
   } finally { rmSync(learnDir, { recursive: true, force: true }) }
 }
 })()
+await (async () => {
+  const { classifyRun } = await import('./failureClass')
+  const { buildScorecard } = await import('./scorecard')
+  check('F27_run_failure_classes_come_from_evidence_not_narrative', classifyRun({ status: 'COMPLETED', reason: 'all steps validated', verifierSummary: '' }) === 'NONE'
+    && classifyRun({ status: 'FAILED', reason: 'the model repeatedly produced a src/a.mjs that declares x more than once', verifierSummary: '' }) === 'EDIT_STAGE_REJECTION'
+    && classifyRun({ status: 'FAILED', reason: 'test/a.test.mjs: UNDETERMINED', verifierSummary: '' }) === 'TEST_AUTHORING'
+    && classifyRun({ status: 'FAILED', reason: 'independent x verification: UNDETERMINED', verifierSummary: 'not ok 1 - verification could not complete' }) === 'SERVER_START'
+    && classifyRun({ status: 'FAILED', reason: 'independent x verification: UNDETERMINED', verifierSummary: 'not ok 4 - x' }) === 'IMPLEMENTATION_DEFECT'
+    && classifyRun({ status: 'FAILED', reason: 'model call failed: timeout', verifierSummary: '' }) === 'RUNTIME'
+    && classifyRun({ status: 'CANCELLED', reason: 'cancel', verifierSummary: '' }) === 'STOPPED')
+  const mk = (o: Partial<BenchmarkRecord>) => bench({ fixture: 'alert-center (x)', ...o })
+  const rows = buildScorecard([mk({ verifierScore: { pass: 12, total: 12 }, completion: 'PARTIAL', workflowCompleted: false, verifierPass: true, failureClass: 'TEST_AUTHORING' }), mk({ verifierScore: { pass: 12, total: 12 }, completion: 'COMPLETED', workflowCompleted: true, verifierPass: true, failureClass: 'NONE' }), mk({ verifierScore: { pass: 3, total: 12 }, completion: 'FAILED', workflowCompleted: false, verifierPass: false, failureClass: 'EDIT_STAGE_REJECTION' })])
+  const r = rows[0]
+  check('F28_scorecard_reports_workflow_completion_separately_from_verifier_pass_and_counts_failure_classes', !!r && Math.abs(r.workflowCompletionRate - 1 / 3) < 1e-9 && Math.abs(r.verifierPassRate - 2 / 3) < 1e-9 && r.failureClasses.TEST_AUTHORING === 1 && r.failureClasses.EDIT_STAGE_REJECTION === 1, JSON.stringify(r))
+})()
 console.log(`FORGE_VALIDATION ${fails ? 'FAIL (' + fails + ')' : 'PASS'}`)
 process.exit(fails ? 1 : 0)

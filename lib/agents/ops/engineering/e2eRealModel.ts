@@ -13,6 +13,8 @@ import { NEED_CRITERIA, type EngineeringTool } from '../types'
 import { assign, deriveAssignments, keyFor, startAssignment } from './assignments'
 import { CHAT_FEATURE, CHAT_VERIFY_SCRIPT, makeChatApp } from './chatFixture'
 import { TASK_FEATURE, TASK_VERIFY_SCRIPT, makeTaskApp } from './taskFixture'
+import { ALERT_FEATURE, ALERT_VERIFY_SCRIPT, makeAlertApp } from './alertFixture'
+import { classifyRun } from '../../forge/failureClass'
 import { execFileSync } from 'node:child_process'
 import { latestCheckpoint } from './continuity'
 import { deriveLedger, debugSummary } from './debugLedger'
@@ -26,8 +28,10 @@ import { runFeatureWorkflow } from './workflow'
 import type { ModelClient, ModelResult } from './runtime/ports'
 
 // Fixture selection (identical engine, policy and verifier semantics for both): FIXTURE=chat (default) | task
-const FIXTURE = process.env.FIXTURE === 'task' ? 'task' : 'chat'
-const FX = FIXTURE === 'task'
+const FIXTURE = process.env.FIXTURE === 'task' ? 'task' : process.env.FIXTURE === 'alert' ? 'alert' : 'chat'
+const FX = FIXTURE === 'alert'
+  ? { id: 'alert-center', label: 'alert-center (ALERT_FEATURE, independent 12-check verifier)', feature: ALERT_FEATURE, verify: ALERT_VERIFY_SCRIPT, make: makeAlertApp, mission: 'mission-alert-center', title: 'Persistent alert center' }
+  : FIXTURE === 'task'
   ? { id: 'task-board', label: 'task-board (TASK_FEATURE, independent 12-check verifier)', feature: TASK_FEATURE, verify: TASK_VERIFY_SCRIPT, make: makeTaskApp, mission: 'mission-task-board', title: 'Persistent task board' }
   : { id: 'chat-sessions', label: 'chat-sessions (CHAT_FEATURE, independent 12-check verifier)', feature: CHAT_FEATURE, verify: CHAT_VERIFY_SCRIPT, make: makeChatApp, mission: 'mission-chat-sessions', title: 'Persistent chat sessions' }
 const engineSha = (() => { try { return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: process.cwd() }).toString().trim() } catch { return 'UNKNOWN' } })()
@@ -77,7 +81,8 @@ if (lessonStoreDir) {
 const t0 = Date.now()
 let peakGpu: number | 'UNKNOWN' = 'UNKNOWN', peakRam: number | 'UNKNOWN' = 'UNKNOWN'
 const sampler = setInterval(() => { const g = gpuUsedMiB(), r = ramUsedMiB(); if (typeof g === 'number' && (peakGpu === 'UNKNOWN' || g > peakGpu)) peakGpu = g; if (typeof r === 'number' && (peakRam === 'UNKNOWN' || r > peakRam)) peakRam = r }, 3000)
-const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => console.log(`[${e.kind}] ${e.detail}`) }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
+const evCount: Record<string, number> = {}
+const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => { evCount[e.kind] = (evCount[e.kind] ?? 0) + 1; console.log(`[${e.kind}] ${e.detail}`) } }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
 const v = deriveAssignments(log).assignments.get(assignment.id)!
 const finalVerify = await verification.run()
 const lessonEffect = lessonStoreDir ? measureLessonEffect(log, assignment.id) : null
@@ -87,6 +92,7 @@ const report = {
   independentVerificationNow: { exitCode: finalVerify.exitCode, summary: finalVerify.stdout.split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ') },
   checkpoint: latestCheckpoint(log, assignment.id)?.state.steps.map((s) => `${s.id} ${s.status} ${s.files[0] ?? ''}${s.note ? ' — ' + s.note : ''}`),
   lessons: { storeDir: lessonStoreDir ?? null, retrievedIds: lessonIds, retrievedTexts: lessonTexts, effect: lessonEffect },
+  eventCounts: evCount,
   debug: debugSummary(log, assignment.id), ledgerFailures: deriveLedger(log, assignment.id).failures.size,
 }
 clearInterval(sampler)
@@ -96,6 +102,6 @@ writeFileSync(path.join(outDir, `report-${stamp}.json`), JSON.stringify(report, 
   const pass = Number(/# pass (\d+)/.exec(report.independentVerificationNow.summary)?.[1]), total = Number(/# tests (\d+)/.exec(report.independentVerificationNow.summary)?.[1])
   const CHAT_CHECKS = 12 // the independent verifier's check count; "verification could not complete" means none of them could pass
   const score = /could not complete/.test(report.independentVerificationNow.summary) ? { pass: 0, total: CHAT_CHECKS } : Number.isFinite(pass) && Number.isFinite(total) && total > 0 ? { pass, total } : ('UNKNOWN' as const)
-  new ForgeStore().recordBenchmark({ modelRef: modelName, executor: `ollama:${modelName}`, fixture: FX.label, engineSha, at: new Date().toISOString(), taskClass: 'complete_feature', verifierScore: score, completion: result.status === 'COMPLETED' && score !== 'UNKNOWN' && score.pass === score.total ? 'COMPLETED' : result.status === 'BLOCKED' ? 'BLOCKED' : score !== 'UNKNOWN' && score.pass > 2 ? 'PARTIAL' : 'FAILED', modelCalls: result.modelCalls, repairs: result.repairs, retries: 'UNKNOWN', regressions: 'UNKNOWN', elapsedMs: report.wallMs, manualIntervention: false, contextTokens: 8192, ramMiB: peakRam, vramMiB: peakGpu, rootCause: result.status === 'COMPLETED' ? undefined : result.reason, evidencePath: path.join(outDir, `report-${stamp}.json`), historicalBaseline: process.argv[4] === 'baseline' })
+  new ForgeStore().recordBenchmark({ modelRef: modelName, executor: `ollama:${modelName}`, fixture: FX.label, engineSha, at: new Date().toISOString(), taskClass: 'complete_feature', verifierScore: score, completion: result.status === 'COMPLETED' && score !== 'UNKNOWN' && score.pass === score.total ? 'COMPLETED' : result.status === 'BLOCKED' ? 'BLOCKED' : score !== 'UNKNOWN' && score.pass > 2 ? 'PARTIAL' : 'FAILED', modelCalls: result.modelCalls, repairs: result.repairs, retries: 'UNKNOWN', regressions: 'UNKNOWN', elapsedMs: report.wallMs, manualIntervention: false, workflowCompleted: result.status === 'COMPLETED', verifierPass: score !== 'UNKNOWN' && score.pass === score.total, failureClass: classifyRun({ status: result.status, reason: result.reason, verifierSummary: report.independentVerificationNow.summary }), editRejections: evCount.REJECT ?? 0, quarantinedTests: result.quarantinedTests ?? 0, contextTokens: 8192, ramMiB: peakRam, vramMiB: peakGpu, rootCause: result.status === 'COMPLETED' ? undefined : result.reason, evidencePath: path.join(outDir, `report-${stamp}.json`), historicalBaseline: process.argv[4] === 'baseline' })
 }
 console.log(JSON.stringify({ status: result.status, reason: result.reason, modelCalls: result.modelCalls, repairs: result.repairs, tokens: result.tokens, files: result.filesChanged, verify: report.independentVerificationNow, wallS: Math.round(report.wallMs / 1000) }, null, 1))
