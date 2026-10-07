@@ -30,3 +30,16 @@ tamper-evidence, not authentication.
 | quality.mjs | `b14d168fba4434a9` | `b14d168fba4434a9` | identical |
 | reslock.mjs | `e0312d790c18b4cd` | `e0312d790c18b4cd` | identical |
 | stages.mjs | `1605c3d7287aec34` | `fafdc2db968c5c25` | lint-only cleanup (unused names); behavior unchanged |
+
+
+## Post-import modifications (supersede the table above for these files)
+
+The table records the state at import. These modules were later changed in this branch and are NOT verbatim copies of the reviewed isolated implementation:
+
+- `broker.mjs`: `list()`, `approvalState()` (current inputs exposed pre-approval), `artifactManifest()`, session-liveness poll for stages (`isSessionLive`), per-execution recovery errors, mission-root vs registry-root match, historical preview keeps declared dependencies; claim label/claim prefix per scope.
+- `buildexec.mjs` / `artifacts.mjs`: symlinked build inputs are refused (`findInputSymlink`, `INPUT_SYMLINK`).
+- `phase9.mjs`: failure-class codes `SESSION_REVOKED`, `INPUT_SYMLINK`.
+- `depverify.mjs` / `depprobe.mjs`: hybrid verification (static first; probe confined to `node_modules` + root `package.json`; reads are cache-only and never execute dependency code; cache keyed by a digest of every file in the dependency directory; the host recomputes entry/package/bin hashes itself and requires probe exit code 0).
+- `envid.mjs`, `quality.mjs`, `depverify.mjs` (options): per-tool env, workspace verifier options.
+
+Each change has regression coverage in `blueprint.live.validation.ts`; the 164-test reference suite still passes. Network confinement remains policy-only (Node has no network permission flag).

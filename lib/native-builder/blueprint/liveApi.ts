@@ -239,6 +239,7 @@ export const handleDependencies = (req: Request, rawId: string) => withActor(req
     if (!declared.some(d => d.name === name && d.version === version)) throw http(400, 'INVALID_FIELD', 'Only dependencies declared by this package can be approved here.')
     if (b.action === 'check') { /* explicit re-check: runs the bounded probe below, changes no approval */ }
     else if (b.action === 'revoke') a.rt.store.revoke(ctx.workspaceId, name, version)
+    else if (b.action !== 'approve') throw http(400, 'INVALID_FIELD', "action must be 'approve', 'revoke' or 'check'.")
     else a.rt.store.approve({ workspaceId: ctx.workspaceId, name, version, actorId: a.userId, sessionId: a.sessionId, reason: strField(b, 'reason', 300) })
   }
   return { execId: id, dependencies: await describeDependencies({ workspaceId: ctx.workspaceId, declared, verifier: a.rt.verifier, store: a.rt.store, mode: req.method === 'POST' ? 'run' : 'cache-only' }) }

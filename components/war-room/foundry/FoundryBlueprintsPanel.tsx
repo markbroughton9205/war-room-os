@@ -116,7 +116,7 @@ export function FoundryBlueprintsPanel() {
                 {deps.rows.length === 0 && <span> none declared, or UNKNOWN</span>}
                 {deps.rows.length > 0 && <button data-testid="bp-dep-check" disabled={busy} onClick={() => act('Check dependencies', `${API}/${sel}/dependencies`, { name: deps.rows[0].name, version: deps.rows[0].version, action: 'check' })} className="ml-2 px-1 bg-gray-700">Re-check (runs bounded probe)</button>}
                 {deps.rows.map(d => <div key={`${d.name}@${d.version}`} data-testid="bp-dep" className="flex gap-2 items-center"><span>{d.name}@{d.version}</span><b>{d.state}</b><span>{d.approved}</span><span className="text-gray-400">{d.reasons}</span>
-                  {d.approved !== 'APPROVED' && <button data-testid="bp-dep-approve" disabled={busy} onClick={() => act('Approve dependency', `${API}/${sel}/dependencies`, { name: d.name, version: d.version, reason: 'Commander approved this exact declared dependency' })} className="px-1 bg-emerald-800">Approve</button>}
+                  {d.approved !== 'APPROVED' && <button data-testid="bp-dep-approve" disabled={busy} onClick={() => act('Approve dependency', `${API}/${sel}/dependencies`, { name: d.name, version: d.version, action: 'approve', reason: 'Commander approved this exact declared dependency' })} className="px-1 bg-emerald-800">Approve</button>}
                   {d.approved === 'APPROVED' && <button data-testid="bp-dep-revoke" disabled={busy} onClick={() => act('Revoke dependency', `${API}/${sel}/dependencies`, { name: d.name, version: d.version, action: 'revoke' })} className="px-1 bg-gray-700">Revoke</button>}</div>)}</div>
             </Section>
 
