@@ -132,7 +132,7 @@ export function planFromCode(index: WorkspaceIndex, input: { request: string; ac
   const dependsOnIt: PlanFile[] = [...new Set(impl.flatMap((s) => index.dependents[s.f.path] ?? []))].filter((p) => !implSet.has(p) && index.files[p]?.kind === 'source').map((p) => toFile(get(index.files[p]), 'dependent', 'inspect')).slice(0, 12)
   for (const s of [...scored.values()].filter((x) => x.f.kind === 'source').sort((a, b) => b.score - a.score)) if (!implSet.has(s.f.path) && s.why.some((w) => w.kind === 'consumer') && !dependsOnIt.some((d) => d.path === s.f.path)) dependsOnIt.push(toFile(s, 'consumer', 'modify'))
   // the page that hosts a consumer client script is part of the UI surface that must change with it
-  for (const c of [...dependsOnIt].filter((d) => d.role === 'consumer')) for (const host of index.dependents[c.path] ?? []) if (index.files[host]?.isHtml && !implSet.has(host) && !dependsOnIt.some((d) => d.path === host)) { const hs = get(index.files[host]); hs.why.push({ kind: 'consumer', file: host, detail: `loads ${c.path}` }); dependsOnIt.push(toFile(hs, 'consumer', 'modify')) }
+  for (const c of [...where, ...dependsOnIt].filter((d) => d.role === 'consumer' || d.layers.includes('ui'))) for (const host of index.dependents[c.path] ?? []) if (index.files[host]?.isHtml && !implSet.has(host) && !dependsOnIt.some((d) => d.path === host)) { const hs = get(index.files[host]); hs.why.push({ kind: 'consumer', file: host, detail: `loads ${c.path}` }); dependsOnIt.push(toFile(hs, 'consumer', 'modify')) }
 
   // naive keyword frequency baseline (what planning from request wording alone would do)
   const texts = new Map<string, string>()

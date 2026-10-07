@@ -11,6 +11,7 @@ import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 import { collisionFacts, isCollisionProblem } from './collision'
 import { quarantineTests } from './testContract'
+import { undefinedNames, routeShadowing, domIds, missingDomIds } from './staticGates'
 import { seedFromHandoff } from './successor'
 
 export type FeatureRequest = { request: string; acceptance: string[]; hints?: string[] }
@@ -185,7 +186,36 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const hint = imported.length ? ` ${imported.join(', ')} is both imported and declared here: rename the import with "as" (e.g. import { ${imported[0]} as store_${imported[0]} } from ...) and call the alias.` : ' Edit the existing declaration instead of adding a second one.'
       return `your version declares ${dups.join(', ')} more than once at the top level (a SyntaxError).${hint}\n${collisionFacts(path, content, dups, buildWorkspaceIndex(ws.root))}`
     }
-    return apiCompat(path, content) ?? importCompat(path, content, ignoreModules)
+    return apiCompat(path, content) ?? importCompat(path, content, ignoreModules) ?? crossRefProblem(path, content)
+  }
+  /** Cross-reference gates (see staticGates.ts): only NEW problems are reported, so a file that already had a defect is not blamed for it. */
+  const crossRefProblem = (path: string, content: string): string | null => {
+    const before = ws.exists(path) ? ws.read(path) : ''
+    if (/\.m?js$/.test(path)) {
+      const had = new Set(undefinedNames(path, before))
+      const fresh = undefinedNames(path, content).filter((n) => !had.has(n))
+      if (fresh.length) {
+        const idx = buildWorkspaceIndex(ws.root)
+        const where = fresh.map((n) => { const f = Object.values(idx.files).find((x) => x.path !== path && x.exports.includes(n)); return f ? `${n} is exported by ${f.path} (add: import { ${n} } from '<relative path to ${f.path}>')` : `${n} is not exported by any workspace file (declare it or do not call it)` })
+        return `your version uses names that are never declared or imported, which fails at run time with "is not defined": ${where.join('; ')}.`
+      }
+      const shadow = routeShadowing(path, content).filter((s) => !routeShadowing(path, before).some((b) => b.literal === s.literal))
+      if (shadow.length) return `route shadowing: ${shadow.map((s) => `${s.literal} (line ${s.literalLine}) is registered after the prefix route ${s.prefix} (line ${s.prefixLine}), which matches it first`).join('; ')}. Register every literal route BEFORE any prefix or id route.`
+    }
+    if (/\.html?$/.test(path)) {
+      const ids = [...new Set(Object.keys(ws.snapshot()).filter((f) => /\.m?js$/.test(f) && !/^(test|src|node_modules)\//.test(f) && f !== 'server.mjs').flatMap((f) => domIds(ws.read(f))))]
+      const had = new Set(missingDomIds(before, ids))
+      const miss = missingDomIds(content, ids).filter((i) => !had.has(i))
+      if (miss.length) return `the page is missing elements that its client scripts read: ${miss.map((i) => `id="${i}"`).join(', ')}. Add elements with exactly these ids.`
+    }
+    return null
+  }
+  /** NO_CHANGE is not acceptable for a page whose client scripts read element ids it does not contain. */
+  const pageMissing = (path: string): string | null => {
+    if (!ws.exists(path)) return null
+    const ids = [...new Set(Object.keys(ws.snapshot()).filter((f) => /\.m?js$/.test(f) && !/^(test|src|node_modules)\//.test(f) && f !== 'server.mjs').flatMap((f) => domIds(ws.read(f))))]
+    const miss = missingDomIds(ws.read(path), ids)
+    return miss.length ? `NO_CHANGE is not valid: the client scripts read ${miss.map((i) => `id="${i}"`).join(', ')} but the page has no such element. Add them.` : null
   }
   const relatedFor = (path: string, doneFiles: string[]) => {
     const idx = buildWorkspaceIndex(ws.root)
@@ -362,7 +392,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 3 && reply.ok; rej++) {
-        const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : null
+        const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : parsedReply.kind === 'no_change' && /\.html?$/.test(path) ? pageMissing(path) : null
         if (!problem) break
         if (rej >= 2 && !isCollisionProblem(problem)) break // the third, targeted retry is reserved for declaration/import collisions (bounded)
         feedback = problem

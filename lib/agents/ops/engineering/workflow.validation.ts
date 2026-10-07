@@ -438,5 +438,22 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const r2 = await runFeatureWorkflow(deps(y, m2, { finalVerification: y.verification }), REQ)
   check('N51_the_collision_retry_is_bounded_and_nothing_is_renamed_mechanically', r2.status === 'FAILED' && k === 4 && !y.ws.read('src/chatService.mjs').includes('loadSessions() { return loadSessions() }'), `${r2.status} k=${k}`)
 }
+
+// ---- 15. static cross-reference gates in the write path
+{
+  const base = SOLUTION['src/chatService.mjs']
+  let n = 0
+  const x = makeWorld({ limits: { maxRetries: 3 } })
+  const m = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'src/chatService.mjs') { n += 1; return fenced(n === 1 ? base + "\nexport function zzz() { return saveEverything() }\n" : base) } return good(c) })
+  const r = await runFeatureWorkflow(deps(x, m, { finalVerification: x.verification }), REQ)
+  const second = m.calls.filter((c) => c.kind === 'file' && c.path === 'src/chatService.mjs')[1]
+  check('N52_a_reply_that_uses_an_undeclared_name_is_rejected_before_it_is_written_and_the_retry_is_told_which_names', r.status === 'COMPLETED' && n === 2 && !!second && /never declared or imported/.test(second.prompt) && second.prompt.includes('saveEverything'), `${r.status} n=${n}`)
+  let k = 0
+  const y = makeWorld({ limits: { maxRetries: 3 } })
+  const m2 = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'public/index.html') { k += 1; return fenced(k === 1 ? '<!doctype html><html><body><p>nothing here</p><script src="/app.js"></script></body></html>' : INDEX_HTML) } return good(c) })
+  const r2 = await runFeatureWorkflow(deps(y, m2, { finalVerification: y.verification }), REQ)
+  const retry = m2.calls.filter((c) => c.kind === 'file' && c.path === 'public/index.html')[1]
+  check('N53_a_page_that_lacks_the_element_ids_its_client_scripts_read_is_rejected_and_the_retry_names_the_ids', r2.status === 'COMPLETED' && k === 2 && !!retry && /missing elements that its client scripts read/.test(retry.prompt), `${r2.status} k=${k}`)
+}
 void deriveAssignments; void AgentRegistry
 finish()
