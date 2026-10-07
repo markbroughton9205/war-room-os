@@ -110,7 +110,9 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     for (const layer of LAYER_ORDER) {
       const sl = plan.slices.find((s) => s.layer === layer)
       if (!sl) continue
-      for (const f of sl.files) { n += 1; fileSteps.push({ id: `s${n}`, title: `${layer}: ${f.action} ${f.path}`, status: 'PENDING', layer, files: [f.path], note: f.rationale.slice(0, 120) }) }
+      // the page that loads a changed client script is part of the UI surface: it must be a step even when the planner ranking missed it
+      const uiHosts = layer === 'ui' ? sl.files.flatMap((f) => (index0.dependents[f.path] ?? []).filter((h) => index0.files[h]?.isHtml && !sl.files.some((x) => x.path === h)).map((h) => ({ path: h, action: 'modify' as const, rationale: `loads ${f.path}` }))).filter((h, i, a) => a.findIndex((x) => x.path === h.path) === i) : []
+      for (const f of [...sl.files, ...uiHosts]) { n += 1; fileSteps.push({ id: `s${n}`, title: `${layer}: ${f.action} ${f.path}`, status: 'PENDING', layer, files: [f.path], note: f.rationale.slice(0, 120) }) }
     }
     if (!fileSteps.length) { failAssignment(log, assignmentId, actor, 'the code-aware plan found no files to change: ' + (plan.uncertainties[0] ?? 'UNDETERMINED'), undefined, clock()); return result('FAILED', 'no plan: ' + (plan.uncertainties[0] ?? 'UNDETERMINED')) }
     // Acceptance runs BEFORE model-written tests: the independent verifier is ground truth for the implementation, so implementation defects are repaired against it first.
@@ -261,8 +263,10 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     // for tests/ui: show the server routes and service as ground truth
     return out
   }
-  const writeFile = async (stepId: string, path: string, content: string) => {
-    const key = `write:${path}:${sha256(content).slice(0, 12)}`
+  let restoreSeq = 0
+  /** tag: a restore/revert is a NEW effect even when the same content was written earlier (the idempotency key would otherwise treat it as already done and skip it). */
+  const writeFile = async (stepId: string, path: string, content: string, tag = '') => {
+    const key = `write:${path}:${sha256(content).slice(0, 12)}${tag}`
     const before = ws.hash(path)
     const expected: FileChange = { path, beforeHash: before, afterHash: sha256(content), stepId }
     const out = await runEffectOnce(log, assignmentId, key, { kind: 'file_write', consequential: true, summary: `write ${path}`, expectedChanges: [expected] }, async () => { const w = ws.write(path, content); return { value: w, fileChanges: [{ path, beforeHash: w.beforeHash, afterHash: w.afterHash, stepId }] } }, (p) => ws.hash(p))
@@ -287,7 +291,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     const body = pr.verdict === 'FAIL' ? `not ok 1 - persistence round trip survives a restart\n  message: ${pr.detail}\n# tests 1\n# pass 0\n# fail 1\n` : `ok 1 - persistence round trip survives a restart\n# tests 1\n# pass 1\n# fail 0\n`
     return { argv: ['persistence-probe'], cwd: ws.root, exitCode: pr.verdict === 'FAIL' ? 1 : 0, timedOut: false, stdout: body, stderr: '', durationMs: 0, startedAt: clock().toISOString(), outputHash: sha256(body) }
   }
-  const runProbe = async (): Promise<PersistenceProbe> => persistenceProbe(ws.root, req.acceptance, Object.keys(ws.snapshot()))
+  const legacyNames = [...new Set(Object.values(baselineText).flatMap((t) => [...t.matchAll(/export\s+(?:async\s+)?(?:function|const|let)\s+(\w+)/g)].map((m) => m[1])))]
+  const runProbe = async (): Promise<PersistenceProbe> => persistenceProbe(ws.root, req.acceptance, Object.keys(ws.snapshot()), legacyNames)
   /**
    * The evidence-driven repair loop for ONE failing command. Returns true when the ORIGINAL failure is fixed.
    * failed check -> implicated route/symbol/storage path (failureEvidence) -> ordered, falsifiable hypotheses -> ONE hypothesis acted on per attempt
@@ -545,8 +550,14 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             // ...unless the failure output itself implicates implementation files (a stack frame or path inside src/, server, public): then the implementation is a suspect too
             const implicated = candidatesFromOutput(out, []).filter((f) => !/^test\//.test(f))
             const testOnly = acceptPassed && out.includes(path) && !otherTests.length && !implicated.length
+            const implSnap = Object.fromEntries([...changed].filter((f) => !/^test\//.test(f) && ws.exists(f)).map((f) => [f, ws.read(f)]))
             stepOk = await debugLoop(run, testOnly ? [path] : [...changed].filter((f) => !/^test\//.test(f)).concat([path]), step.id, 'tests', () => runCheck(tests), testOnly ? [path] : undefined)
-            if (!stepOk && testOnly) {
+            // implementation files edited at the test stage must not regress the independently verified behaviour: the verifier is the arbiter, the edit is reverted otherwise
+            if (acceptPassed && deps.finalVerification && Object.entries(implSnap).some(([f, t]) => ws.read(f) !== t)) {
+              const chk = await deps.finalVerification.run()
+              if (chk.exitCode !== 0) { for (const [f, t] of Object.entries(implSnap)) if (ws.read(f) !== t) await writeFile(step.id, f, t, `:revert${++restoreSeq}`); state.doNotRepeat.push({ key: `revert:${step.id}`, reason: 'a repair at the test stage changed implementation files and broke the independent acceptance; the edit was reverted' }); emit('REVERT_REGRESSION', `${step.id}: implementation edit reverted (independent acceptance regressed)`); stepOk = (await runCheck(tests)).exitCode === 0 }
+            }
+            if (!stepOk && acceptPassed) {
               // The implementation PASSED the independent acceptance and only the model-written test still fails: the test asserts something the contract does not require.
               // Quarantine exactly the failing cases (recorded, reviewable, never silent) so an invented expectation cannot block a feature that meets its acceptance criteria.
               const last = await runCheck(tests)
@@ -563,7 +574,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                   emit('QUARANTINE', `${path}: ${note}`)
                   quarantined += q.removed.length
                   stepOk = true
-                } else { await writeFile(step.id, path, orig) }
+                } else { await writeFile(step.id, path, orig, `:restore${++restoreSeq}`) }
               }
               if (!stepOk) {
                 // the case mixes grounded and ungrounded assertions (or is the only case): disable only the failing assertion statements, up to three rounds, never the whole case
@@ -583,7 +594,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                   emit('QUARANTINE_ASSERTION', `${path}: ${removedAll.map((x) => `line ${x.line}`).join(', ')}`)
                   quarantined += removedAll.length
                   stepOk = true
-                } else if (removedAll.length) { await writeFile(step.id, path, orig) }
+                } else if (removedAll.length) { await writeFile(step.id, path, orig, `:restore${++restoreSeq}`) }
               }
             }
           }

@@ -499,4 +499,21 @@ void deriveAssignments; void AgentRegistry
   check('N61_a_server_that_omits_routes_the_contract_names_is_rejected_with_the_exact_routes_and_gets_a_bounded_third_retry', r2.status === 'COMPLETED' && asks === 4 && m2.calls.filter((c) => c.path === 'server.mjs')[1].prompt.includes('does not serve what the acceptance contract requires'), `${r2.status} asks=${asks} ${r2.reason}`)
 }
 
+// ---- 18. the verifier is the arbiter: an implementation edit made at the test stage that regresses the independent acceptance is reverted, and the test side is quarantined instead
+{
+  const LATENT = "\nexport function describeStore() { throw new Error('latent defect: describeStore is unfinished') }\n"
+  const T = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { describeStore } from '../src/messageStore.mjs'\ntest('describes the store', () => { assert.strictEqual(describeStore(), 'store') })\ntest('an unrelated case', () => { assert.ok(true) })\n`
+  const x = makeWorld({ limits: { maxRetries: 5 } }); const ev: string[] = []
+  const breaking = SOLUTION['src/messageStore.mjs'].replace('export function saveSessions', 'export function saveSessionsOLD') + "\nexport function saveSessions(s) { return s }\nexport function describeStore() { return 'store' }\n"
+  const m = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/messageStore.mjs') return fenced(SOLUTION['src/messageStore.mjs'] + LATENT)
+    if (c.kind === 'file' && c.path === 'test/messageStore.test.mjs') return fenced(T)
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'describeStore throws an unfinished-implementation error (stack points into src/messageStore.mjs)', file: 'src/messageStore.mjs', differs: 'first attempt' })
+    if (c.kind === 'repair') return fenced(breaking)
+    return good(c)
+  })
+  const r = await runFeatureWorkflow(deps(x, m, { finalVerification: x.verification, onEvent: (e) => ev.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('N62_an_implementation_edit_at_the_test_stage_that_breaks_the_independent_acceptance_is_reverted_and_the_ungrounded_test_case_is_quarantined', r.status === 'COMPLETED' && ev.some((e) => e.startsWith('REVERT_REGRESSION')) && ev.some((e) => e.startsWith('QUARANTINE ')) && x.ws.read('src/messageStore.mjs').includes('saveSessions') && !x.ws.read('src/messageStore.mjs').includes('saveSessionsOLD') && (await x.verification.run()).exitCode === 0, `${r.status} ${r.reason} ${ev.filter((e) => /REVERT|QUARANT/.test(e)).join('|')}`)
+}
+
 finish()

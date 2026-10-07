@@ -87,10 +87,11 @@ const GETTER = /^(all|list|get[A-Z]\w*|read\w*|find\w*|load\w*|count\w*|summary|
 const SCRIPT = `
 import { pathToFileURL } from 'node:url'
 const [file, phase, argsJson] = process.argv.slice(1)
+const skip = new Set(JSON.parse(process.env.PROBE_SKIP || '[]'))
 const mod = await import(pathToFileURL(file).href)
 const out = { created: null, snap: {} }
 const shapes = argsJson ? [JSON.parse(argsJson)] : [['probe'], [{ name: 'probe', title: 'probe', text: 'probe', severity: 'info', author: 'probe' }], ['probe', 'probe'], [{ text: 'probe' }], [{ title: 'probe' }], [{ name: 'probe' }]]
-const isFn = (k) => typeof mod[k] === 'function'
+const isFn = (k) => typeof mod[k] === 'function' && !skip.has(k)
 if (phase === '1') {
   for (const k of Object.keys(mod).filter((k) => isFn(k) && ${CREATE}.test(k))) {
     for (const a of shapes) { try { await mod[k](...a); out.created = { fn: k, args: a }; break } catch {} }
@@ -103,7 +104,7 @@ console.log('PROBE ' + JSON.stringify(out))
 const runNode = (cwd: string, args: string[], env: Record<string, string>) => new Promise<string>((resolve) => execFile('node', ['--input-type=module', '-e', SCRIPT, ...args], { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', ...env } as unknown as NodeJS.ProcessEnv, timeout: 15_000 }, (_e, stdout) => resolve(String(stdout))))
 const parse = (s: string) => { const m = /PROBE (\{.*\})/.exec(s); try { return m ? JSON.parse(m[1]) as { created: { fn: string; args: unknown[] } | null; snap: Record<string, string> } : null } catch { return null } }
 /** Round trip on the real storage module: create, read, then a FRESH process re-imports it and must read the same data back. Works on a private copy; never touches the workspace. */
-export async function persistenceProbe(root: string, acceptance: string[], files: string[]): Promise<PersistenceProbe> {
+export async function persistenceProbe(root: string, acceptance: string[], files: string[], legacyNames: string[] = []): Promise<PersistenceProbe> {
   if (!wantsPersistence(acceptance)) return { verdict: 'INCONCLUSIVE', detail: 'the acceptance criteria do not claim persistence' }
   const candidates = files.filter((p) => isSource(p) && existsSync(path.join(root, p)) && storageFacts(p, readFileSync(path.join(root, p), 'utf8')).writers.length)
   if (!candidates.length) return { verdict: 'INCONCLUSIVE', detail: 'no module writes data to disk yet' }
@@ -111,7 +112,7 @@ export async function persistenceProbe(root: string, acceptance: string[], files
     const dir = mkdtempSync(path.join(tmpdir(), 'persist-probe-'))
     try {
       cpSync(root, dir, { recursive: true, filter: (s) => !/node_modules/.test(s) })
-      const env: Record<string, string> = Object.fromEntries(storageEnvVars(acceptance).map((v) => [v, path.join(dir, `${v}.json`)]))
+      const env: Record<string, string> = { ...Object.fromEntries(storageEnvVars(acceptance).map((v) => [v, path.join(dir, `${v}.json`)])), PROBE_SKIP: JSON.stringify(legacyNames) }
       const target = path.join(dir, rel)
       const p1 = parse(await runNode(dir, [target, '1'], env))
       if (!p1) continue
@@ -123,5 +124,5 @@ export async function persistenceProbe(root: string, acceptance: string[], files
       return { verdict: 'PASS', detail: `${rel}: ${p1.created.fn}() then a fresh process read back identical data from ${Object.keys(p1.snap).join(', ') || 'no getter'}`, module: rel }
     } finally { rmSync(dir, { recursive: true, force: true }) }
   }
-  return { verdict: 'INCONCLUSIVE', detail: 'no storage module accepted a recognisable create call' }
+  return { verdict: 'INCONCLUSIVE', detail: 'no NEW function accepted a recognisable create call (functions that existed before the change are not probed: their persistence is not part of the contract)' }
 }

@@ -1,5 +1,5 @@
 import { type Route, acceptanceRoutes, contractRouteProblems, legacyStateDrift, routeFindings, routeTable, statusReachability, syntaxProblems, undefinedNames, domIds, missingDomIds } from './staticGates'
-import { persistenceProblems, type PersistenceProbe } from './persistenceContract'
+import { persistenceProblems, storageEnvVars, type PersistenceProbe } from './persistenceContract'
 
 /**
  * Verifier-to-planner feedback. A failing independent check is NOT passed on as prose: it is parsed, mapped to the implicated route / symbol / storage path /
@@ -76,6 +76,8 @@ export function buildEvidence(inp: EvidenceInput): StructuredEvidence {
   const srcProblems = Object.entries(files).filter(([p]) => SOURCE(p) || /^public\//.test(p)).flatMap(([p, t]) => syntaxProblems(p, t).map((m) => ({ file: p, msg: m })))
   const missingStatus = statusReachability(files, inp.acceptance)
 
+  const kindOf = (c: { n: number; name: string; message: string }): CheckKind => (testInfo.has(c.n) ? 'TEST_FAILURE' : /could not complete|server exited|did not start/i.test(`${c.name} ${c.message}`) ? 'SERVER_START' : /persist|surviv|restart|durab/i.test(c.name) ? 'PERSISTENCE' : 'GENERIC')
+  const out0 = checks.map((c) => ({ n: c.n, kind: kindOf(c) }))
   const out: CheckFailure[] = checks.map((c) => {
     const text = `${c.name} ${c.message}`
     const facts: string[] = [], hyps: Hypothesis[] = []
@@ -176,7 +178,11 @@ export function buildEvidence(inp: EvidenceInput): StructuredEvidence {
       for (const d of drift) { facts.push(`legacy state drift: ${d.file} ${d.fn}() ${d.was} -> ${d.now}`); H(kind, `persist:legacy-drift:${d.file}`, `${d.fn}() in ${d.file} is an existing export that used ${d.was}; it now reads/writes the NEW state ${d.now}, so data of the old feature leaks into the new entity (and the reverse). Keep it on its own state and add new functions for the new entity`, [d.file]) }
       for (const p of persistIssues) { facts.push(p); H(kind, `persist:contract:${p.slice(0, 50)}`, p, [/^[^:]+: (\S+)/.exec(p)?.[1] ?? Object.keys(files).find((f) => /store|feed|repo|db/i.test(f) && SOURCE(f)) ?? ''].filter((f) => files[f] !== undefined)) }
       if (inp.probe?.verdict === 'FAIL' && inp.probe.module) H(kind, `persist:roundtrip:${inp.probe.module}`, `round trip through ${inp.probe.module} fails: ${inp.probe.detail}`, [inp.probe.module])
-      H(kind, 'persist:cascade', `the storage round trip itself is not broken; this check fails on data produced by earlier functional defects in the same scenario. Fix the other failing checks first and re-run`, [])
+      if (!out0.some((o) => o.n !== c.n && o.kind !== 'PERSISTENCE')) {
+        const envs = storageEnvVars(inp.acceptance)
+        const storeFile = Object.keys(files).find((f) => SOURCE(f) && envs.some((v) => files[f].includes(`process.env.${v}`))) ?? Object.keys(files).find((f) => SOURCE(f) && /writeFileSync|writeFile\(/.test(files[f])) ?? ''
+        H(kind, `persist:reload:${storeFile}`, `everything else passes, so the storage round trip itself is wrong (${c.message.slice(0, 120)}): data or counters are not written completely, not read back from ${envs.join('/') || 'the data file'}, or are mixed with unrelated (pre-existing) state. Check what is saved (every field and the id counter), where it is loaded at start-up, and that only the new entity is stored in this file`, [storeFile])
+      } else H(kind, 'persist:cascade', `the storage round trip itself is not broken; this check fails on data produced by earlier functional defects in the same scenario. Fix the other failing checks first and re-run`, [])
     }
     return { n: c.n, name: c.name, message: c.message, kind, facts, hypotheses: hyps }
   })

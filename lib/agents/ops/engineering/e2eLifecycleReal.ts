@@ -75,6 +75,24 @@ console.log('# tests ' + n); console.log('# pass ' + pass); console.log('# fail 
 process.exit(fail === 0 && n >= 4 ? 0 : 1)
 `
 
+// a materially SIMILAR second mission (same layers and verification style, different endpoint, fields and element): the reuse-vs-create decision must be made on evidence
+const MINI2 = {
+  request: 'Add an event summary: the API reports the total number of events and the most recent message, and the page shows the total.',
+  acceptance: [
+    'GET /api/events/summary returns {"total":n,"lastMessage":m} where n is the number of recorded events (0 when none) and m is the message of the most recent event (null when none)',
+    'the page shows the total in an element with id event-total, filled from /api/events/summary',
+    'the existing GET/POST /api/events endpoints keep working',
+    'node tests cover the new summary function',
+  ],
+  hints: ['event', 'summary'],
+}
+const MINI2_VERIFY = MINI_VERIFY
+  .replace(/events(\\?\/)count/g, 'events$1summary').replace(/event-count/g, 'event-total')
+  .replace('c0.b.count === 0', 'c0.b.total === 0 && c0.b.lastMessage === null').replace('c2.b.count === 2', "c2.b.total === 2 && c2.b.lastMessage === 'two'")
+  .replace('count is 0 before any event', 'summary is empty before any event').replace('count reflects recorded events', 'summary reflects recorded events and the latest message')
+type Mission = { request: string; acceptance: string[]; hints: string[]; verify: string }
+const M1: Mission = { ...MINI, verify: MINI_VERIFY }, M2: Mission = { ...MINI2, verify: MINI2_VERIFY }
+
 const log = new AgentOpsLog(path.join(outDir, `agent-ops-${stamp}`))
 const reg = new AgentRegistry(log)
 const p9 = new LearningLog(path.join(outDir, `phase9-${stamp}`))
@@ -85,7 +103,7 @@ const say = (k: string, v: unknown) => { evidence[k] = v; console.log(`## ${k}: 
 let modelCalls = 0
 const traced = { async generate(input: Parameters<OllamaModelClient['generate']>[0]) { const t0 = Date.now(); const r = await real.generate(input); modelCalls += 1; appendFileSync(trace, JSON.stringify({ at: new Date().toISOString(), ms: Date.now() - t0, ok: r.ok, promptChars: input.prompt.length }) + '\n'); return r } }
 
-const verifier = (root: string, tag: string) => makeIndependentVerification(`independent mini verification (${tag})`, path.join(outDir, `verifier-${stamp}-${tag}`), 'verify.mjs', MINI_VERIFY, root)
+const verifier = (root: string, tag: string, m: Mission = M1) => makeIndependentVerification(`independent mini verification (${tag})`, path.join(outDir, `verifier-${stamp}-${tag}`), 'verify.mjs', m.verify, root)
 const limitsOk = { maxSteps: 30, maxRuntimeMs: 900_000, maxModelCalls: 60, maxRetries: 3 }
 function newMission(id: string, agentId: string, limits = limitsOk, objective = MINI.request) {
   const root = makeAlertApp(path.join(wsBase, id))
@@ -93,11 +111,11 @@ function newMission(id: string, agentId: string, limits = limitsOk, objective = 
   const { assignment, created } = assign(log, d, C)
   return { assignment, created, root }
 }
-async function run(asgId: string, root: string, tag: string, onEvent?: (e: { kind: string; detail: string }) => void): Promise<WorkflowResult> {
-  return runFeatureWorkflow({ log, assignmentId: asgId, ws: new Workspace(root), model: traced, tools: TOOLS, finalVerification: verifier(root, tag), onEvent: (e) => { console.log(`  [${e.kind}] ${e.detail}`); onEvent?.(e) } }, { request: MINI.request, acceptance: MINI.acceptance, hints: MINI.hints })
+async function run(asgId: string, root: string, tag: string, onEvent?: (e: { kind: string; detail: string }) => void, m: Mission = M1): Promise<WorkflowResult> {
+  return runFeatureWorkflow({ log, assignmentId: asgId, ws: new Workspace(root), model: traced, tools: TOOLS, finalVerification: verifier(root, tag, m), onEvent: (e) => { console.log(`  [${e.kind}] ${e.detail}`); onEvent?.(e) } }, { request: m.request, acceptance: m.acceptance, hints: m.hints })
 }
 const state = (id: string) => deriveAssignments(log).assignments.get(id)!
-const score = async (root: string, tag: string) => { const r = await verifier(root, tag).run(); const m = (re: RegExp) => Number(re.exec(r.stdout)?.[1]); return { pass: m(/# pass (\d+)/), total: m(/# tests (\d+)/), exit: r.exitCode } }
+const score = async (root: string, tag: string, mi: Mission = M1) => { const r = await verifier(root, tag, mi).run(); const m = (re: RegExp) => Number(re.exec(r.stdout)?.[1]); return { pass: m(/# pass (\d+)/), total: m(/# tests (\d+)/), exit: r.exitCode } }
 function recordEval(label: string, asgId: string, res: WorkflowResult, sc: { pass: number; total: number }, wallMs: number) {
   const b: BenchmarkRecord = { modelRef: modelName, executor: `ollama:${modelName}`, fixture: 'lifecycle-mini (event counter)', engineSha, at: new Date().toISOString(), taskClass: 'complete_feature', verifierScore: sc, completion: res.status === 'COMPLETED' && sc.pass === sc.total ? 'COMPLETED' : sc.pass > 1 ? 'PARTIAL' : 'FAILED', modelCalls: res.modelCalls, repairs: res.repairs, retries: 'UNKNOWN', regressions: 'UNKNOWN', elapsedMs: wallMs, manualIntervention: false, contextTokens: 8192, ramMiB: 'UNKNOWN', vramMiB: 'UNKNOWN', workflowCompleted: res.status === 'COMPLETED', verifierPass: sc.pass === sc.total, failureClass: classifyRun({ status: res.status, reason: res.reason, verifierSummary: '' }), rootCause: res.status === 'COMPLETED' ? undefined : res.reason, evidencePath: label }
   return emitEngineeringRun(p9, b, { trial: `${label}:${asgId}` })
@@ -114,10 +132,10 @@ say('2_decision_with_no_history', { action: d0.action, agent: d0.agentId, creati
 
 // ===== 2. two real missions by the generalist (recurring work becomes evidence)
 const results: Record<string, unknown>[] = []
-async function realMission(id: string, agentId: string, tag: string) {
-  const m = newMission(id, agentId); startAssignment(log, m.assignment.id, 'system:runner')
-  const t0 = Date.now(); const res = await run(m.assignment.id, m.root, tag); const wall = Date.now() - t0
-  const sc = await score(m.root, `${tag}-final`)
+async function realMission(id: string, agentId: string, tag: string, mission: Mission = M1) {
+  const m = newMission(id, agentId, limitsOk, mission.request); startAssignment(log, m.assignment.id, 'system:runner')
+  const t0 = Date.now(); const res = await run(m.assignment.id, m.root, tag, undefined, mission); const wall = Date.now() - t0
+  const sc = await score(m.root, `${tag}-final`, mission)
   const ev = recordEval(id, m.assignment.id, res, sc, wall)
   const row = { id, assignment: m.assignment.id, status: res.status, reason: res.reason.slice(0, 160), state: state(m.assignment.id).state, verifier: `${sc.pass}/${sc.total}`, wallS: Math.round(wall / 1000), modelCalls: res.modelCalls, repairs: res.repairs, phase9: ev }
   results.push(row); say(`mission_${id}`, row); return { m, res, sc }
@@ -143,8 +161,22 @@ if (d1.action === 'CREATE_PROPOSAL' && d1.creation?.allowed) {
   say('6_specialist', { agent: spec.agentId, stateBeforeCommander: preState, assignmentBlockedBeforeApproval: blocked, stateAfter: deriveAgents(log).agents.get(spec.agentId)!.state })
 } else say('6_specialist', { created: false, why: 'the evidence-based gate did not allow creation (recorded honestly)', decision: d1.action })
 
+// ===== 3b. the specialist does REAL work: assignment -> real model -> validation -> result -> outcome recorded -> lifecycle state
+let specMission: Awaited<ReturnType<typeof realMission>> | null = null
 const { completeAssignment } = await import('./assignments')
 completeAssignment(log, busy.assignment.id, 'system:runner', { validation: 'PASSED', summary: 'decision-time placeholder released', artifacts: [], executor: 'UNKNOWN', tokens: 'UNKNOWN', latencyMs: 'UNKNOWN', retries: 0 })
+if (spec) {
+  specMission = await realMission('spec-1', spec.agentId, 'sp1')
+  say('6b_specialist_mission', { agent: spec.agentId, status: specMission.res.status, state: state(specMission.m.assignment.id).state, verifier: `${specMission.sc.pass}/${specMission.sc.total}`, outcome: state(specMission.m.assignment.id).outcome?.validation ?? null })
+  // ===== 3c. a materially similar second mission: reuse the existing specialist, or create another? decided on evidence
+  const agentsBefore = [...deriveAgents(log).agents.keys()]
+  const dr = decideSpecialist(log, { taskClass: 'feature_implementation', capabilities: ['feature_implementation'] })
+  say('6c_reuse_decision', { action: dr.action, agent: dr.agentId, reasons: dr.reasons.slice(0, 3), candidates: dr.candidates.map((c) => ({ agent: c.agentId, evidence: c.weakest, proven: c.proven, available: c.available })) })
+  const target = dr.agentId ?? spec.agentId
+  const reused = await realMission('similar-1', target, 'sim1', M2)
+  const agentsAfter = [...deriveAgents(log).agents.keys()]
+  say('6d_reuse_result', { decision: dr.action, reusedAgent: target, specialistReused: target === spec.agentId, newAgentsCreated: agentsAfter.filter((a) => !agentsBefore.includes(a)), status: reused.res.status, state: state(reused.m.assignment.id).state, verifier: `${reused.sc.pass}/${reused.sc.total}` })
+}
 // ===== 4. duplicate prevention (same mission + objective -> the existing assignment, no second run)
 const dup = newMission('gen-1', gen.id)
 say('7_duplicate_prevention', { created: dup.created, sameAssignment: dup.assignment.id === gm[0].m.assignment.id })

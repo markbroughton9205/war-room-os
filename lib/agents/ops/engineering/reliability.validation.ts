@@ -105,5 +105,15 @@ const T = ['import test from "node:test"', 'import assert from "node:assert"', '
 const qa = quarantineAssertions('test/a.test.mjs', T, [5])
 check('R36_only_the_failing_assertion_statement_is_disabled_and_the_case_with_its_other_assertions_stays', !!qa && qa.removed.length === 1 && qa.removed[0].line === 5 && qa.content.includes('assert.ok(true)') && qa.content.includes('assert.ok(2 > 1)') && qa.content.split('\n')[4].trim().startsWith('// QUARANTINED ASSERTION'))
 check('R37_assertion_quarantine_refuses_to_leave_a_test_file_without_any_assertion', quarantineAssertions('test/a.test.mjs', 'import test from "node:test"\nimport assert from "node:assert"\ntest("x", () => {\n  assert.strictEqual(1, 2)\n})\n', [4]) === null)
+
+// ---- the probe only exercises NEW functions; a sole persistence failure is not blamed on a cascade
+const legacyStore = mkRoot({ 'package.json': '{"type":"module"}', 'src/store.mjs': STORE_OK + "const legacy = []\nexport function addLegacy(x) { legacy.push(x); return x }\nexport function allLegacy() { return legacy }\n" })
+const onlyLegacy = mkRoot({ 'package.json': '{"type":"module"}', 'src/store.mjs': "import fs from 'node:fs'\nconst file = process.env.DATA_FILE\nlet items = []\nif (fs.existsSync(file)) items = JSON.parse(fs.readFileSync(file, 'utf8'))\nfunction save() { fs.writeFileSync(file, JSON.stringify(items)) }\nexport function addLegacy(x) { items.push(x); return x }\nexport function allLegacy() { return items }\nexport function keep() { save() }\n" })
+const pLegacy = await persistenceProbe(onlyLegacy, PERSIST, ['src/store.mjs'], ['addLegacy', 'allLegacy'])
+check('R38_functions_that_existed_before_the_change_are_never_probed_so_pre_existing_in_memory_behaviour_is_not_forced_to_persist', pLegacy.verdict === 'INCONCLUSIVE' && /NEW function/.test(pLegacy.detail), pLegacy.detail)
+const pBoth = await persistenceProbe(legacyStore, PERSIST, ['src/store.mjs'], ['addLegacy', 'allLegacy'])
+check('R39_a_new_function_next_to_legacy_ones_is_still_probed_and_judged_on_its_own_getters', pBoth.verdict === 'PASS' && /addItem/.test(pBoth.detail), pBoth.detail)
+const evSole = buildEvidence({ output: TAP([[12, 'items persist in DATA_FILE across a restart', 'persisted=true all=[1,2]']]), acceptance: PERSIST, files: { 'src/store.mjs': STORE_OK } })
+check('R40_when_persistence_is_the_only_failing_check_the_hypothesis_targets_the_store_not_an_imaginary_cascade', evSole.queue[0].key.startsWith('persist:reload:') && evSole.queue[0].files[0] === 'src/store.mjs' && !evSole.queue.some((h) => h.key === 'persist:cascade'), evSole.queue.map((h) => h.key).join())
 void cpSync
 finish()
