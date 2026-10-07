@@ -143,6 +143,8 @@ if (d1.action === 'CREATE_PROPOSAL' && d1.creation?.allowed) {
   say('6_specialist', { agent: spec.agentId, stateBeforeCommander: preState, assignmentBlockedBeforeApproval: blocked, stateAfter: deriveAgents(log).agents.get(spec.agentId)!.state })
 } else say('6_specialist', { created: false, why: 'the evidence-based gate did not allow creation (recorded honestly)', decision: d1.action })
 
+const { completeAssignment } = await import('./assignments')
+completeAssignment(log, busy.assignment.id, 'system:runner', { validation: 'PASSED', summary: 'decision-time placeholder released', artifacts: [], executor: 'UNKNOWN', tokens: 'UNKNOWN', latencyMs: 'UNKNOWN', retries: 0 })
 // ===== 4. duplicate prevention (same mission + objective -> the existing assignment, no second run)
 const dup = newMission('gen-1', gen.id)
 say('7_duplicate_prevention', { created: dup.created, sameAssignment: dup.assignment.id === gm[0].m.assignment.id })
@@ -153,8 +155,6 @@ const lim = newMission('limited', holder, { ...limitsOk, maxModelCalls: 5 }); st
 const limRes = await run(lim.assignment.id, lim.root, 'lim')
 say('8_limit_enforcement', { status: limRes.status, reason: limRes.reason, modelCalls: limRes.modelCalls, ceiling: 5, state: state(lim.assignment.id).state, ceilingUnchanged: state(lim.assignment.id).assignment.limits.maxModelCalls === 5, checkpoint: latestCheckpoint(log, lim.assignment.id)?.state.steps.map((s) => `${s.id}:${s.status}`) })
 // free the generalist, then the successor (a different agent when a specialist exists) continues with real work
-const { completeAssignment } = await import('./assignments')
-completeAssignment(log, busy.assignment.id, 'system:runner', { validation: 'PASSED', summary: 'holder released', artifacts: [], executor: 'UNKNOWN', tokens: 'UNKNOWN', latencyMs: 'UNKNOWN', retries: 0 })
 let succ: ReturnType<typeof continueAssignment> | null = null
 try { succ = continueAssignment(log, lim.assignment.id, gen.id, C, 'the predecessor hit its model-call ceiling; continue from its checkpoint with a normal budget') } catch (e) { say('9_successor_error', String((e as Error).message)) }
 if (succ) {
