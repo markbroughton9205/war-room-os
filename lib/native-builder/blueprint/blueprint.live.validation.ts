@@ -208,6 +208,22 @@ async function main() {
     const ran14 = await adv14.then((x: any) => x, (e: any) => ({ err: e.code }))
     check('session_revoked_mid_stage_stops_build', (ran14 as any).claims?.built === false && !(ran14 as any).ran?.some((x: any) => x.status === 'PASSED'), JSON.stringify((ran14 as any).ran ?? ran14).slice(0, 200))
     Object.assign(facts, keep); done(s14)
+    // ---- L10c dependency probe: hybrid (static first, bounded probe second); reads never execute dependency code; probe cannot read the workspace outside node_modules
+    const s15 = await seedBlueprintSandbox(sb, { name: 'ws-probe' }); await refreshBlueprintWorkspace(s15.workspaceId); approveDeps(rt, s15)
+    const secretFile = path.join(s15.workspaceRoot, 'secret.txt'); fs.writeFileSync(secretFile, 'WORKSPACE-SECRET\n')
+    const depIndex = path.join(s15.workspaceRoot, 'node_modules/tiny-dep/index.js')
+    fs.writeFileSync(depIndex, "const fs = require('fs'), path = require('path')\nlet leaked = false; try { fs.readFileSync(path.resolve(__dirname, '../../secret.txt')); leaked = true } catch { /* denied: expected */ }\nif (leaked) throw new Error('LEAK')\nmodule.exports = { describe: () => 'tiny-dep@1.2.3' }\n")
+    const decl = [{ name: 'tiny-dep', version: '1.2.3' }], spawns0 = rt.verifier.stats().spawns
+    const readOnly = await rt.verifier.verify(s15.workspaceId, decl, { mode: 'cache-only' })
+    check('read_never_runs_dependency_code', rt.verifier.stats().spawns === spawns0 && readOnly.deps[0].state === 'RESOLVABLE' && readOnly.deps[0].reasons.includes('PROBE_NOT_RUN_ON_READ') && readOnly.allUsable === false, `state=${readOnly.deps[0].state} ${readOnly.deps[0].reasons}`)
+    const ran = await rt.verifier.verify(s15.workspaceId, decl)
+    check('probe_cannot_read_workspace_outside_node_modules', ran.deps[0].state === 'VERIFIED_USABLE' && rt.verifier.stats().spawns === spawns0 + 1, `state=${ran.deps[0].state} ${ran.deps[0].reasons}`)
+    const cached = await rt.verifier.verify(s15.workspaceId, decl, { mode: 'cache-only' })
+    check('verified_usable_only_from_a_real_probe_of_an_unchanged_install', cached.deps[0].state === 'VERIFIED_USABLE' && rt.verifier.stats().spawns === spawns0 + 1, 'cache hit reuses the proof, no new spawn')
+    fs.appendFileSync(depIndex, '// changed\n'); fs.writeFileSync(path.join(s15.workspaceRoot, 'node_modules/tiny-dep/package.json'), fs.readFileSync(path.join(s15.workspaceRoot, 'node_modules/tiny-dep/package.json'), 'utf8').replace('"1.2.3"', '"1.2.3" '))
+    const changed = await rt.verifier.verify(s15.workspaceId, decl, { mode: 'cache-only' })
+    check('changed_install_invalidates_the_proof', changed.deps[0].state !== 'VERIFIED_USABLE', `state=${changed.deps[0].state}`)
+    done(s15)
     // ---- L11 base identity accessor: stable across own writes, distinguishes commit/worktree/copy/installed runtime
     const s11 = await seedBlueprintSandbox(sb, { name: 'ws-identity' }), id0 = readWorkspaceBaseIdentity({ workspaceId: s11.workspaceId, root: s11.workspaceRoot })
     fs.writeFileSync(path.join(s11.workspaceRoot, 'src/a.mjs'), 'export const a = 99\n'); fs.writeFileSync(path.join(s11.workspaceRoot, 'src/new.mjs'), 'x\n')

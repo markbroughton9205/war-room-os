@@ -73,9 +73,9 @@ export function createLiveDependencyVerifier(opts: { store: DependencyApprovalSt
 export type LiveDependencyVerifier = ReturnType<typeof createLiveDependencyVerifier>
 
 /** Everything the Commander needs to see about a package's dependencies: the host-evidence plan, Commander approvals and real usability verification. */
-export async function describeDependencies(input: { workspaceId: string; declared: { name: string; version: string }[]; verifier: LiveDependencyVerifier; store: DependencyApprovalStore }) {
+export async function describeDependencies(input: { workspaceId: string; declared: { name: string; version: string }[]; verifier: LiveDependencyVerifier; store: DependencyApprovalStore; mode?: 'run' | 'cache-only' }) {
   const plan = buildDependencyPlan({ declared: input.declared, workspaceId: input.workspaceId, evidence: input.verifier.evidence })
-  const verification = await input.verifier.verify(input.workspaceId, input.declared)
+  const verification = await input.verifier.verify(input.workspaceId, input.declared, { mode: input.mode ?? 'cache-only' })
   const approvals = Object.fromEntries(input.declared.map(d => [`${d.name}@${d.version}`, input.store.isApproved(input.workspaceId, d.name, d.version)]))
   return {
     plan: { status: plan.status, digest: plan.digest, blockedCount: plan.blockedCount, manifestChange: plan.manifestChange, lockfileChange: plan.lockfileChange, executable: plan.executable, entries: plan.entries },
