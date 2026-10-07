@@ -23,10 +23,12 @@ const GUIDANCE: Record<LessonClass, string> = {
   ESM_COMMONJS_MIX: 'This workspace is ES modules: use import/export, never require(); derive paths from import.meta.url instead of __dirname.',
   MISSING_FILE: 'Create parent directories and initialise missing data files before reading them (mkdirSync recursive, write an empty default).',
   SYNTAX: 'Re-read the whole file for balanced braces and valid syntax before replying.',
+  ROUTE_ORDER: 'In server.mjs register every LITERAL route (for example /api/x/read-all or /api/x/unread-count) BEFORE any route that matches a prefix or an id (startsWith(\'/api/x/\') or /api/x/:id/...). A prefix check placed first swallows the literal routes and answers 404 or 400. Match id routes with an exact pattern such as a regular expression with (\\d+), and make each branch return only for the exact path it handles.',
   ASSERTION: 'Make the code satisfy the exact assertion in the failing test output; do not weaken the test.',
   OTHER: '',
 }
 
+export const routeOrderGuidance = () => GUIDANCE.ROUTE_ORDER
 export function allLessons(log: AgentOpsLog): Lesson[] {
   return log.view().records.flatMap((r) => (r.t === 'lesson' ? [r.lesson] : []))
 }

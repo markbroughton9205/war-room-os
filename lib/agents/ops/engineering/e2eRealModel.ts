@@ -14,6 +14,7 @@ import { assign, deriveAssignments, keyFor, startAssignment } from './assignment
 import { CHAT_FEATURE, CHAT_VERIFY_SCRIPT, makeChatApp } from './chatFixture'
 import { TASK_FEATURE, TASK_VERIFY_SCRIPT, makeTaskApp } from './taskFixture'
 import { ALERT_FEATURE, ALERT_VERIFY_SCRIPT, makeAlertApp } from './alertFixture'
+import { TICKET_FEATURE, TICKET_VERIFY_SCRIPT, makeTicketApp } from './ticketFixture'
 import { classifyRun } from '../../forge/failureClass'
 import { execFileSync } from 'node:child_process'
 import { latestCheckpoint } from './continuity'
@@ -28,8 +29,10 @@ import { runFeatureWorkflow } from './workflow'
 import type { ModelClient, ModelResult } from './runtime/ports'
 
 // Fixture selection (identical engine, policy and verifier semantics for both): FIXTURE=chat (default) | task
-const FIXTURE = process.env.FIXTURE === 'task' ? 'task' : process.env.FIXTURE === 'alert' ? 'alert' : 'chat'
-const FX = FIXTURE === 'alert'
+const FIXTURE = process.env.FIXTURE === 'task' ? 'task' : process.env.FIXTURE === 'alert' ? 'alert' : process.env.FIXTURE === 'ticket' ? 'ticket' : 'chat'
+const FX = FIXTURE === 'ticket'
+  ? { id: 'ticket-desk', label: 'ticket-desk (TICKET_FEATURE, independent 12-check verifier)', feature: TICKET_FEATURE, verify: TICKET_VERIFY_SCRIPT, make: makeTicketApp, mission: 'mission-ticket-desk', title: 'Persistent ticket desk' }
+  : FIXTURE === 'alert'
   ? { id: 'alert-center', label: 'alert-center (ALERT_FEATURE, independent 12-check verifier)', feature: ALERT_FEATURE, verify: ALERT_VERIFY_SCRIPT, make: makeAlertApp, mission: 'mission-alert-center', title: 'Persistent alert center' }
   : FIXTURE === 'task'
   ? { id: 'task-board', label: 'task-board (TASK_FEATURE, independent 12-check verifier)', feature: TASK_FEATURE, verify: TASK_VERIFY_SCRIPT, make: makeTaskApp, mission: 'mission-task-board', title: 'Persistent task board' }

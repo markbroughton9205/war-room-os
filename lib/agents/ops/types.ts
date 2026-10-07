@@ -259,11 +259,11 @@ export type DebugEntry =
   | { kind: 'VALIDATION'; failureId: string; repairId: string; argv: string[]; exitCode: number | null; testsRun: number | Unknown; outcome: 'ORIGINAL_FIXED' | 'SAME_FAILURE' | 'NEW_FAILURE' | 'VACUOUS' | 'WRONG_TEST_SUSPECTED'; signature: string | null; note: string }
   | { kind: 'UNDETERMINED'; failureId: string; reason: string; attempts: number }
 
-export type LessonClass = 'DUPLICATE_DECLARATION' | 'MISSING_EXPORT' | 'REMOVED_EXPORT' | 'ESM_COMMONJS_MIX' | 'MISSING_FILE' | 'SYNTAX' | 'ASSERTION' | 'OTHER'
+export type LessonClass = 'DUPLICATE_DECLARATION' | 'MISSING_EXPORT' | 'REMOVED_EXPORT' | 'ESM_COMMONJS_MIX' | 'MISSING_FILE' | 'SYNTAX' | 'ASSERTION' | 'ROUTE_ORDER' | 'OTHER'
 /** A correction learned from REAL evidence (a fixed failure or a gate rejection); never from narrative. */
 export type Lesson = {
   id: string; cls: LessonClass; taskClass: string; observation: string; correction: string
-  evidence: { assignmentId: string; failureId?: string; kind: 'FIXED_FAILURE' | 'GATE_REJECTION' }
+  evidence: { assignmentId: string; failureId?: string; kind: 'FIXED_FAILURE' | 'GATE_REJECTION' | 'UNRESOLVED_FAILURE' }
   at: string; executor: string
   /** The task pattern that triggers recall, when the failure happened (file/layer/mode), and when the correction applies. */
   trigger?: string
