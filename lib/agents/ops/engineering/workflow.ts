@@ -9,6 +9,8 @@ import type { CommandRecord, ModelClient, ModelResult } from './runtime/ports'
 import { runCommand, runHermetic } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
+import { collisionFacts, isCollisionProblem } from './collision'
+import { quarantineTests } from './testContract'
 import { seedFromHandoff } from './successor'
 
 export type FeatureRequest = { request: string; acceptance: string[]; hints?: string[] }
@@ -32,6 +34,7 @@ export type WorkflowResult = {
   status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'PAUSED' | 'CONFLICT' | 'BLOCKED' | 'CRASHED'
   reason: string
   modelCalls: number
+  quarantinedTests?: number
   repairs: number
   filesChanged: string[]
   stepsDone: number
@@ -53,10 +56,11 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   let tokens: number | 'UNKNOWN' = 0
   let executor: WorkflowResult['executor'] = 'UNKNOWN'
   let repairs = 0
+  let quarantined = 0
   let stepsDone = 0
   const changed = new Set<string>()
   const emit = (kind: string, detail: string) => deps.onEvent?.({ at: clock().toISOString(), kind, detail })
-  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => ({ status, reason, modelCalls, repairs, filesChanged: [...changed], stepsDone, tokens, latencyMs: Date.now() - t0, executor })
+  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => ({ status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, stepsDone, tokens, latencyMs: Date.now() - t0, executor })
 
   // ---- state: resume from the latest checkpoint when one exists
   const baselineSnap = ws.snapshot()
@@ -179,7 +183,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     if (dups.length) {
       const imported = dups.filter((n) => new RegExp(`import\\s*\\{[^}]*\\b${n}\\b[^}]*\\}`).test(content))
       const hint = imported.length ? ` ${imported.join(', ')} is both imported and declared here: rename the import with "as" (e.g. import { ${imported[0]} as store_${imported[0]} } from ...) and call the alias.` : ' Edit the existing declaration instead of adding a second one.'
-      return `your version declares ${dups.join(', ')} more than once at the top level (a SyntaxError).${hint}`
+      return `your version declares ${dups.join(', ')} more than once at the top level (a SyntaxError).${hint}\n${collisionFacts(path, content, dups, buildWorkspaceIndex(ws.root))}`
     }
     return apiCompat(path, content) ?? importCompat(path, content, ignoreModules)
   }
@@ -357,9 +361,10 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const askFile = async (extra: string[], retry = 0) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}); noteTokens(r); return r }
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
-      for (let rej = 0; rej < 2 && reply.ok; rej++) {
+      for (let rej = 0; rej < 3 && reply.ok; rej++) {
         const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : null
         if (!problem) break
+        if (rej >= 2 && !isCollisionProblem(problem)) break // the third, targeted retry is reserved for declaration/import collisions (bounded)
         feedback = problem
         emit('REJECT', `${path}: ${problem}`)
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
@@ -398,6 +403,26 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             const implicated = candidatesFromOutput(out, []).filter((f) => !/^test\//.test(f))
             const testOnly = acceptPassed && out.includes(path) && !otherTests.length && !implicated.length
             stepOk = await debugLoop(run, testOnly ? [path] : [...changed].filter((f) => !/^test\//.test(f)).concat([path]), step.id, 'tests', () => runCheck(tests), testOnly ? [path] : undefined)
+            if (!stepOk && testOnly) {
+              // The implementation PASSED the independent acceptance and only the model-written test still fails: the test asserts something the contract does not require.
+              // Quarantine exactly the failing cases (recorded, reviewable, never silent) so an invented expectation cannot block a feature that meets its acceptance criteria.
+              const last = await runCheck(tests)
+              const failing = parseToolOutput(last.stdout, last.stderr).failures.map((f) => f.name)
+              const orig = ws.read(path)
+              const q = quarantineTests(path, orig, failing, req.acceptance)
+              if (q) {
+                await writeFile(step.id, path, q.content)
+                const after = await runCheck(tests)
+                if (after.exitCode === 0) {
+                  const note = q.removed.map((r) => `${r.name} [contract overlap ${r.overlap}${r.criterion !== null ? ` with criterion ${r.criterion + 1}` : ''}]`).join('; ')
+                  state.doNotRepeat.push({ key: `quarantine:${path}`, reason: `quarantined ${q.removed.length} model-invented test case(s) that failed against the independently verified implementation: ${note}` })
+                  state.validations.push({ stepId: step.id, command: tests.join(' '), status: 'PASSED', at: clock().toISOString(), outputHash: after.outputHash, summary: `after quarantining ${q.removed.length} ungrounded test case(s); ${q.kept.length} contract test(s) kept` })
+                  emit('QUARANTINE', `${path}: ${note}`)
+                  quarantined += q.removed.length
+                  stepOk = true
+                } else { await writeFile(step.id, path, orig) }
+              }
+            }
           }
         }
       }

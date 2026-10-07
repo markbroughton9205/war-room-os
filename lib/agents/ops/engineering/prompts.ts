@@ -1,6 +1,7 @@
 import { mergeAppend } from './editMerge'
 import type { EngineeringCodePlan } from './codePlanner'
 import { planContextForModel } from './codePlanner'
+import { testObligations } from './testContract'
 
 export const ENGINEER_SYSTEM = [
   "You are Foundry's engineering worker. You edit ONE file at a time inside a bounded workspace.",
@@ -65,7 +66,7 @@ export function featurePrompt(input: { request: string; acceptance: string[]; pl
     `FILE TO ${input.job.exists ? 'EDIT' : 'CREATE'}: ${input.job.path}  (layer: ${input.job.layer}, role: ${input.job.role})`,
     input.job.exists ? `CURRENT CONTENT OF ${input.job.path}:\n\`\`\`\n${input.job.current}\n\`\`\`` : `${input.job.path} does not exist yet.`,
     input.job.exists && input.keepExports?.length ? `EXISTING EXPORTS OF ${input.job.path} THAT OTHER FILES IMPORT (they must all still exist afterwards): ${input.keepExports.join(', ')}` : '',
-    input.job.role === 'test' ? `Write node:test tests (import test from 'node:test'; import assert from 'node:assert') that prove the feature through the real functions above. Use a temporary data file via the environment variable the code reads.` : '',
+    input.job.role === 'test' ? `Write node:test tests (import test from 'node:test'; import assert from 'node:assert') that prove the feature through the real functions above. Use a temporary data file via the environment variable the code reads.\n${testObligations(input.acceptance)}` : '',
     !input.job.exists || input.mode === 'rewrite' ? `Reply with the complete ${input.job.exists ? 'new content' : 'content'} of ${input.job.path} in one fenced block${input.job.exists ? ', or NO_CHANGE' : ''}.` : `Reply with edits for ${input.job.path} (append and/or search/replace), or NO_CHANGE.`,
   ].filter(Boolean).join('\n\n')
 }

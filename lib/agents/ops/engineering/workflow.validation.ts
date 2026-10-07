@@ -393,5 +393,50 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   const raw = (await import('node:fs')).readFileSync(x.log.file, 'utf8')
   check('N46_credential_like_text_is_redacted_before_it_is_persisted_and_the_assignment_is_not_aborted_by_it', r.status === 'COMPLETED' && !raw.includes(FAKE) && raw.includes('[REDACTED]'), `${r.status} ${r.reason} persisted=${raw.includes(FAKE)}`)
 }
+
+// ---- 13. contract-subordinate tests: an invented expectation that fails against a verified implementation is quarantined, not allowed to block it
+{
+  const mk = (extra: string) => `import test from 'node:test'\nimport assert from 'node:assert'\nimport { describeStore } from '../src/messageStore.mjs'\ntest('sessions round-trip through the data file', () => { assert.strictEqual(describeStore(), 'store') })\n${extra}`
+  const impl = SOLUTION['src/messageStore.mjs'] + "\nexport function describeStore() { return 'store' }\n"
+  const mkModel = (testBody: string) => new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/messageStore.mjs') return fenced(impl)
+    if (c.kind === 'file' && c.path === 'test/messageStore.test.mjs') return fenced(testBody)
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'the test expects another string', file: 'test/messageStore.test.mjs', differs: 'first attempt' })
+    if (c.kind === 'repair') return fenced(testBody) // the model insists on its invented expectation
+    return good(c)
+  })
+  const x = makeWorld({ limits: { maxRetries: 3 } })
+  const m = mkModel(mk("test('wording of the store label', () => { assert.strictEqual(describeStore(), 'STORE (primary, v2)') })\n"))
+  const r = await runFeatureWorkflow(deps(x, m, { finalVerification: x.verification }), REQ)
+  const kept = x.ws.read('test/messageStore.test.mjs')
+  check('N47_an_invented_test_expectation_that_fails_against_the_verified_implementation_is_quarantined_and_the_workflow_completes', r.status === 'COMPLETED' && r.quarantinedTests === 1 && kept.includes('QUARANTINED') && kept.includes('sessions round-trip') && x.ws.read('src/messageStore.mjs') === impl, `${r.status} ${r.reason} q=${r.quarantinedTests}`)
+  const y = makeWorld({ limits: { maxRetries: 3 } })
+  const only = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { describeStore } from '../src/messageStore.mjs'\ntest('wording of the store label', () => { assert.strictEqual(describeStore(), 'STORE (primary, v2)') })\n`
+  const r2 = await runFeatureWorkflow(deps(y, mkModel(only), { finalVerification: y.verification }), REQ)
+  check('N48_a_test_file_whose_only_test_is_ungrounded_is_not_quarantined_into_nothing_the_step_fails_honestly', r2.status === 'FAILED' && !(r2.quarantinedTests ?? 0), `${r2.status} ${r2.reason}`)
+  const tm = new ScriptedModel(good); const z = makeWorld()
+  await runFeatureWorkflow(deps(z, tm, { finalVerification: z.verification }), REQ)
+  const tp = tm.calls.find((c) => c.kind === 'file' && c.path?.startsWith('test/'))
+  check('N49_the_test_prompt_carries_the_acceptance_contract_as_obligations_and_forbids_inventing_expectations', !!tp && tp.prompt.includes('TEST OBLIGATIONS') && tp.prompt.includes(CHAT_FEATURE.acceptance[0]) && /Do NOT assert exact error-message wording/.test(tp.prompt))
+}
+// ---- 14. declaration/import collisions: the targeted retry is fed the real import facts; a third rejection is still recoverable
+{
+  const base = SOLUTION['src/chatService.mjs']
+  const colliding = base + "\nexport function loadSessions() { return loadSessions() }\n"
+  let n = 0
+  const x = makeWorld({ limits: { maxRetries: 3 } })
+  const m = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'src/chatService.mjs') { n += 1; return fenced(n <= 3 ? colliding : base) }
+    return good(c)
+  })
+  const r = await runFeatureWorkflow(deps(x, m, { finalVerification: x.verification }), REQ)
+  const retry = m.calls.filter((c) => c.kind === 'file' && c.path === 'src/chatService.mjs')[1]
+  check('N50_a_declaration_that_collides_with_an_import_gets_three_targeted_retries_with_the_real_import_facts', r.status === 'COMPLETED' && n === 4 && !!retry && retry.prompt.includes('really exports:') && retry.prompt.includes('recurses forever') && retry.prompt.includes('collides with a declaration'), `${r.status} ${r.reason} n=${n}`)
+  let k = 0
+  const y = makeWorld({ limits: { maxRetries: 3 } })
+  const m2 = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'src/chatService.mjs') { k += 1; return fenced(colliding) } return good(c) })
+  const r2 = await runFeatureWorkflow(deps(y, m2, { finalVerification: y.verification }), REQ)
+  check('N51_the_collision_retry_is_bounded_and_nothing_is_renamed_mechanically', r2.status === 'FAILED' && k === 4 && !y.ws.read('src/chatService.mjs').includes('loadSessions() { return loadSessions() }'), `${r2.status} k=${k}`)
+}
 void deriveAssignments; void AgentRegistry
 finish()
