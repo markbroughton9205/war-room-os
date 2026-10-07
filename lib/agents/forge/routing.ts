@@ -1,6 +1,6 @@
 import type { BenchmarkRecord, ModelEntry, TaskClass } from './types'
 
-export type RouteDecision = { taskClass: TaskClass; model: string | null; basis: 'EVIDENCE' | 'NO_EVIDENCE'; reason: string; considered: { model: string; best: string; runs: number }[] }
+export type RouteDecision = { taskClass: TaskClass; model: string | null; basis: 'EVIDENCE' | 'NO_EVIDENCE'; /** LOW when fewer than 3 completed full-score runs back the choice; the route is then provisional. */ confidence?: 'LOW' | 'MODERATE'; reason: string; considered: { model: string; best: string; runs: number }[] }
 const score = (b: BenchmarkRecord) => (b.verifierScore === 'UNKNOWN' ? -1 : b.verifierScore.pass / Math.max(1, b.verifierScore.total))
 const isReal = (b: BenchmarkRecord) => !/test-double|scripted/i.test(b.executor)
 
@@ -23,5 +23,6 @@ export function routeFor(taskClass: TaskClass, models: ModelEntry[], benchmarks:
   }
   if (!winners.length) return { taskClass, model: null, basis: 'NO_EVIDENCE', reason: 'no eligible model has a completed full-score real run for this task class; do not assume a default', considered }
   const w = [...winners].sort((a, b) => a.repairs - b.repairs || a.elapsedMs - b.elapsedMs)[0]
-  return { taskClass, model: w.modelRef, basis: 'EVIDENCE', reason: `completed ${taskClass} with full verifier score using ${w.repairs} repair(s) in ${Math.round(w.elapsedMs / 1000)}s`, considered }
+  const completedRuns = benchmarks.filter((b) => b.modelRef === w.modelRef && b.taskClass === taskClass && isReal(b) && !b.historicalBaseline && b.completion === 'COMPLETED' && b.verifierScore !== 'UNKNOWN' && b.verifierScore.pass === b.verifierScore.total && !b.manualIntervention).length
+  return { taskClass, model: w.modelRef, basis: 'EVIDENCE', confidence: completedRuns >= 3 ? 'MODERATE' : 'LOW', reason: `${completedRuns} completed full-score run(s); completed ${taskClass} with full verifier score using ${w.repairs} repair(s) in ${Math.round(w.elapsedMs / 1000)}s`, considered }
 }

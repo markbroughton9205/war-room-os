@@ -34,7 +34,7 @@ try {
   s.recordBenchmark(bench({ modelRef: 'huihui_ai/qwen3-abliterated:14b', repairs: 3 }))
   s.recordBenchmark(bench({ repairs: 1 }))
   const r = routeFor('complete_feature', s.models(), s.benchmarks())
-  check('F09_winner_chosen_by_evidence_fewer_repairs_per_task_class', r.model === 'huihui_ai/devstral-abliterated:24b' && r.basis === 'EVIDENCE')
+  check('F09_winner_chosen_by_evidence_fewer_repairs_per_task_class_and_a_thin_basis_is_marked_LOW_confidence', r.model === 'huihui_ai/devstral-abliterated:24b' && r.basis === 'EVIDENCE' && r.confidence === 'LOW')
   check('F10_other_task_classes_stay_undecided', routeFor('review', s.models(), s.benchmarks()).model === null)
   check('F11_residency_classified_from_runtime_bytes', classifyResidency(100, 100).residency === 'FULL_GPU' && classifyResidency(100, 60).residency === 'PARTIAL_OFFLOAD' && classifyResidency(100, 0).residency === 'CPU_ASSISTED' && classifyResidency(null, null).residency === 'UNKNOWN')
   const GiB = 1024 ** 3

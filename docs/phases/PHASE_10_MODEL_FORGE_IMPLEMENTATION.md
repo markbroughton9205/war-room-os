@@ -26,3 +26,13 @@ Model Forge lives in `lib/agents/forge/` inside Agent Foundry. It is not a separ
 - `OllamaModelClient` already reports the actual executor and token counts; benchmark records carry them.
 - Routing decisions are read by Foundry through `routeFor(taskClass, models, benchmarks)`; wiring it into assignment execution is a follow-up once at least one model has full-score evidence.
 - Qwen2.5-coder:14b remains installed as historical baseline only (`historicalBaseline: true` in its benchmark records).
+
+## Status after the first cross-fixture benchmark rounds (2026-10-06)
+- Registry holds five identities; the two Devstral generations are separate (`generation` field): Devstral Small 2505 (`huihui_ai/devstral-abliterated:24b`) and Devstral Small 2 2512 (`AliBilge/Huihui-Devstral-Small-2-24B-Instruct-2512-abliterated:q4_k_m`).
+- Phase 9 wiring (`phase9.ts`): every real run emits a model event and a workflow event (`foundry:complete-feature-workflow`, task class `code_modification`); cost/tokens stay UNKNOWN. `cli p9-backfill <sinceIso>` ingests recorded runs idempotently.
+- Scorecard (`scorecard.ts`, `cli scorecard`): per model/class/fixture, never a global rank.
+- Routing (`routeFor`): complete_feature currently resolves to Devstral Small 2 with LOW confidence (1 completed full-score run); every other task class is NO_EVIDENCE.
+- Evidence: `evidence/phase10/phase10-forge-small2-and-cross-fixture-final.md`, `phase10-cross-fixture-analysis.md`, `phase10-learning-proof.md`.
+
+## Architecture direction (unchanged)
+Council reasons about the goal and sends a clear build request to Foundry. Foundry plans against the actual War Room code, asks Model Forge (`routeFor`) for an evidence-based coding model, builds, tests, repairs, validates and returns the result. HVS requests engineering work through Foundry and uses separate media-generation models for image/video/voice; coding models are never used as media models. Model Forge only supplies recommendations; Foundry's governance (Commander approval, limits) is unchanged.
