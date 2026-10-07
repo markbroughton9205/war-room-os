@@ -1,5 +1,8 @@
 import ts from 'typescript'
 import path from 'node:path'
+import fs from 'node:fs'
+import os from 'node:os'
+import { spawnSync } from 'node:child_process'
 
 /**
  * Cross-reference gates that run BEFORE a reply is written. Each one is pure static analysis of the proposed file against ground truth in the workspace,
@@ -135,7 +138,19 @@ export function statusReachability(files: Record<string, string>, acceptance: st
 export function syntaxProblems(rel: string, text: string): string[] {
   if (!/\.(m?js|cjs)$/.test(rel)) return []
   const r = ts.transpileModule(text, { reportDiagnostics: true, fileName: rel.replace(/\.cjs$/, '.js'), compilerOptions: { allowJs: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } })
-  return (r.diagnostics ?? []).filter((d) => d.category === ts.DiagnosticCategory.Error).slice(0, 3).map((d) => { const pos = d.file && d.start !== undefined ? d.file.getLineAndCharacterOfPosition(d.start) : null; return `${pos ? `line ${pos.line + 1}: ` : ''}${ts.flattenDiagnosticMessageText(d.messageText, ' ')}` })
+  const found = (r.diagnostics ?? []).filter((d) => d.category === ts.DiagnosticCategory.Error).slice(0, 3).map((d) => { const pos = d.file && d.start !== undefined ? d.file.getLineAndCharacterOfPosition(d.start) : null; return `${pos ? `line ${pos.line + 1}: ` : ''}${ts.flattenDiagnosticMessageText(d.messageText, ' ')}` })
+  if (found.length || process.env.ENGINE_NODE_PARSE === '0') return found
+  // the TypeScript transpiler accepts some code Node rejects (await outside an async function, reserved words): ask Node's own parser
+  let dir = ''
+  try {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'syn-'))
+    const f = path.join(dir, /\.cjs$/.test(rel) ? 'x.cjs' : 'x.mjs')
+    fs.writeFileSync(f, text)
+    const c = spawnSync(process.execPath, ['--check', f], { encoding: 'utf8', timeout: 10000 })
+    if (c.status === 0 || c.status === null) return []
+    const lines = String(c.stderr).split('\n'), msg = lines.find((l) => /Error:/.test(l)) ?? 'syntax error', at = lines.find((l) => /:\d+$/.test(l))
+    return [`${at ? `line ${at.split(':').at(-1)}: ` : ''}${msg.trim()} (node --check)`]
+  } catch { return [] } finally { if (dir) try { fs.rmSync(dir, { recursive: true, force: true }) } catch { /* best effort */ } }
 }
 /** An existing export that used module state S and now uses a NEWLY introduced module state N instead (a legacy endpoint silently re-pointed at the new feature's data). */
 export function legacyStateDrift(rel: string, before: string, after: string): { fn: string; was: string; now: string }[] {

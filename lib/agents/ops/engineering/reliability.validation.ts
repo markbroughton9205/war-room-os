@@ -116,4 +116,9 @@ check('R39_a_new_function_next_to_legacy_ones_is_still_probed_and_judged_on_its_
 const evSole = buildEvidence({ output: TAP([[12, 'items persist in DATA_FILE across a restart', 'persisted=true all=[1,2]']]), acceptance: PERSIST, files: { 'src/store.mjs': STORE_OK } })
 check('R40_when_persistence_is_the_only_failing_check_the_hypothesis_targets_the_store_not_an_imaginary_cascade', evSole.queue[0].key.startsWith('persist:reload:') && evSole.queue[0].files[0] === 'src/store.mjs' && !evSole.queue.some((h) => h.key === 'persist:cascade'), evSole.queue.map((h) => h.key).join())
 void cpSync
+{
+  const { syntaxProblems } = await import('./staticGates')
+  const bad = syntaxProblems('t.mjs', "function f() {\n  const { a } = await import('x')\n}\n"), ok = syntaxProblems('t.mjs', 'export const a = 1\n')
+  check('R41_the_syntax_gate_uses_nodes_own_parser_so_await_outside_async_is_rejected_before_it_is_written', bad.length === 1 && /node --check/.test(bad[0]) && ok.length === 0)
+}
 finish()

@@ -81,6 +81,7 @@ function makeWorld(over: { limits?: Partial<{ maxSteps: number; maxRuntimeMs: nu
 }
 const deps = (x: World, model: ScriptedModel, over: Partial<WorkflowDeps> = {}): WorkflowDeps => ({ log: x.log, assignmentId: x.asg.id, ws: x.ws, model, tools: TOOLS, finalVerification: x.verification, ...over })
 const good = (ctx: ScriptCtx) => (ctx.kind === 'file' && ctx.path && SOLUTION[ctx.path] ? fenced(SOLUTION[ctx.path]) : null)
+process.env.ENGINE_NODE_PARSE = '0' // these scenarios inject syntax breaks that must reach the repair ledger; the node-parse gate has its own validator (reliability R41)
 const REQ = { request: CHAT_FEATURE.request, acceptance: CHAT_FEATURE.acceptance, hints: CHAT_FEATURE.hints }
 const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments.get(x.asg.id)!
 
