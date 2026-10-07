@@ -22,7 +22,25 @@ export type CommanderSession =
 
 export { isLocalDesktopCommanderRuntime, resolveLocalCommanderUserId } from '@/lib/security/commanderSessionPolicy'
 
-async function readLoopbackLocalCommander(): Promise<{ userId: string } | null> {
+/**
+ * Credential-free facts about the SAME verified local session the Commander gate just accepted (blueprint approval binding).
+ * Never contains the cookie/bearer token, the identity object, the installation id or any secret.
+ */
+export type CommanderSessionFacts = {
+  /** `lses_<32 hex>` session row id (NOT the cookie token). */
+  sessionId: string
+  /** Epoch ms the session was issued. */
+  authenticatedAt: number
+  /** Epoch ms the session expires. */
+  expiresAt: number
+  source: 'war-room.local-session'
+}
+
+export type CommanderSessionWithFacts =
+  | { ok: true; userId: string; facts: CommanderSessionFacts | null }
+  | { ok: false; response: NextResponse }
+
+async function readLoopbackLocalCommander(): Promise<{ userId: string; facts: CommanderSessionFacts | null } | null> {
   const requestHeaders = await headers()
   const gate = assertLocalOnlyRequest({
     host: requestHeaders.get('host'),
@@ -48,7 +66,14 @@ async function readLoopbackLocalCommander(): Promise<{ userId: string } | null> 
       linkedRemoteUserId: auth.identity.linked_remote_user_id,
       configuredCommanderUserId: commanderConfig.ok ? commanderConfig.commanderUserId : null,
     })
-    return userId ? { userId } : null
+    if (!userId) return null
+    const created = Date.parse(auth.session.created_at)
+    const expires = Date.parse(auth.session.expires_at)
+    // Facts come from the very session row verifySessionToken just validated: no gate/facts mismatch is possible.
+    const facts: CommanderSessionFacts | null = Number.isFinite(created) && Number.isFinite(expires)
+      ? { sessionId: auth.session.session_id, authenticatedAt: created, expiresAt: expires, source: 'war-room.local-session' }
+      : null
+    return { userId, facts }
   } catch {
     return null
   }
@@ -99,5 +124,26 @@ export async function requireCommanderSession(actionLabel = 'War Room memory'): 
   return {
     ok: false,
     response: NextResponse.json({ error: 'Authenticated Commander session required.' }, { status: 401 }),
+  }
+}
+
+/**
+ * Commander gate + credential-free session facts, derived from ONE verified session. A remote (Supabase) Commander has no
+ * session-row facts here, so `facts` is null and blueprint authority fails closed (AUTH_SOURCE_UNAVAILABLE) for that path.
+ */
+export async function requireCommanderSessionFacts(actionLabel = 'Blueprint'): Promise<CommanderSessionWithFacts> {
+  const local = await readLoopbackLocalCommander()
+  if (local) return { ok: true, userId: local.userId, facts: local.facts }
+  const gate = await requireCommanderSession(actionLabel)
+  if (!gate.ok) return gate
+  return { ok: true, userId: gate.userId, facts: null }
+}
+
+/** Pure revocation/expiry probe for a local session id (no cookie, no last_seen write). False when unknown or the store is unavailable. */
+export function isLocalCommanderSessionLive(sessionId: string): boolean {
+  try {
+    return getLocalOwnershipStore(process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null).sessionIsLive(sessionId)
+  } catch {
+    return false
   }
 }

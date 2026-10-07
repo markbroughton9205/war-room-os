@@ -8,6 +8,7 @@ import { execFileSync } from 'node:child_process'
 import os from 'node:os'
 import path from 'node:path'
 import { resolveBaseRepoRoot } from '@/lib/repo/paths'
+import { baseDigestOf, createGitProbe, normalizeBaseIdentity } from './blueprint/baseid.mjs'
 import {
   classifyWorkspaceRoot as classifyByNormalizedPath,
   presentFoundryWorkspace as presentCore,
@@ -214,3 +215,19 @@ export const FOUNDRY_UI_SOURCE_MAP = {
 } as const
 
 export const FOUNDRY_CANONICAL_UI_FILES = Object.values(FOUNDRY_UI_SOURCE_MAP)
+
+let baseIdentityProbe: ReturnType<typeof createGitProbe> | null = null
+
+/**
+ * Read-only base identity of an already-validated workspace root (blueprint adapter). Distinguishes the physical root (realpath + dev:ino), the repository,
+ * the worktree, the base commit and the branch; it is STABLE across edits to working-tree files and never uses dirty state. Only the whitelisted read-only
+ * `git rev-parse` / `git symbolic-ref` commands run (never `git status`, which can refresh the index). `root` must already be canonical
+ * (validateWorkspaceRoot().root); a non-canonical spelling yields an incomplete identity (digest null).
+ */
+export function readWorkspaceBaseIdentity(input: { workspaceId: string; root: string }) {
+  baseIdentityProbe ??= createGitProbe()
+  const facts = baseIdentityProbe.inspect(input.root)
+  const identity = normalizeBaseIdentity({ workspaceId: input.workspaceId, ...('error' in facts ? {} : facts), observedAt: Date.now() })
+  const workspaceType = classifyWorkspaceRoot(input.root)
+  return { identity, digest: identity?.complete ? baseDigestOf(identity) : null, workspaceType, installedRuntime: workspaceType === 'INSTALLED_RUNTIME' }
+}
