@@ -152,3 +152,6 @@ id_ed25519*
 
 # Local lint diagnostic output; preserve on disk, never track.
 /lint-errors.txt
+
+# blueprint adapter reference tests create throwaway fixture dirs here
+/tests/blueprint/.fixtures-*
