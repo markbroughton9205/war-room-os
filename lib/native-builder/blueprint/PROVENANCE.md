@@ -43,3 +43,5 @@ The table records the state at import. These modules were later changed in this 
 - `envid.mjs`, `quality.mjs`, `depverify.mjs` (options): per-tool env, workspace verifier options.
 
 Each change has regression coverage in `blueprint.live.validation.ts`; the 164-test reference suite still passes. Network confinement remains policy-only (Node has no network permission flag).
+
+Disclosure (dependency probe): the probe runs the approved dependency's own code in the same process and shares stdout with it. The host therefore never trusts self-reported hashes (it recomputes them) and requires exit code 0, but a hostile, already Commander-approved dependency can still claim "loaded" with a valid in-package entry path, and `exportKeys` is probe-reported. VERIFIED_USABLE means "resolved at the exact version inside the workspace, manifest and lockfile exact, and a confined probe reported a successful load" - it is not a proof against a malicious approved package. Large packages (over 500 files / 10 MB / containing symlinks) are never cached and so show RESOLVABLE on reads until re-checked.
