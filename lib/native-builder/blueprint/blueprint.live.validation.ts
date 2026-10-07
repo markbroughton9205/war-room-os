@@ -23,6 +23,7 @@ import { BlueprintError } from './base.mjs'
 import { blueprintEventToEvaluationInputs } from './livePhase9'
 import { buildBlueprintRuntime, type BlueprintRuntime } from './liveRuntime'
 import { blueprintRoots } from './liveRoots'
+import { approvalView, artifactRows, claimRows } from './uiModel'
 import { liveBaseIdentity, refreshBlueprintWorkspace } from './liveWorkspaces'
 import { materializeTools } from './liveBuild'
 import { configureSandboxEnv, createSandboxRoot, fixturePackage, git, seedBlueprintSandbox, FIXTURE_A0, FIXTURE_A1, type SeedResult } from './testkit'
@@ -170,8 +171,8 @@ async function main() {
     await releaseResource('REPO_WRITE', 'noop').catch(() => false)
 
     // ---- L10 SIGKILL crash recovery against the real stores (orphaned recipe process is never duplicated; unknown outputs are never adopted)
-    const rtCrash = rtOf({ buildArgs: ['--sleep=2500'] }), s10 = await seedBlueprintSandbox(sb, { name: 'ws-crash' }); const r10 = await ready(rtCrash, s10); rtCrash.broker.approve(r10.h, r10.id, r10.ctx); await rtCrash.broker.execute(r10.h, r10.id, r10.ctx)
-    const child = spawnSync(process.execPath, ['--loader', './scripts/ts-extension-loader.mjs', '--experimental-transform-types', 'lib/native-builder/blueprint/testkit.crashChild.ts'], { cwd: repoRoot(), timeout: 60_000, env: { ...process.env, BLUEPRINT_CRASH_OPTS: JSON.stringify({ password: PASSWORD, execId: r10.id, ctx: r10.ctx, point: 'after-launch', stage: 'build', buildArgs: ['--sleep=2500'] }) } })
+    const rtCrash = rtOf({ buildArgs: ['--sleep=6000'] }), s10 = await seedBlueprintSandbox(sb, { name: 'ws-crash' }); const r10 = await ready(rtCrash, s10); rtCrash.broker.approve(r10.h, r10.id, r10.ctx); await rtCrash.broker.execute(r10.h, r10.id, r10.ctx)
+    const child = spawnSync(process.execPath, ['--loader', './scripts/ts-extension-loader.mjs', '--experimental-transform-types', 'lib/native-builder/blueprint/testkit.crashChild.ts'], { cwd: repoRoot(), timeout: 60_000, env: { ...process.env, BLUEPRINT_CRASH_OPTS: JSON.stringify({ password: PASSWORD, execId: r10.id, ctx: r10.ctx, point: 'after-launch', stage: 'build', buildArgs: ['--sleep=6000'] }) } })
     check('crash_child_sigkilled', child.signal === 'SIGKILL', `signal=${child.signal} ${String(child.stderr).slice(-200)}`)
     await sleep(1800)
     const run0 = rtCrash.broker.stageRuns(r10.h, r10.id)[0]
@@ -180,7 +181,7 @@ async function main() {
     for (let i = 0; i < 120 && rtCrash.broker.stageRuns(r10.h, r10.id)[0]?.processAlive === true; i++) await sleep(100)
     check('unknown_outputs_not_adopted_reconcile_required', (await code(() => rtCrash.broker.advanceStages(r10.h, r10.id, r10.ctx))) === 'RECONCILIATION_REQUIRED' && (await rtCrash.broker.lineage(r10.h, r10.id)).claims.built === false, 'present output without a receipt is ARTIFACT_PROVENANCE_UNKNOWN')
     rtCrash.broker.reconcileStage(r10.h, r10.id, r10.ctx, 'build', { decision: 'RETRY', reason: 'validator: process confirmed gone' })
-    const rtRec = rtOf({ buildArgs: ['--sleep=2500'] }), rec = await rtRec.broker.advanceStages(admit(rtRec), r10.id, r10.ctx)
+    const rtRec = rtOf({ buildArgs: ['--sleep=6000'] }), rec = await rtRec.broker.advanceStages(admit(rtRec), r10.id, r10.ctx)
     check('recovery_rebuilds_once_after_reconcile', rec.ran[0].attempt === 2 && rec.ran.every((x: any) => x.status === 'PASSED') && rec.claims.built === true && rec.claims.packaged === true, JSON.stringify(rec.ran))
     done(s10)
 
@@ -208,6 +209,11 @@ async function main() {
     check('all_routes_exist_and_delegate_to_gated_handlers', routes.every(f => fs.existsSync(f) && fs.readFileSync(f, 'utf8').includes("@/lib/native-builder/blueprint/liveApi")), `${routes.length} routes`)
     const mutating = ['handleImport', 'handleApprove', 'handleRun', 'handlePause', 'handleResume', 'handleCancel', 'handleReconcile', 'handleRestore']
     check('mutating_handlers_require_csrf_and_commander', mutating.every(h => new RegExp(`export const ${h} = \\(req: Request[^)]*\\) => withActor\\(req, true`).test(apiSrc)) && apiSrc.includes('requireCommanderSessionFacts') && apiSrc.includes('x-wr-blueprints') && apiSrc.includes('assertLocalMutationOrigin'), 'withActor(req, true, …) on every mutating verb')
+
+    // ---- L13 UI truthfulness (pure view model used by /war-room/engineering/blueprints)
+    check('ui_stale_approval_demands_new_approval', approvalView({ approved: true, usable: false, stale: ['baseIdentity'] }).label === 'STALE' && approvalView({ approved: true, usable: false, stale: ['baseIdentity'] }).mustReapprove === true && approvalView(undefined).label === 'UNKNOWN', 'STALE shown, new approval required, missing data is UNKNOWN')
+    check('ui_claims_never_overclaim', claimRows({ claims: { sourceValidated: true } }, null).find(c => c.key === 'built')?.value === 'UNKNOWN' && claimRows({ claims: { sourceValidated: true } }, { claims: { built: true, packaged: false } }).find(c => c.key === 'packaged')?.value === 'NO' && claimRows({}, null).filter(c => ['installed', 'taskComplete'].includes(c.key)).every(c => c.value === 'NO'), 'built/packaged only from lineage; installed/complete always NO')
+    check('ui_artifacts_show_unverified_and_failed', artifactRows({ stages: { build: { entries: [{ name: 'b', path: 'bundle.mjs', sha256: 'x', bytes: 1, runId: 'r' }] } }, verification: null }).rows[0]?.verification === 'NOT_VERIFIED' && artifactRows({ stages: { build: { entries: [{ path: 'p' }] } }, verification: { build: { ok: false, problems: [{ code: 'ARTIFACT_HASH_MISMATCH' }] } } }).rows[0]?.verification.startsWith('FAILED'), 'unverified and tampered artifacts are not hidden')
   } finally {
     try { fs.rmSync(sb.root, { recursive: true, force: true }) } catch { /* best effort */ }
   }

@@ -147,7 +147,8 @@ export const handleGet = (req: Request, rawId: string) => withActor(req, false, 
   let lineage: unknown = null, lineageError: unknown = null
   try { if (projection.state === 'VERIFIED_SOURCE') lineage = await rt.broker.lineage(a.handle, id) } catch (e) { lineageError = e instanceof BlueprintError ? describeError(e) : { code: 'EXECUTION_FAILED', message: 'Lineage unavailable' } }
   let stageRuns: unknown = []; try { stageRuns = rt.broker.stageRuns(a.handle, id) } catch { stageRuns = [] }
-  return { execId: id, projection, approval, preview, previewError, authority: authoritySnapshot(a, ctx, approval), dependencies, lineage, lineageError, stageRuns, background: rt.background.get(id) ?? null, recipe: { authorized: rt.kit.pipeline.authorized(), pipelineKind: rt.kit.pipeline.kind, recipes: ['build', 'package'].map(s => { const r = rt.kit.pipeline.recipe(s as 'build' | 'package'); return { stage: s, id: r.id, version: r.version, digest: r.digest, sandbox: r.sandbox, network: r.network } }) }, notClaimed: ['WAR_ROOM_DESKTOP_BUILD', 'PRODUCTION_PACKAGE', 'INSTALLED_RUNTIME', 'TASK_COMPLETE', 'DEPLOYMENT'] }
+  let artifacts: unknown = null; try { artifacts = rt.broker.artifactManifest(a.handle, id) } catch { artifacts = null }
+  return { execId: id, projection, approval, preview, previewError, artifacts, authority: authoritySnapshot(a, ctx, approval), dependencies, lineage, lineageError, stageRuns, background: rt.background.get(id) ?? null, recipe: { authorized: rt.kit.pipeline.authorized(), pipelineKind: rt.kit.pipeline.kind, recipes: ['build', 'package'].map(s => { const r = rt.kit.pipeline.recipe(s as 'build' | 'package'); return { stage: s, id: r.id, version: r.version, digest: r.digest, sandbox: r.sandbox, network: r.network } }) }, notClaimed: ['WAR_ROOM_DESKTOP_BUILD', 'PRODUCTION_PACKAGE', 'INSTALLED_RUNTIME', 'TASK_COMPLETE', 'DEPLOYMENT'] }
 })
 
 export const handleStatus = (req: Request, rawId: string) => withActor(req, false, async a => {
@@ -216,7 +217,8 @@ export const handleReceipts = (req: Request, rawId: string) => withActor(req, fa
   let lineage: unknown = null; try { lineage = await a.rt.broker.lineage(a.handle, id) } catch { lineage = null }
   let recovery: unknown = null; try { recovery = (a.rt.broker.recoverAll(a.handle) as { execId: string }[]).find(r => r.execId === id) ?? null } catch { recovery = null }
   let stageRecovery: unknown = null; try { stageRecovery = (await a.rt.broker.recoverStages(a.handle) as { execId: string }[]).find(r => r.execId === id) ?? null } catch { stageRecovery = null }
-  return { execId: id, coreReceipt, lineage, runRecovery: recovery, stageRecovery, stageRuns: a.rt.broker.stageRuns(a.handle, id) }
+  let artifacts: unknown = null; try { artifacts = a.rt.broker.artifactManifest(a.handle, id) } catch { artifacts = null }
+  return { execId: id, coreReceipt, lineage, runRecovery: recovery, stageRecovery, stageRuns: a.rt.broker.stageRuns(a.handle, id), artifacts }
 })
 
 /** Dependency view + Commander approval of dependency NEEDS (never an install; manifest/lockfile changes are a separate governed action that is not performed here). */
