@@ -14,7 +14,7 @@ check('V04_ESM_misuse_dirname_is_reported_as_undefined', undefinedNames('a.mjs',
 check('V05_a_prefix_route_before_a_literal_route_shadows_it', (() => { const s = routeShadowing('server.mjs', "    if (url.pathname.startsWith('/api/alerts/') && req.method === 'POST') {\n    }\n    if (url.pathname === '/api/alerts/read-all' && req.method === 'POST') return 1\n"); return s.length === 1 && s[0].literal === '/api/alerts/read-all' })())
 check('V06_literal_first_or_different_method_is_not_shadowing', routeShadowing('server.mjs', "    if (url.pathname === '/api/alerts/read-all' && req.method === 'POST') return 1\n    if (url.pathname.startsWith('/api/alerts/') && req.method === 'POST') {}\n").length === 0 && routeShadowing('server.mjs', "    if (url.pathname.startsWith('/api/alerts/') && req.method === 'PATCH') {}\n    if (url.pathname === '/api/alerts/summary' && req.method === 'GET') return 1\n").length === 0)
 check('V07_dom_ids_a_script_reads_must_exist_in_the_page', (() => { const ids = domIds("document.getElementById('a'); document.getElementById(\"b\")"); return ids.join() === 'a,b' && missingDomIds('<ul id="a"></ul>', ids).join() === 'b' })())
-let flagged: string[] = []
+const flagged: string[] = []
 for (const [name, ref] of Object.entries({ chat: CHAT_REFERENCE, task: TASK_REFERENCE, alert: ALERT_REFERENCE, ticket: TICKET_REFERENCE })) for (const [rel, text] of Object.entries(ref)) {
   const u = undefinedNames(rel, text), s = routeShadowing(rel, text)
   if (u.length || s.length) flagged.push(`${name}:${rel} undefined=${u.join('|')} shadow=${s.map((x) => x.literal).join('|')}`)
