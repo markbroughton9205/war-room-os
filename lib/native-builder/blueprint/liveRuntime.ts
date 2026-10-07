@@ -29,7 +29,7 @@ export const BLUEPRINT_BROKER_ID = 'wr-blueprint-broker'
 
 export type BackgroundRun = { execId: string; startedAt: number; finishedAt: number | null; error: { code: string; message: string } | null }
 
-export function buildBlueprintRuntime(overrides: { leaseTtlMs?: number; now?: () => number } = {}) {
+export function buildBlueprintRuntime(overrides: { leaseTtlMs?: number; now?: () => number; buildArgs?: string[]; packArgs?: string[]; hooks?: { fault?: (point: string, stage?: string) => void } } = {}) {
   const roots = blueprintRoots()
   for (const d of [roots.root, roots.control, roots.evidence, roots.tools]) fs.mkdirSync(d, { recursive: true, mode: 0o700 })
   const control = createControlPlane({ root: roots.control, now: overrides.now, leaseTtlMs: overrides.leaseTtlMs ?? 120_000 })
@@ -38,7 +38,7 @@ export function buildBlueprintRuntime(overrides: { leaseTtlMs?: number; now?: ()
   const probe = tools['depprobe.mjs']
   const node = blueprintNode()
   const verifier = createLiveDependencyVerifier({ store, probePath: probe.path, probeDigest: probe.sha256, nodeCmd: node.cmd, nodeEnv: node.env })
-  const kit = createLiveBuildKit({ toolsDir: roots.tools, verifier })
+  const kit = createLiveBuildKit({ toolsDir: roots.tools, verifier, buildArgs: overrides.buildArgs, packArgs: overrides.packArgs, hooks: overrides.hooks })
   const bridge = createWarRoomAuthBridge({ isSessionLive: isLocalCommanderSessionLive, now: overrides.now })
   const missions = createLiveOwnershipBridge()
   const model = createRegistryLockModel({ file: roots.repoWriteRegistry, epochFile: roots.leaseEpochs })

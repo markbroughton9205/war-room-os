@@ -152,13 +152,14 @@ test('AU12 session fixation / handle abuse: handles are server-minted random ids
   const small = createWarRoomAuthBridge({ now: e.now, handleTtlMs: 1000, isSessionLive: () => true }), s = small.admit(OK, facts(e)); e.offset += 2000; assert.equal(codeOf(() => small.sessions.resolve(s)).code, 'SESSION_STALE'); assert.equal(small.openHandles, 0)
 })
 
-test('AU13 live-source conformance (opt-in, READ-ONLY file reads; nothing imported or executed)', { skip: process.env.BLUEPRINT_LIVE_AUTH_INSPECT !== '1' }, () => {
-  const root = process.env.WAR_ROOM_SOURCE_ROOT ?? '/home/chosenone/Codex/war-room-os', rd = rel => fs.readFileSync(path.join(root, rel), 'utf8')
+test('AU13 live-source conformance (mandatory; READ-ONLY file reads of THIS repo; nothing imported or executed)', () => {
+  const root = fileURLToPath(new URL('../..', import.meta.url)), rd = rel => fs.readFileSync(path.join(root, rel), 'utf8')
   const gate = rd('lib/security/commanderSession.ts'), store = rd('lib/sovereign-runtime/local-ownership/store.ts'), types = rd('lib/sovereign-runtime/local-ownership/types.ts')
-  assert.match(gate, /export async function requireCommanderSession/); assert.match(gate, /\{ ok: true, userId/); for (const st of ['status: 401', 'status: 403', 'status: 503']) assert.ok(gate.includes(st), st)
-  assert.ok(!/sessionId|session_id|expires_at|authenticatedAt/.test(gate.replace(/\/\/.*$/gm, ''))) // gate exposes NO session id / auth time / expiry
+  assert.match(gate, /export async function requireCommanderSession\b/); assert.match(gate, /\{ ok: true, userId/); for (const st of ['status: 401', 'status: 403', 'status: 503']) assert.ok(gate.includes(st), st)
+  assert.match(gate, /export async function requireCommanderSessionFacts/); assert.match(gate, /auth\.session\.session_id/) // facts come from the verified session row
   assert.match(types, /LOCAL_SESSION_TTL_MS = 12 \* 60 \* 60 \* 1000/); assert.match(store, /if \(row\.revoked_at\) return null/); assert.match(store, /expires_at\)\.getTime\(\) <= Date\.now\(\)/)
   assert.match(store, /UPDATE local_session SET last_seen_at/) // verifySessionToken WRITES last_seen_at: not a pure read
+  const probe = store.slice(store.indexOf('sessionIsLive('), store.indexOf('sessionIsLive(') + 900); assert.ok(!/UPDATE|INSERT|DELETE/.test(probe.split('\n  }\n')[0])) // the liveness probe is a pure read
 })
 
 test('AU14 review regressions: a raw token/cookie value or unknown source can never be accepted as a session id; revocation check is mandatory; auth codes map to AUTHORITY', () => {

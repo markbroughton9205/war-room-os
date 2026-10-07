@@ -56,17 +56,17 @@ function runNodeCheck(node: { cmd: string; env: Record<string, string> }, file: 
 
 type CheckInput = { root: string; package: { workspace: { id: string }; dependencies: { name: string; version: string }[]; changes: { path: string; operation: string }[] }; signal?: AbortSignal }
 
-export function createLiveBuildKit(opts: { toolsDir: string; verifier: LiveDependencyVerifier }) {
+export function createLiveBuildKit(opts: { toolsDir: string; verifier: LiveDependencyVerifier; /** host-only recipe argv (tests); packages can never set these */ buildArgs?: string[]; packArgs?: string[]; hooks?: { fault?: (point: string, stage?: string) => void } }) {
   const tools = materializeTools(opts.toolsDir)
   const node = blueprintNode()
   const recipes = {
-    build: createRecipe({ id: 'wr-bundle-build', version: '1', stage: 'build', cmd: node.cmd, args: ['--progress'], scriptPath: tools['wr-bundle-build.mjs'].path, inputRoots: ['src'], readScopes: ['workspace'], envFixed: node.env,
+    build: createRecipe({ id: 'wr-bundle-build', version: '1', stage: 'build', cmd: node.cmd, args: opts.buildArgs ?? ['--progress'], scriptPath: tools['wr-bundle-build.mjs'].path, inputRoots: ['src'], readScopes: ['workspace'], envFixed: node.env,
       progress: 'bp-json', timeoutMs: 180_000, graceMs: 2000, outputs: [{ logicalName: 'bundle', relPath: 'bundle.mjs', kind: 'bundle' }, { logicalName: 'build-info', relPath: 'build-info.json', kind: 'report' }] }),
-    package: createRecipe({ id: 'wr-bundle-pack', version: '1', stage: 'package', cmd: node.cmd, args: [], scriptPath: tools['wr-bundle-pack.mjs'].path, readScopes: ['input'], workdir: 'input', envFixed: node.env,
+    package: createRecipe({ id: 'wr-bundle-pack', version: '1', stage: 'package', cmd: node.cmd, args: opts.packArgs ?? [], scriptPath: tools['wr-bundle-pack.mjs'].path, readScopes: ['input'], workdir: 'input', envFixed: node.env,
       requires: ['source', 'dependencies', 'build'], timeoutMs: 180_000, graceMs: 2000, outputs: [{ logicalName: 'app', relPath: 'app.pkg', kind: 'package' }] }),
   }
   const environment = createEnvironmentIdentity({ tools: [{ id: 'node', cmd: node.cmd, versionArgs: ['--version'], env: node.env }], envNames: [], mode: BLUEPRINT_PIPELINE_KIND })
-  const pipeline = createBuildPipeline({ authorized: ['build', 'package'], recipes, environment, stageChecks: { build: ['wr-bundle-syntax'], package: ['wr-pack-verify'] }, kind: BLUEPRINT_PIPELINE_KIND })
+  const pipeline = createBuildPipeline({ authorized: ['build', 'package'], recipes, environment, stageChecks: { build: ['wr-bundle-syntax'], package: ['wr-pack-verify'] }, kind: BLUEPRINT_PIPELINE_KIND, hooks: opts.hooks ?? {} })
 
   // ---- host-owned checks (a package may only reference these ids/versions)
   const dependencyAudit = {
