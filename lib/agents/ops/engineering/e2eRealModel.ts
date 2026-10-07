@@ -34,7 +34,7 @@ const FX = FIXTURE === 'alert'
   : FIXTURE === 'task'
   ? { id: 'task-board', label: 'task-board (TASK_FEATURE, independent 12-check verifier)', feature: TASK_FEATURE, verify: TASK_VERIFY_SCRIPT, make: makeTaskApp, mission: 'mission-task-board', title: 'Persistent task board' }
   : { id: 'chat-sessions', label: 'chat-sessions (CHAT_FEATURE, independent 12-check verifier)', feature: CHAT_FEATURE, verify: CHAT_VERIFY_SCRIPT, make: makeChatApp, mission: 'mission-chat-sessions', title: 'Persistent chat sessions' }
-const engineSha = (() => { try { return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: process.cwd() }).toString().trim() } catch { return 'UNKNOWN' } })()
+const engineSha = process.env.ENGINE_SHA || (() => { try { return execFileSync('git', ['rev-parse', '--short=12', 'HEAD'], { cwd: process.cwd() }).toString().trim() } catch { return 'UNKNOWN' } })()
 const outDir = process.argv[2]
 const modelName = process.argv[3] ?? 'qwen2.5-coder:14b'
 if (!outDir) throw new Error('usage: e2eRealModel.ts <outDir> [model]')
