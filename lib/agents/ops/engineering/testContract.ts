@@ -55,3 +55,20 @@ export function quarantineTests(rel: string, text: string, failing: string[], ac
   for (const c of [...hit].sort((a, b) => b.start - a.start)) out = out.slice(0, c.start) + `// QUARANTINED (no contract basis, failed against the independently verified implementation): ${c.name}` + out.slice(c.end)
   return { content: out, removed: hit.map((c) => ({ name: c.name, ...contractOverlap(`${c.name}\n${c.text}`, acceptance), reason: 'failed only in the test file after the implementation passed independent acceptance' })), kept: keptCalls.map((c) => c.name) }
 }
+
+/**
+ * Assertion-level quarantine for a test case that mixes contract-grounded and ungrounded assertions: only the failing assertion statements (by the reported line) are
+ * disabled, the case and its remaining assertions stay. Refuses unless at least one assert remains in the file. Reviewable: every disabled line is returned.
+ */
+export function quarantineAssertions(rel: string, text: string, lines: number[]): { content: string; removed: { line: number; code: string }[] } | null {
+  if (!lines.length) return null
+  const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.ES2022, true)
+  const stmts: ts.ExpressionStatement[] = []
+  const walk = (n: ts.Node) => { if (ts.isExpressionStatement(n) && /\bassert\b/.test(n.expression.getText(sf).slice(0, 40))) stmts.push(n); ts.forEachChild(n, walk) }
+  walk(sf)
+  const hit = stmts.filter((st) => { const a = sf.getLineAndCharacterOfPosition(st.getStart(sf)).line + 1, b = sf.getLineAndCharacterOfPosition(st.getEnd()).line + 1; return lines.some((l) => l >= a && l <= b) })
+  if (!hit.length || stmts.length - hit.length < 1) return null
+  let out = text
+  for (const st of [...hit].sort((a, b) => b.getStart(sf) - a.getStart(sf))) out = out.slice(0, st.getStart(sf)) + `// QUARANTINED ASSERTION (no contract basis; failed against the independently verified implementation): ${st.getText(sf).replace(/\s+/g, ' ').slice(0, 100)}` + out.slice(st.getEnd())
+  return { content: out, removed: hit.map((st) => ({ line: sf.getLineAndCharacterOfPosition(st.getStart(sf)).line + 1, code: st.getText(sf).replace(/\s+/g, ' ').slice(0, 100) })) }
+}

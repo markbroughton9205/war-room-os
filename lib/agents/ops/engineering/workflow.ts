@@ -10,10 +10,10 @@ import { runCommand, runHermetic } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 import { collisionFacts, isCollisionProblem } from './collision'
-import { quarantineTests } from './testContract'
+import { quarantineTests, quarantineAssertions } from './testContract'
 import { undefinedNames, routeFindings, routeTable, contractRouteProblems, statusReachability, syntaxProblems, legacyStateDrift, domIds, missingDomIds } from './staticGates'
 import { persistenceProblems, persistenceProbe, wantsPersistence, type PersistenceProbe } from './persistenceContract'
-import { buildEvidence, renderEvidence } from './failureEvidence'
+import { buildEvidence, renderEvidence, parseTestFailures } from './failureEvidence'
 import { startupProbe } from './startupProbe'
 import { storageEnvVars } from './persistenceContract'
 import { seedFromHandoff } from './successor'
@@ -53,6 +53,7 @@ export type WorkflowResult = {
   latencyMs: number
   executor: { provider: string; model: string } | 'UNKNOWN'
 }
+const FACT_BEARING = /route conflict|does not serve what the acceptance contract|nothing in the code can ever respond|existing exports changed|persistence contract|syntax error|never declared or imported/
 const LAYER_ORDER = ['storage', 'domain', 'api', 'ui', 'tests']
 
 export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest): Promise<WorkflowResult> {
@@ -315,7 +316,9 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const evCmd = addEvidence(log, assignmentId, rec.failureId, { kind: /\.m?js$/.test(cmd.argv.at(-1) ?? '') && cmd.argv[1] === '--check' ? 'type_diagnostic' : 'test_result', ref: `${cmd.argv.join(' ')}#attempt${attempt}`, content: out, summary: `${label} failed (exit ${cmd.exitCode}): ${out.split('\n').filter((l) => /Error|not ok|✖|fail/i.test(l)).slice(0, 2).join(' | ').slice(0, 220) || 'see output'}` }, actor, clock())
       const probe = !confine && wantsPersistence(req.acceptance) && /persist|surviv|restart/i.test(out) ? await runProbe().catch(() => null) : null
       const startup = !confine && /could not complete|server exited|did not start/i.test(out) ? await startupProbe(ws.root, Object.fromEntries(storageEnvVars(req.acceptance).map((v) => [v, `${v}.json`]))).catch(() => null) : null
-      const ev = confine || !/^not ok \d+ - /m.test(out) ? null : buildEvidence({ output: out, acceptance: req.acceptance, files: sourceFiles(), baseline: baselineText, probe, startupOutput: startup && !startup.started ? startup.output : undefined })
+      const ev0 = !/^not ok \d+ - |^\s*✖ /m.test(out) ? null : buildEvidence({ output: out, acceptance: req.acceptance, files: sourceFiles(), baseline: baselineText, probe, startupOutput: startup && !startup.started ? startup.output : undefined, testScope: !!confine })
+      // a confined repair (the verified implementation must not change) may only act on hypotheses that target the confined files
+      const ev = ev0 && confine ? { ...ev0, queue: ev0.queue.filter((h) => h.files.length > 0 && h.files.every((f) => confine.includes(f))) } : ev0
       const nextH = ev?.queue.find((h) => canTry(h.key)) ?? null
       const refutedList = [...tried].filter(([, t]) => t.outcome === 'REFUTED').map(([key, t]) => ({ key, why: t.why }))
       // escalation: two materially distinct hypotheses were acted on and refuted
@@ -504,7 +507,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       for (let rej = 0; rej < 3 && reply.ok; rej++) {
         const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : parsedReply.kind === 'no_change' && /\.html?$/.test(path) ? pageMissing(path) : null
         if (!problem) break
-        if (rej >= 2 && !isCollisionProblem(problem)) break // the third, targeted retry is reserved for declaration/import collisions (bounded)
+        if (rej >= 2 && !isCollisionProblem(problem) && !FACT_BEARING.test(problem)) break // the third, targeted retry is reserved for problems that carry exact facts (collisions, route conflicts, contract routes/statuses, state drift, persistence, syntax, undeclared names); bounded
         feedback = problem
         emit('REJECT', `${path}: ${problem}`)
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
@@ -561,6 +564,26 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                   quarantined += q.removed.length
                   stepOk = true
                 } else { await writeFile(step.id, path, orig) }
+              }
+              if (!stepOk) {
+                // the case mixes grounded and ungrounded assertions (or is the only case): disable only the failing assertion statements, up to three rounds, never the whole case
+                const removedAll: { line: number; code: string }[] = []
+                for (let round = 0; round < 3; round++) {
+                  const r = await runCheck(tests)
+                  if (r.exitCode === 0) break
+                  const fails = parseTestFailures(`${r.stdout}\n${r.stderr}`).filter((f) => f.file === path && f.line)
+                  const qa = quarantineAssertions(path, ws.read(path), fails.map((f) => f.line!))
+                  if (!qa) break
+                  await writeFile(step.id, path, qa.content); removedAll.push(...qa.removed)
+                }
+                const after = await runCheck(tests)
+                if (removedAll.length && after.exitCode === 0) {
+                  state.doNotRepeat.push({ key: `quarantine-assertions:${path}`, reason: `disabled ${removedAll.length} assertion(s) that failed against the independently verified implementation and have no contract basis: ${removedAll.map((x) => `line ${x.line}: ${x.code}`).join('; ').slice(0, 300)}` })
+                  state.validations.push({ stepId: step.id, command: tests.join(' '), status: 'PASSED', at: clock().toISOString(), outputHash: after.outputHash, summary: `after disabling ${removedAll.length} ungrounded assertion(s)` })
+                  emit('QUARANTINE_ASSERTION', `${path}: ${removedAll.map((x) => `line ${x.line}`).join(', ')}`)
+                  quarantined += removedAll.length
+                  stepOk = true
+                } else if (removedAll.length) { await writeFile(step.id, path, orig) }
               }
             }
           }

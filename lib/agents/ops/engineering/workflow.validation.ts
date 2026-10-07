@@ -345,7 +345,7 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
   })
   const r2 = await runFeatureWorkflow(deps(y, m2, { finalVerification: y.verification }), REQ)
   const an2 = m2.calls.find((c) => c.kind === 'analyst')
-  check('N42_a_failure_that_only_implicates_the_new_test_after_verified_acceptance_is_repaired_in_the_test_and_never_touches_implementation', r2.status === 'COMPLETED' && !!an2 && !an2.prompt.includes('--- src/messageStore.mjs ---') && an2.prompt.includes('The failing test is the suspect') && y.ws.read('src/messageStore.mjs').includes("return 'store'"), `${r2.status} ${r2.reason}`)
+  check('N42_a_failure_that_only_implicates_the_new_test_after_verified_acceptance_is_repaired_in_the_test_and_never_touches_implementation', r2.status === 'COMPLETED' && !an2 /* the structured evidence needs no analyst guess */ && m2.calls.some((c) => c.kind === 'repair' && c.prompt.includes('test:expectation') && c.prompt.includes('Do not change implementation files')) && y.ws.read('src/messageStore.mjs').includes("return 'store'"), `${r2.status} ${r2.reason}`)
 }
 // ---- 12. repeated hypotheses: acting twice on the same cause is refused; one different hypothesis is requested, else UNDETERMINED early
 {
@@ -381,12 +381,12 @@ const view = (x: World) => deriveAssignments(new AgentOpsLog(x.dir)).assignments
 // ---- 14. credential-LIKE text in a model-written file or in command output must not abort real work, and must never be persisted
 {
   const FAKE = 'abcd1234efgh5678ijkl'
-  const T = `import test from 'node:test'\nimport assert from 'node:assert'\n// fixture: token = "${FAKE}"\ntest('fails on purpose so the file is read as evidence', () => { assert.strictEqual(1, 2) })\n`
+  const T = `import test from 'node:test'\nimport assert from 'node:assert'\n// fixture: token = "${FAKE}"\ntest('fails on purpose so the file is read as evidence', () => { assert.strictEqual(1, 2, 'token = "${FAKE}"') })\n`
   const x = makeWorld({ limits: { maxRetries: 3 } })
   const model = new ScriptedModel((c) => {
     if (c.kind === 'file' && c.path === 'test/messageStore.test.mjs') return fenced(T)
     if (c.kind === 'analyst') return JSON.stringify({ hypothesis: `the fixture line token = "${FAKE}" is irrelevant; the new test asserts 1 equals 2 which can never hold`, file: 'test/messageStore.test.mjs', differs: 'first attempt' })
-    if (c.kind === 'repair') return fenced(T.replace('assert.strictEqual(1, 2)', 'assert.strictEqual(1, 1)'))
+    if (c.kind === 'repair') return fenced(T.replace(/assert\.strictEqual\(1, 2, [^)]*\)/, 'assert.strictEqual(1, 1)'))
     return good(c)
   })
   const r = await runFeatureWorkflow(deps(x, model, { finalVerification: x.verification }), REQ)
@@ -477,6 +477,26 @@ void deriveAssignments; void AgentRegistry
   const solo = new ScriptedModel((c) => (c.kind === 'repair' ? (c.prompt.includes('HYPOTHESIS TO ACT ON NOW (status:inline') ? fixes(c) : noop(c)) : filePhase(c)))
   const r2 = await runFeatureWorkflow(deps(y, solo, { onEvent: (e) => ev2.push(`${e.kind} ${e.detail}`) }), REQ)
   check('N59_without_an_escalation_model_the_context_still_escalates_and_the_model_is_never_switched_silently', r2.status === 'COMPLETED' && r2.escalations!.length === 1 && r2.escalations![0].modelBefore === r2.escalations![0].modelAfter && ev2.some((e) => /no escalation model configured/.test(e)), JSON.stringify(r2.escalations))
+}
+
+// ---- 17. test-stage reliability: an ungrounded assertion inside the only test case is disabled (the case stays); route/contract problems get the bounded third retry
+{
+  const SINGLE = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { mkdtempSync } from 'node:fs'\nimport { tmpdir } from 'node:os'\nimport path from 'node:path'\nprocess.env.CHAT_DATA_FILE = path.join(mkdtempSync(path.join(tmpdir(), 'chat-')), 'sessions.json')\nconst { createSession, listSessions, getSession, addSessionMessage } = await import('../src/chatService.mjs')\ntest('session service functions', () => {\n  const s = createSession('alpha')\n  assert.ok(listSessions().some((x) => x.id === s.id))\n  assert.strictEqual(listSessions().length, 99)\n  addSessionMessage(s.id, { text: 'hi' })\n  assert.strictEqual(getSession(s.id).messages.length, 1)\n})\n`
+  const x = makeWorld(); const ev: string[] = []
+  const m = new ScriptedModel((c) => {
+    if (c.kind === 'file' && c.path === 'test/chatService.test.mjs') return fenced(SINGLE)
+    if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'the expectation of 99 sessions is wrong', file: 'test/chatService.test.mjs', differs: 'first attempt' })
+    if (c.kind === 'repair') { const k = /CURRENT CONTENT:\n```\n([\s\S]*?)\n```/.exec(c.prompt); return k ? fenced(k[1]) : null }
+    return good(c)
+  })
+  const r = await runFeatureWorkflow(deps(x, m, { onEvent: (e) => ev.push(`${e.kind} ${e.detail}`) }), REQ)
+  const body = x.ws.read('test/chatService.test.mjs')
+  check('N60_an_ungrounded_assertion_in_the_only_test_case_is_disabled_by_line_the_case_and_its_grounded_assertions_stay_and_the_feature_completes', r.status === 'COMPLETED' && r.quarantinedTests === 1 && body.includes('QUARANTINED ASSERTION') && body.includes('assert.ok(listSessions()') && body.includes("getSession(s.id).messages.length, 1") && ev.some((e) => e.startsWith('QUARANTINE_ASSERTION')), `${r.status} ${r.reason}`)
+  const y = makeWorld(); let asks = 0
+  const noSessions = CHAT_REFERENCE['server.mjs'].split('\n').filter((l) => !l.includes("url.pathname === '/api/sessions'")).join('\n')
+  const m2 = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'server.mjs') { asks += 1; return fenced(asks <= 3 ? noSessions : CHAT_REFERENCE['server.mjs']) } return good(c) })
+  const r2 = await runFeatureWorkflow(deps(y, m2), REQ)
+  check('N61_a_server_that_omits_routes_the_contract_names_is_rejected_with_the_exact_routes_and_gets_a_bounded_third_retry', r2.status === 'COMPLETED' && asks === 4 && m2.calls.filter((c) => c.path === 'server.mjs')[1].prompt.includes('does not serve what the acceptance contract requires'), `${r2.status} asks=${asks} ${r2.reason}`)
 }
 
 finish()

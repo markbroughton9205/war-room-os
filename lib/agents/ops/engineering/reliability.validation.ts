@@ -4,7 +4,8 @@ import path from 'node:path'
 import { harness, tmp } from './engtestkit'
 import { persistenceProblems, persistenceProbe, storageFacts, wantsPersistence, storageEnvVars } from './persistenceContract'
 import { acceptanceRoutes, contractRouteProblems, legacyStateDrift, routeFindings, routeTable, statusReachability, syntaxProblems } from './staticGates'
-import { buildEvidence, parseChecks } from './failureEvidence'
+import { buildEvidence, parseChecks, parseTestFailures } from './failureEvidence'
+import { quarantineAssertions } from './testContract'
 import { startupProbe } from './startupProbe'
 import { CHAT_FEATURE, CHAT_REFERENCE, makeChatApp } from './chatFixture'
 import { TASK_FEATURE, TASK_REFERENCE } from './taskFixture'
@@ -92,5 +93,17 @@ check('R31_a_server_that_does_not_start_names_the_module_that_lacks_the_export_n
 const sp = await startupProbe(mkRoot({ 'server.mjs': "import { x } from './nope.mjs'\n" }))
 check('R32_the_engine_reproduces_a_start_up_failure_with_the_full_error_output', !sp.started && /ERR_MODULE_NOT_FOUND|Cannot find module/.test(sp.output), sp.output.slice(0, 120))
 check('R33_a_check_that_cannot_be_mapped_yields_no_hypotheses_so_the_analyst_path_is_used', buildEvidence({ output: TAP([[3, 'something odd', 'weird']]), acceptance: [], files: {} }).queue.length === 0)
+
+// ---- node:test failures: parsed into evidence, with an isolation hypothesis for accumulated state; assertion-level quarantine
+const TESTOUT = `✔ other case (0.3ms)\n✖ session service functions (1.2ms)\nℹ tests 2\nℹ fail 1\n\n✖ failing tests:\n\ntest at test/svc.test.mjs:12:1\n✖ session service functions (1.2ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  3 !== 1\n  \n      at TestContext.<anonymous> (file:///tmp/ws/test/svc.test.mjs:28:10)\n      at Test.run (node:internal/test_runner/test:1402:25) {\n    actual: 3,\n    expected: 1,\n    operator: 'strictEqual'\n  }\n`
+const tf = parseTestFailures(TESTOUT)
+check('R34_a_node_test_failure_is_parsed_with_the_failing_assertion_line_and_actual_vs_expected', tf.length === 1 && tf[0].file === 'test/svc.test.mjs' && tf[0].line === 28 && tf[0].actual === '3' && tf[0].expected === '1', JSON.stringify(tf))
+const svc = ['import test from "node:test"', 'import assert from "node:assert"', 'test("session service functions", () => {', ...Array.from({ length: 24 }, () => '  // setup'), '  const sessions = [1, 2, 3]', '  assert.strictEqual(sessions.length, 1)', '})'].join('\n')
+const ev3 = buildEvidence({ output: TESTOUT, acceptance: [], files: { 'test/svc.test.mjs': svc.split('\n').slice(0, 3).join('\n') + '\n' + '\n'.repeat(24) + '  assert.strictEqual(sessions.length, 1)\n' }, testScope: true })
+check('R35_state_accumulating_across_tests_is_named_as_an_isolation_hypothesis_that_targets_only_the_test_file', ev3.checks[0].kind === 'TEST_FAILURE' && ev3.queue[0].key === 'test:isolation:test/svc.test.mjs' && ev3.queue.every((h) => h.files.join() === 'test/svc.test.mjs'), ev3.queue.map((h) => h.key).join())
+const T = ['import test from "node:test"', 'import assert from "node:assert"', 'test("one case with a good and a bad assertion", () => {', '  assert.ok(true)', '  assert.strictEqual(1 + 1, 3)', '  assert.ok(2 > 1)', '})'].join('\n')
+const qa = quarantineAssertions('test/a.test.mjs', T, [5])
+check('R36_only_the_failing_assertion_statement_is_disabled_and_the_case_with_its_other_assertions_stays', !!qa && qa.removed.length === 1 && qa.removed[0].line === 5 && qa.content.includes('assert.ok(true)') && qa.content.includes('assert.ok(2 > 1)') && qa.content.split('\n')[4].trim().startsWith('// QUARANTINED ASSERTION'))
+check('R37_assertion_quarantine_refuses_to_leave_a_test_file_without_any_assertion', quarantineAssertions('test/a.test.mjs', 'import test from "node:test"\nimport assert from "node:assert"\ntest("x", () => {\n  assert.strictEqual(1, 2)\n})\n', [4]) === null)
 void cpSync
 finish()

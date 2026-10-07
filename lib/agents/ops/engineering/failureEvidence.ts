@@ -6,13 +6,13 @@ import { persistenceProblems, type PersistenceProbe } from './persistenceContrac
  * file, enriched with facts read from the code (dependency + caller context), and turned into an ORDERED set of explicit, falsifiable hypotheses.
  * The repair loop acts on one hypothesis at a time, compares the failure before/after, and never repeats a refuted one.
  */
-export type CheckKind = 'SERVER_START' | 'ROUTE_MISSING' | 'STATUS_MISMATCH' | 'RESPONSE_SHAPE' | 'LOOKUP_AFTER_CREATE' | 'LEGACY_REGRESSION' | 'UI_PAGE' | 'PERSISTENCE' | 'GENERIC'
+export type CheckKind = 'TEST_FAILURE' | 'SERVER_START' | 'ROUTE_MISSING' | 'STATUS_MISMATCH' | 'RESPONSE_SHAPE' | 'LOOKUP_AFTER_CREATE' | 'LEGACY_REGRESSION' | 'UI_PAGE' | 'PERSISTENCE' | 'GENERIC'
 export type Hypothesis = { key: string; kind: CheckKind; statement: string; files: string[]; check: number }
 export type CheckFailure = { n: number; name: string; message: string; kind: CheckKind; facts: string[]; hypotheses: Hypothesis[] }
 export type StructuredEvidence = { checks: CheckFailure[]; queue: Hypothesis[]; files: string[]; signatureOf: (n: number) => string }
-export type EvidenceInput = { output: string; acceptance: string[]; files: Record<string, string>; baseline?: Record<string, string>; changed?: string[]; probe?: PersistenceProbe | null; startupOutput?: string }
+export type EvidenceInput = { output: string; acceptance: string[]; files: Record<string, string>; baseline?: Record<string, string>; changed?: string[]; probe?: PersistenceProbe | null; startupOutput?: string; testScope?: boolean }
 
-const PRIORITY: CheckKind[] = ['SERVER_START', 'ROUTE_MISSING', 'STATUS_MISMATCH', 'RESPONSE_SHAPE', 'LOOKUP_AFTER_CREATE', 'LEGACY_REGRESSION', 'UI_PAGE', 'PERSISTENCE', 'GENERIC']
+const PRIORITY: CheckKind[] = ['TEST_FAILURE', 'SERVER_START', 'ROUTE_MISSING', 'STATUS_MISMATCH', 'RESPONSE_SHAPE', 'LOOKUP_AFTER_CREATE', 'LEGACY_REGRESSION', 'UI_PAGE', 'PERSISTENCE', 'GENERIC']
 export function parseChecks(out: string): { n: number; name: string; message: string }[] {
   const lines = out.split('\n'), res: { n: number; name: string; message: string }[] = []
   lines.forEach((ln, i) => {
@@ -27,8 +27,26 @@ export function parseChecks(out: string): { n: number; name: string; message: st
 const SOURCE = (p: string) => /\.m?js$/.test(p) && !/^(test|node_modules|public)\//.test(p)
 const exportedBy = (files: Record<string, string>, name: string): string | null => Object.entries(files).find(([p, t]) => SOURCE(p) && new RegExp(`export\\s+(?:async\\s+)?(?:function|const|let)\\s+${name}\\b|export\\s*\\{[^}]*\\b${name}\\b`).test(t))?.[0] ?? null
 
+export type TestFailure = { name: string; message: string; actual: string | null; expected: string | null; file: string | null; line: number | null }
+/** node:test spec output: every failing case with its assertion message, actual/expected values and the test-file line of the failing assertion. */
+export function parseTestFailures(out: string): TestFailure[] {
+  const res: TestFailure[] = []
+  const lines = out.split('\n')
+  lines.forEach((ln, i) => {
+    const m = /^\s*✖\s+(.+?)(?:\s+\(\d[\d.]*ms\))?\s*$/.exec(ln); if (!m || /^failing tests:?$/.test(m[1])) return
+    const prev = res.findIndex((r) => r.name === m[1]); if (prev >= 0 && res[prev].file) return
+    const block = lines.slice(i + 1, i + 45).join('\n').split(/\n\s*✖ |\nℹ /)[0]
+    const frame = /((?:test)\/[\w./-]+\.m?js):(\d+):\d+/.exec(block)
+    const rec: TestFailure = { name: m[1], message: (/(\w*Error[^\n]*)\n/.exec(block)?.[1] ?? 'failed').slice(0, 140) + ((/\n\s*([^\n]*!==[^\n]*)\n/.exec(block)?.[1] ?? '') ? ` ${/\n\s*([^\n]*!==[^\n]*)\n/.exec(block)![1].trim()}` : ''), actual: /\bactual: ([^\n,]+)/.exec(block)?.[1] ?? null, expected: /\bexpected: ([^\n,]+)/.exec(block)?.[1] ?? null, file: frame?.[1] ?? null, line: frame ? Number(frame[2]) : null }
+    if (prev >= 0) res[prev] = rec; else res.push(rec)
+  })
+  return res
+}
+
 export function buildEvidence(inp: EvidenceInput): StructuredEvidence {
-  const checks = parseChecks(inp.output)
+  let checks = parseChecks(inp.output)
+  const testInfo = new Map<number, TestFailure>()
+  if (!checks.length && inp.testScope) { const tf = parseTestFailures(inp.output); checks = tf.map((t, i) => { testInfo.set(i + 1, t); return { n: i + 1, name: t.name, message: t.message } }) }
   const files = inp.files
   const serverFile = Object.keys(files).find((p) => SOURCE(p) && /createServer\s*\(/.test(files[p])) ?? 'server.mjs'
   const serverText = files[serverFile] ?? ''
@@ -68,7 +86,8 @@ export function buildEvidence(inp: EvidenceInput): StructuredEvidence {
     const mism: { key: string; code: number; exp: number }[] = expected.length && observedPairs.length ? observedPairs.map((o, i) => ({ ...o, exp: expected.length === observedPairs.length ? expected[i] : expected[0] })).filter((o) => o.code !== o.exp && !(expected.length !== observedPairs.length && expected.includes(o.code))) : []
     // setup steps that legitimately answered 2xx are not the failing condition when the contract expects an error status
     if (expected.some((e) => e >= 400) && mism.some((m) => m.code >= 400)) { const keep = mism.filter((m) => m.code >= 400); mism.length = 0; mism.push(...keep) }
-    if (/could not complete|server exited|did not start/i.test(text)) kind = 'SERVER_START'
+    if (testInfo.has(c.n)) kind = 'TEST_FAILURE'
+    else if (/could not complete|server exited|did not start/i.test(text)) kind = 'SERVER_START'
     else if (/persist|surviv|restart|durab/i.test(c.name)) kind = 'PERSISTENCE'
     else if (/existing .*(keep|still) working|legacy/i.test(c.name)) kind = 'LEGACY_REGRESSION'
     else if (/\bpage\b|\bui\b|badge/i.test(c.name)) kind = 'UI_PAGE'
@@ -85,6 +104,16 @@ export function buildEvidence(inp: EvidenceInput): StructuredEvidence {
     if (route) facts.push(`implicated route: ${route}`)
     if (callees.length) facts.push(`the handler calls ${callees.map((x) => `${x.fn}() from ${x.file}`).join(', ')}`)
 
+    if (kind === 'TEST_FAILURE') {
+      const t = testInfo.get(c.n)!
+      const code = t.file && t.line ? (files[t.file] ?? '').split('\n')[t.line - 1]?.trim() ?? '' : ''
+      if (t.file) facts.push(`failing assertion: ${t.file}:${t.line}${code ? `  ${code.slice(0, 120)}` : ''}`)
+      if (t.actual !== null) facts.push(`the assertion expected ${t.expected} and got ${t.actual}`)
+      const tfile = t.file ?? ''
+      const na = Number(t.actual), ne = Number(t.expected)
+      if (tfile && Number.isFinite(na) && Number.isFinite(ne) && na > ne) H(kind, `test:isolation:${tfile}`, `${tfile}:${t.line} expects ${t.expected} but finds ${t.actual}: state left by earlier tests or earlier calls in the same process (a shared data file or module state) is still present. Give each test its own fresh state (new data file / unique names) or assert relative to the value measured before the action. Do not change implementation files`, [tfile])
+      if (tfile) H(kind, `test:expectation:${tfile}:${t.line}`, `the assertion at ${tfile}:${t.line} (${code.slice(0, 80)}) does not match what the independently verified implementation does (${t.message}); correct the expectation to the behaviour the acceptance criteria state. Do not change implementation files`, [tfile])
+    }
     if (kind === 'SERVER_START') {
       const crash = inp.startupOutput ? /(?:file:\/\/)?(?:[\w./-]*\/)?((?:[\w.-]+\/)*[\w.-]+\.m?js):(\d+)[\s\S]*?\n(\w*Error:[^\n]+)/.exec(inp.startupOutput) : null
       if (crash) { const f = Object.keys(files).find((x) => x === crash[1] || x.endsWith('/' + crash[1].split('/').pop()!)); facts.push(`the engine reproduced the start-up failure: ${crash[3].slice(0, 160)} at ${crash[1]}:${crash[2]}`); if (f) H(kind, `startup:error:${f}`, `starting the server fails with "${crash[3].slice(0, 140)}" at ${f}:${crash[2]}`, [f]) }
