@@ -11,6 +11,8 @@ import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 import { collisionFacts, isCollisionProblem } from './collision'
 import { quarantineTests, quarantineAssertions } from './testContract'
+import { repairRouteOrder, statusDiagnosis } from './routeEdit'
+import type { RouteEditMode, RouteOp } from './routeEdit'
 import { undefinedNames, routeFindings, routeTable, routeRegion, contractRouteProblems, statusReachability, syntaxProblems, legacyStateDrift, domIds, missingDomIds } from './staticGates'
 import { persistenceProblems, persistenceProbe, wantsPersistence, type PersistenceProbe } from './persistenceContract'
 import { buildEvidence, renderEvidence, parseTestFailures } from './failureEvidence'
@@ -38,6 +40,7 @@ export type WorkflowDeps = {
   escalation?: { label: string; model: ModelClient }
 }
 export type RepairTraceEntry = { step: string; label: string; attempt: number; check: number | null; checkName: string; key: string; hypothesis: string; files: string[]; model: string; contextDepth: 0 | 1; before: string; after: string; outcome: 'TARGET_FIXED' | 'CHANGED' | 'REFUTED' | 'NO_EDIT' }
+export type RouteEditRecord = { step: string; stage: 'EDIT_REJECTION' | 'DEBUG_REPAIR'; file: string; mode: RouteEditMode; ops: RouteOp[]; notes: string[]; finding: string; spanBefore: string; spanAfter: string; originalCheck: string; resultAfter: string }
 export type EscalationRecord = { step: string; attempt: number; reason: string; modelBefore: string; modelAfter: string; contextDepth: 1; outcomeAfter?: string }
 export type WorkflowResult = {
   status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'PAUSED' | 'CONFLICT' | 'BLOCKED' | 'CRASHED'
@@ -46,6 +49,7 @@ export type WorkflowResult = {
   quarantinedTests?: number
   repairTrace?: RepairTraceEntry[]
   escalations?: EscalationRecord[]
+  routeEdits?: RouteEditRecord[]
   repairs: number
   filesChanged: string[]
   stepsDone: number
@@ -71,11 +75,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   let quarantined = 0
   const trace: RepairTraceEntry[] = []
   const escalations: EscalationRecord[] = []
+  const routeEdits: RouteEditRecord[] = []
   let activeModel: ModelClient = deps.model
   let stepsDone = 0
   const changed = new Set<string>()
   const emit = (kind: string, detail: string) => deps.onEvent?.({ at: clock().toISOString(), kind, detail })
-  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => ({ status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, repairTrace: trace, escalations, stepsDone, tokens, latencyMs: Date.now() - t0, executor })
+  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => ({ status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor })
 
   // ---- state: resume from the latest checkpoint when one exists
   const baselineSnap = ws.snapshot()
@@ -229,7 +234,11 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         if (cp.length) return `the server does not serve what the acceptance contract requires: ${cp.join('; ')}. Add or fix exactly these routes (method and path as written in the contract).`
         const files = { ...Object.fromEntries(Object.keys(ws.snapshot()).filter((f) => /\.m?js$/.test(f)).map((f) => [f, ws.read(f)])), [path]: content }
         const lost = statusReachability(files, req.acceptance)
-        if (lost.length) return `the acceptance contract requires HTTP ${lost.join(', ')} but nothing in the code can ever respond with it. A generic catch that always answers one status hides it: raise errors that carry their status (for example err.status) and answer with that status.`
+        if (lost.length) {
+          const diag = statusDiagnosis(content, files, req.acceptance).filter((d) => lost.includes(d.status) && d.target !== 'OK')
+          const handler = diag.filter((d) => d.target === 'HANDLER').map((d) => `${d.method} ${d.path} -> ${d.status}: ${d.reason}`)
+          return `the acceptance contract requires HTTP ${lost.join(', ')} but nothing in the code can ever respond with it${handler.length ? ` (diagnosis HANDLER, the route is reachable: ${handler.slice(0, 3).join('; ')})` : ''}. A generic catch that always answers one status hides it: raise errors that carry their status (for example err.status) and answer with that status.`
+        }
       }
       const drift = legacyStateDrift(path, before, content)
       if (drift.length) return `existing exports changed which data they use: ${drift.map((d) => `${d.fn}() used ${d.was} and now uses the NEW state ${d.now}`).join('; ')}. Existing endpoints must keep their own behaviour and data: leave ${drift.map((d) => d.fn).join(', ')} using ${drift[0].was} and add NEW functions for the new feature.`
@@ -401,6 +410,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         }
         if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); continue }
         let compat = gateProblem(file, pr.content)
+        if (compat && pr.kind === 'code') { const sfix = structuralRoute(stepId, 'DEBUG_REPAIR', file, pr.content, compat, `${label}: ${nextH ? nextH.check : 'n/a'}`); if (sfix !== null) { pr = { ...pr, content: sfix }; compat = gateProblem(file, sfix) } }
         if (compat && budgetLeft()) {
           const rr3 = await call(ENGINEER_REWRITE_SYSTEM, mk(`\nYOUR PREVIOUS REPLY WAS REJECTED BEFORE IT WAS WRITTEN: ${compat}`, 'rewrite'))
           noteTokens(rr3)
@@ -452,6 +462,17 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     } finally { activeModel = deps.model }
   }
 
+  /** Pure route ordering/duplicate conflicts are fixed STRUCTURALLY (the route blocks are moved, nothing else is touched); fails closed to the model when no unique safe operation exists. */
+  const structuralRoute = (stepId: string, stage: RouteEditRecord['stage'], path: string, content: string, problem: string, originalCheck: string): string | null => {
+    if (!/^route conflict/.test(problem) || !/\.m?js$/.test(path)) return null
+    const fixed = repairRouteOrder(path, content)
+    if (!fixed) return null
+    const remaining = gateProblem(path, fixed.text)
+    if (remaining && /^route conflict|^your version has a syntax error/.test(remaining)) return null // the move did not resolve the conflict or broke the file: model rewrite instead
+    routeEdits.push({ step: stepId, stage, file: path, mode: fixed.mode, ops: fixed.ops, notes: fixed.notes, finding: problem.slice(0, 400), spanBefore: routeRegion(content, 1500), spanAfter: routeRegion(fixed.text, 1500), originalCheck, resultAfter: remaining ? `route order fixed; remaining gate problem: ${remaining.slice(0, 200)}` : 'route order fixed; all static gates pass' })
+    emit('ROUTE_EDIT', `${path}: ${fixed.mode}: ${fixed.notes.join('; ')}`)
+    return fixed.text
+  }
   // ---- execute steps
   try {
     for (const step of state.steps) {
@@ -504,20 +525,25 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const notes = state.steps.filter((s) => s.status === 'DONE').map((s) => s.title)
       const lessons = deps.lessons?.({ plan, request: req.request }) ?? []
       let feedback = ''
+      let routeKept = ''
       const keep = keepExportsFor(path)
       const mode = chooseMode(job.exists, job.current.split('\n').length, keep)
       const askFile = async (extra: string[], retry = 0) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}); noteTokens(r); return r }
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 3 && reply.ok; rej++) {
-        const problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : parsedReply.kind === 'no_change' && /\.html?$/.test(path) ? pageMissing(path) : null
+        let problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : parsedReply.kind === 'no_change' && /\.html?$/.test(path) ? pageMissing(path) : null
+        if (problem && parsedReply.kind === 'code') {
+          const sfix = structuralRoute(step.id, 'EDIT_REJECTION', path, parsedReply.content, problem, 'edit-stage static gate')
+          if (sfix !== null) { parsedReply = { ...parsedReply, content: sfix }; problem = gateProblem(path, sfix); if (problem) routeKept = routeRegion(sfix) }
+        }
         if (!problem) break
         if (rej >= 2 && !isCollisionProblem(problem) && !FACT_BEARING.test(problem)) break // the third, targeted retry is reserved for problems that carry exact facts (collisions, route conflicts, contract routes/statuses, state drift, persistence, syntax, undeclared names); bounded
         feedback = problem
         emit('REJECT', `${path}: ${problem}`)
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
         const bs = budgetStop(); if (bs) { failAssignment(log, assignmentId, actor, bs.reason, undefined, clock()); return bs }
-        reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`, (parsedReply.kind === 'code' && /^route conflict|^the server does not serve/.test(problem) && routeRegion(parsedReply.content) ? `THE ROUTE LAYOUT OF THE REJECTED REPLY (line numbers match the message above; reorder these so every specific route comes before the broader route that also matches it, then keep everything else):\n${routeRegion(parsedReply.content)}` : `THE REJECTED REPLY (do NOT repeat it):\n${reply.text.slice(0, 700)}`)], rej + 1)
+        reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`, (routeKept && parsedReply.kind === 'code' ? `THE ENGINE ALREADY CORRECTED THE ROUTE ORDER of your reply (do not change the order of the routes). Here is the corrected file; return it with ONLY the problem above fixed:\n${parsedReply.content.slice(0, 7500)}` : parsedReply.kind === 'code' && /^route conflict|^the server does not serve/.test(problem) && routeRegion(parsedReply.content) ? `THE ROUTE LAYOUT OF THE REJECTED REPLY (line numbers match the message above; reorder these so every specific route comes before the broader route that also matches it, then keep everything else):\n${routeRegion(parsedReply.content)}` : `THE REJECTED REPLY (do NOT repeat it):\n${reply.text.slice(0, 700)}`)], rej + 1)
         parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       }
       void feedback

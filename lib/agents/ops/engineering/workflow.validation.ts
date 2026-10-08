@@ -517,4 +517,18 @@ void deriveAssignments; void AgentRegistry
   check('N62_an_implementation_edit_at_the_test_stage_that_breaks_the_independent_acceptance_is_reverted_and_the_ungrounded_test_case_is_quarantined', r.status === 'COMPLETED' && ev.some((e) => e.startsWith('REVERT_REGRESSION')) && ev.some((e) => e.startsWith('QUARANTINE ')) && x.ws.read('src/messageStore.mjs').includes('saveSessions') && !x.ws.read('src/messageStore.mjs').includes('saveSessionsOLD') && (await x.verification.run()).exitCode === 0, `${r.status} ${r.reason} ${ev.filter((e) => /REVERT|QUARANT/.test(e)).join('|')}`)
 }
 
+// ---- 14. structural route repair: a prefix-first server is reordered by the engine, not rewritten by the model
+{
+  const srv = SOLUTION['server.mjs']
+  const hider = "    if (url.pathname.startsWith('/api/sessions/') && req.method === 'GET') return send(res, 404, { error: 'not found' })\n"
+  const at = srv.indexOf('    const m = ')
+  const prefixFirst = at > 0 ? srv.slice(0, at) + hider + srv.slice(at) : srv
+  const x = makeWorld(); const ev: string[] = []
+  const m = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'server.mjs' ? fenced(prefixFirst) : good(c)))
+  const r = await runFeatureWorkflow(deps(x, m, { onEvent: (e) => ev.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('N63_a_prefix_first_server_is_fixed_by_a_structural_route_move_with_one_model_call_for_that_file', at > 0 && r.status === 'COMPLETED' && m.calls.filter((c) => c.kind === 'file' && c.path === 'server.mjs').length === 1 && (r.routeEdits ?? []).length === 1 && r.routeEdits![0].mode === 'ENGINE_DETERMINISTIC_REPAIR' && r.routeEdits![0].ops[0].op === 'MOVE_ROUTE_BEFORE' && ev.some((e) => e.startsWith('ROUTE_EDIT')), `${r.status} ${r.reason} calls=${m.calls.filter((c) => c.path === 'server.mjs').length} edits=${(r.routeEdits ?? []).length}`)
+  check('N64_the_structural_edit_is_recorded_with_before_and_after_spans_and_the_original_finding', !!r.routeEdits?.[0] && /route conflict/.test(r.routeEdits[0].finding) && r.routeEdits[0].spanBefore !== r.routeEdits[0].spanAfter && /all static gates pass|remaining gate problem/.test(r.routeEdits[0].resultAfter))
+  check('N65_the_handler_body_the_model_wrote_survives_the_structural_move_unchanged', x.ws.read('server.mjs').includes("return send(res, 404, { error: 'not found' })") && x.ws.read('server.mjs').split('\n').sort().join('\n') === prefixFirst.split('\n').sort().join('\n'))
+}
+
 finish()
