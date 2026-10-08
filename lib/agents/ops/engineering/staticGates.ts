@@ -62,9 +62,17 @@ export function routeTable(text: string): Route[] {
     for (const m of ln.matchAll(/pathname\s*===?\s*['"]([^'"]+)['"]/g)) { found = true; add('literal', m[1], (p) => p === m[1]) }
     for (const m of ln.matchAll(/pathname\.startsWith\(\s*['"]([^'"]+)['"]\s*\)/g)) { found = true; add('prefix', m[1], (p) => p.startsWith(m[1])) }
     for (const m of ln.matchAll(/\/((?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\n\\\[])+)\/\w*\.test\(\s*[\w.]*pathname\s*\)/g)) { found = true; try { const re = new RegExp(m[1]); add('regex', m[1], (p) => re.test(p)) } catch { /* not a usable regex */ } }
+    for (const m of ln.matchAll(/[\w.]*pathname\.(?:match|search)\(\s*\/((?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\n\\\[])+)\/\w*\s*\)|\/((?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\n\\\[])+)\/\w*\.exec\(\s*[\w.]*pathname\s*\)/g)) { const src = m[1] ?? m[2]; if (found && out.some((o) => o.line === i + 1 && o.pattern === src)) continue; found = true; try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* not a usable regular expression */ } }
     for (const [a, src] of alias) if (new RegExp(`\\bif\\s*\\(\\s*!?${a}\\b`).test(ln) && !found) { found = true; try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* ignore */ } }
   })
   return out.filter((r, i) => !out.slice(0, i).some((e) => e.end > e.line && r.line > e.line && r.line <= e.end))
+}
+/** The dispatcher's route lines (numbered), so a rejection can show the model the exact layout it must reorder instead of the head of its file. */
+export function routeRegion(text: string, cap = 3600): string {
+  const rs = routeTable(text)
+  if (!rs.length) return ''
+  const lines = text.split('\n'), from = Math.min(...rs.map((r) => r.line)), to = Math.max(...rs.map((r) => r.end))
+  return lines.slice(from - 1, to).map((l, i) => `${from + i}: ${l}`).join('\n').slice(0, cap)
 }
 const sampleOf = (r: Route): string[] => {
   if (r.kind === 'literal') return [r.pattern]
@@ -86,6 +94,7 @@ export function routeFindings(rel: string, text: string): RouteFinding[] {
       if (!methodsCompatible(e.method, c.method) || !e.returns) continue
       if (e.kind === c.kind && e.pattern === c.pattern && e.method === c.method) { out.push({ kind: 'DUPLICATE', hidden: c.pattern, hiding: e.pattern, hiddenLine: c.line, hidingLine: e.line }); break }
       if (e.kind === 'literal') continue
+      if (c.kind === 'prefix' && e.kind === 'prefix' && c.pattern !== e.pattern && c.pattern.startsWith(e.pattern)) { out.push({ kind: 'PREFIX_SHADOWS', hidden: c.pattern, hiding: e.pattern, hiddenLine: c.line, hidingLine: e.line }); break } // a narrower prefix registered after a broader one can never be reached
       const samples = sampleOf(c)
       if (c.kind === 'prefix' || !samples.length) continue
       if (e.kind === 'prefix' && c.kind === 'literal' && c.pattern === e.pattern.replace(/\/$/, '')) continue

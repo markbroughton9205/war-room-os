@@ -11,7 +11,7 @@ import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 import { collisionFacts, isCollisionProblem } from './collision'
 import { quarantineTests, quarantineAssertions } from './testContract'
-import { undefinedNames, routeFindings, routeTable, contractRouteProblems, statusReachability, syntaxProblems, legacyStateDrift, domIds, missingDomIds } from './staticGates'
+import { undefinedNames, routeFindings, routeTable, routeRegion, contractRouteProblems, statusReachability, syntaxProblems, legacyStateDrift, domIds, missingDomIds } from './staticGates'
 import { persistenceProblems, persistenceProbe, wantsPersistence, type PersistenceProbe } from './persistenceContract'
 import { buildEvidence, renderEvidence, parseTestFailures } from './failureEvidence'
 import { startupProbe } from './startupProbe'
@@ -517,7 +517,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         emit('REJECT', `${path}: ${problem}`)
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
         const bs = budgetStop(); if (bs) { failAssignment(log, assignmentId, actor, bs.reason, undefined, clock()); return bs }
-        reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`, `THE REJECTED REPLY (do NOT repeat it):\n${reply.text.slice(0, 700)}`], rej + 1)
+        reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`, (parsedReply.kind === 'code' && /^route conflict|^the server does not serve/.test(problem) && routeRegion(parsedReply.content) ? `THE ROUTE LAYOUT OF THE REJECTED REPLY (line numbers match the message above; reorder these so every specific route comes before the broader route that also matches it, then keep everything else):\n${routeRegion(parsedReply.content)}` : `THE REJECTED REPLY (do NOT repeat it):\n${reply.text.slice(0, 700)}`)], rej + 1)
         parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       }
       void feedback

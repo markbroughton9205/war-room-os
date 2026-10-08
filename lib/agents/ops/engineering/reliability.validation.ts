@@ -121,4 +121,25 @@ void cpSync
   const bad = syntaxProblems('t.mjs', "function f() {\n  const { a } = await import('x')\n}\n"), ok = syntaxProblems('t.mjs', 'export const a = 1\n')
   check('R41_the_syntax_gate_uses_nodes_own_parser_so_await_outside_async_is_rejected_before_it_is_written', bad.length === 1 && /node --check/.test(bad[0]) && ok.length === 0)
 }
+
+// ---- route reasoning matrix (several domains, not one fixture)
+{
+  const { routeFindings, routeTable, routeRegion } = await import('./staticGates')
+  const wrap = (body: string) => `import { createServer } from 'node:http'\nconst server = createServer((req, res) => {\n  const url = new URL(req.url, 'http://x')\n${body}\n})\n`
+  const kinds = (b: string) => routeFindings('server.mjs', wrap(b)).map((f) => `${f.kind}:${f.hidden}<-${f.hiding}`)
+  check('R42_exact_route_before_prefix_route_is_accepted_across_domains', kinds(`  if (url.pathname === '/api/orders/export' && req.method === 'POST') return res.end('1')\n  if (url.pathname.startsWith('/api/orders/') && req.method === 'POST') return res.end('2')`).length === 0 && kinds(`  if (url.pathname === '/api/notes/clear' && req.method === 'POST') return res.end('1')\n  if (url.pathname.startsWith('/api/notes/')) return res.end('2')`).length === 0)
+  check('R43_prefix_route_before_exact_route_is_reported_with_both_lines_in_other_domains', kinds(`  if (url.pathname.startsWith('/api/orders/')) return res.end('2')\n  if (url.pathname === '/api/orders/export') return res.end('1')`).join() === 'PREFIX_SHADOWS:/api/orders/export<-/api/orders/' && kinds(`  if (url.pathname.startsWith('/v1/files/') && req.method === 'POST') return res.end('2')\n  if (url.pathname === '/v1/files/purge' && req.method === 'POST') return res.end('1')`).length === 1)
+  check('R44_a_prefix_route_that_only_serves_another_method_does_not_shadow', kinds(`  if (url.pathname.startsWith('/api/orders/') && req.method === 'GET') return res.end('2')\n  if (url.pathname === '/api/orders/export' && req.method === 'POST') return res.end('1')`).length === 0)
+  check('R45_parameter_route_shadowing_a_fixed_route_is_reported', kinds(`  const item = /^\\/api\\/books\\/([^/]+)$/.exec(url.pathname)\n  if (item) return res.end('1')\n  if (url.pathname === '/api/books/count') return res.end('2')`).some((k) => /^PARAM_SHADOWS:\/api\/books\/count/.test(k)) && kinds(`  if (/^\\/api\\/users\\/\\d+$/.test(url.pathname)) return res.end('1')\n  if (url.pathname === '/api/users/42') return res.end('2')`).length === 1)
+  check('R46_fixed_route_before_parameter_route_is_accepted', kinds(`  if (url.pathname === '/api/books/count') return res.end('2')\n  if (/^\\/api\\/books\\/[^/]+$/.test(url.pathname)) return res.end('1')`).length === 0)
+  check('R47_duplicate_routes_are_reported_but_same_path_with_different_methods_is_allowed', kinds(`  if (url.pathname === '/api/tags' && req.method === 'GET') return res.end('1')\n  if (url.pathname === '/api/tags' && req.method === 'GET') return res.end('2')`).join().startsWith('DUPLICATE') && kinds(`  if (url.pathname === '/api/tags' && req.method === 'GET') return res.end('1')\n  if (url.pathname === '/api/tags' && req.method === 'POST') return res.end('2')`).length === 0)
+  check('R48_a_catch_all_prefix_registered_first_hides_everything_after_it_and_last_hides_nothing', kinds(`  if (url.pathname.startsWith('/')) return res.end('all')\n  if (url.pathname === '/health') return res.end('ok')`).length >= 1 && kinds(`  if (url.pathname === '/health') return res.end('ok')\n  if (url.pathname.startsWith('/')) return res.end('all')`).length === 0)
+  check('R49_nested_paths_are_ordered_by_what_matches_what', kinds(`  if (url.pathname.startsWith('/api/a/')) return res.end('1')\n  if (url.pathname.startsWith('/api/a/b/')) return res.end('2')`).length >= 1 && kinds(`  if (url.pathname.startsWith('/api/a/b/')) return res.end('2')\n  if (url.pathname.startsWith('/api/a/')) return res.end('1')`).length === 0)
+  check('R50_inline_match_and_exec_regex_routes_are_understood', routeTable(wrap(`  if (url.pathname.match(/^\\/api\\/jobs\\/(\\d+)\\/cancel$/) && req.method === 'POST') return res.end('1')\n  if (/^\\/api\\/jobs\\/?$/.exec(url.pathname)) return res.end('2')`)).length === 2)
+  const bad = wrap(`  if (url.pathname.startsWith('/api/orders/') && req.method === 'POST') {\n    return res.end('id')\n  }\n  if (url.pathname === '/api/orders/export' && req.method === 'POST') return res.end('1')`)
+  const good = wrap(`  if (url.pathname === '/api/orders/export' && req.method === 'POST') return res.end('1')\n  if (url.pathname.startsWith('/api/orders/') && req.method === 'POST') {\n    return res.end('id')\n  }`)
+  check('R51_a_corrected_retry_is_accepted_after_a_rejected_layout', routeFindings('server.mjs', bad).length === 1 && routeFindings('server.mjs', good).length === 0)
+  const region = routeRegion(bad)
+  check('R52_the_rejection_feedback_shows_the_numbered_route_layout_not_the_head_of_the_file', /\d+: +if \(url\.pathname\.startsWith\('\/api\/orders\/'\)/.test(region) && /\d+: +if \(url\.pathname === '\/api\/orders\/export'/.test(region) && !/createServer/.test(region))
+}
 finish()
