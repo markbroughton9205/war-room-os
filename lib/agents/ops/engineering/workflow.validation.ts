@@ -670,6 +670,13 @@ void deriveAssignments; void AgentRegistry
   const candBad = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(invented) : null))
   const r9 = await runFeatureWorkflow(deps(c2, mkBuilder(), { testCandidates: [{ label: 'cand-bad', model: candBad }] }), REQ)
   check('S33_when_no_competing_candidate_passes_the_existing_quarantine_still_applies_and_the_build_is_WITH_QUARANTINE_never_CLEAN', r9.status === 'COMPLETED' && (r9.quarantinedTests ?? 0) >= 1 && r9.completionClass === 'WITH_QUARANTINE' && r9.cleanKind === null && r9.testAuthoring!.candidates.every((k) => !k.passed), `${r9.status} ${r9.completionClass} q=${r9.quarantinedTests}`)
+  // independent-writer fallback: a writer that only produces unusable (syntactically broken) test files must not fail the step; the builder gets bounded tries
+  const fbW = makeWorld(); const evf: string[] = []
+  const broken = "import test from 'node:test'\ntest('[C1] broken', () => {\n  const s = 'unterminated\n"
+  const brokenWriter = new ScriptedModel((c) => (c.kind === 'file' && c.path?.startsWith('test/') ? fenced(broken) : null))
+  const fbBuilder = new ScriptedModel(good)
+  const r10 = await runFeatureWorkflow(deps(fbW, fbBuilder, { testWriter: { label: 'broken-writer', model: brokenWriter }, onEvent: (e) => evf.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('S35_when_the_independent_writer_only_produces_unusable_files_the_builder_gets_bounded_tries_and_the_step_does_not_fail', r10.status === 'COMPLETED' && evf.some((e) => e.startsWith('TEST_WRITER_FALLBACK')) && fbBuilder.calls.some((c) => c.path?.startsWith('test/')) && brokenWriter.calls.length >= 1 && brokenWriter.calls.length <= 4, `${r10.status} ${r10.reason} writerCalls=${brokenWriter.calls.length} builderTestCalls=${fbBuilder.calls.filter((c) => c.path?.startsWith('test/')).length}`)
   check('S34_acceptance_criteria_are_untouched_by_candidates_assist_or_grounding', [r, r6, r7, r8].every((rr, i) => rr.status === 'COMPLETED' && rr.build!.assignmentId.length > 0 && i >= 0) && JSON.stringify(latestCheckpoint(c1.log, c1.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance) && JSON.stringify(latestCheckpoint(x.log, x.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance))
 }
 

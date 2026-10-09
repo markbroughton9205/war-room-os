@@ -647,6 +647,18 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       }
       void feedback
+      // INDEPENDENT-WRITER FALLBACK: if the test writer could not produce a statically valid test file, the builder gets bounded tries at it (competing attempt) instead of failing the step.
+      if (job.role === 'test' && deps.testWriter && reply.ok) {
+        const skipForFallback = new Set(state.steps.filter((x) => x.status === 'SKIPPED').flatMap((x) => x.files))
+        const badNow = () => (parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content, skipForFallback) : parsedReply.kind === 'invalid' ? parsedReply.reason : null)
+        let bad = badNow()
+        for (let fb = 0; bad && fb < 2 && budgetLeft(); fb++) {
+          emit('TEST_WRITER_FALLBACK', `${path}: the independent writer ${writerLabel} produced an unusable file (${bad.slice(0, 160)}); asking the builder (attempt ${fb + 1}/2)`)
+          reply = await askFile([`THE PREVIOUS TEST FILE WAS UNUSABLE: ${bad}. Keep it small: at most ${req.acceptance.length} tests, one per numbered obligation.`], fb, deps.model)
+          parsedReply = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
+          bad = badNow()
+        }
+      }
       if (reply.ok) { const skippedFiles = new Set(state.steps.filter((x) => x.status === 'SKIPPED').flatMap((x) => x.files)) // a skipped step's file may be the true defect: let evidence-driven repair find it rather than failing here
       const still = parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content, skippedFiles) : null; if (still) { step.status = 'FAILED'; step.note = `rejected: ${still}`; checkpoint(); failAssignment(log, assignmentId, actor, `the model repeatedly produced a ${path} that ${still}`, undefined, clock()); return result('FAILED', `${path}: incompatible rewrite after 2 rejections`) } }
       if (!reply.ok) { if (reply.detail.includes('cancel')) { const b = boundary(); if (b.stop) { checkpoint(); return b.stop } } step.status = 'FAILED'; step.note = `model call failed: ${reply.detail}`; checkpoint(); failAssignment(log, assignmentId, actor, `model call failed: ${reply.detail}`, undefined, clock()); return result('FAILED', `model call failed: ${reply.detail}`) }
