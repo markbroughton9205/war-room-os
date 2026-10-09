@@ -676,7 +676,31 @@ void deriveAssignments; void AgentRegistry
   const brokenWriter = new ScriptedModel((c) => (c.kind === 'file' && c.path?.startsWith('test/') ? fenced(broken) : null))
   const fbBuilder = new ScriptedModel(good)
   const r10 = await runFeatureWorkflow(deps(fbW, fbBuilder, { testWriter: { label: 'broken-writer', model: brokenWriter }, onEvent: (e) => evf.push(`${e.kind} ${e.detail}`) }), REQ)
-  check('S35_when_the_independent_writer_only_produces_unusable_files_the_builder_gets_bounded_tries_and_the_step_does_not_fail', r10.status === 'COMPLETED' && evf.some((e) => e.startsWith('TEST_WRITER_FALLBACK')) && fbBuilder.calls.some((c) => c.path?.startsWith('test/')) && brokenWriter.calls.length >= 1 && brokenWriter.calls.length <= 4, `${r10.status} ${r10.reason} writerCalls=${brokenWriter.calls.length} builderTestCalls=${fbBuilder.calls.filter((c) => c.path?.startsWith('test/')).length}`)
+  check('S35_when_the_independent_writer_only_produces_unusable_files_the_builder_gets_bounded_tries_and_the_step_does_not_fail', r10.status === 'COMPLETED' && evf.some((e) => e.startsWith('TEST_WRITER_FALLBACK')) && fbBuilder.calls.some((c) => c.path?.startsWith('test/')) && brokenWriter.calls.length >= 1 && ['test/messageStore.test.mjs', 'test/chatService.test.mjs'].every((f) => brokenWriter.calls.filter((c) => c.path === f).length <= 4), `${r10.status} ${r10.reason} writerCalls=${brokenWriter.calls.map((c) => c.path).join()} builderTestCalls=${fbBuilder.calls.filter((c) => c.path?.startsWith('test/')).map((c) => c.path).join()}`)
+  // ---- selective helpers: bounded share, protected reserve, one candidate per file by default, evidence of unmet escalation, governance fields
+  const c3 = makeWorld({ limits: { maxRetries: 3 } }); const evh: string[] = []
+  const candR = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(sane) : null))
+  const r11 = await runFeatureWorkflow(deps(c3, mkBuilder(), { testCandidates: [{ label: 'cand-r', model: candR }], helperPolicy: { reserveCalls: 39 }, onEvent: (e) => evh.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('S40w_the_reserve_for_the_main_build_and_final_verifier_blocks_helpers_candidates_are_never_asked_and_quarantine_still_applies', candR.calls.length === 0 && evh.some((e) => e.startsWith('HELPER_BUDGET_EXHAUSTED')) && r11.status === 'COMPLETED' && (r11.quarantinedTests ?? 0) >= 1 && r11.completionClass === 'WITH_QUARANTINE', `${r11.status} calls=${candR.calls.length} q=${r11.quarantinedTests} ${evh.filter((e) => /HELPER/.test(e)).join('|').slice(0, 160)}`)
+  const c4 = makeWorld({ limits: { maxRetries: 3 } })
+  const first = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(invented) : null)), second = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(sane) : null))
+  await runFeatureWorkflow(deps(c4, mkBuilder(), { testCandidates: [{ label: 'first', model: first }, { label: 'second', model: second }] }), REQ)
+  check('S41w_helpers_are_selective_only_one_candidate_per_test_file_by_default', first.calls.length === 1 && second.calls.length === 0)
+  const c5 = makeWorld({ limits: { maxRetries: 3 } })
+  const first2 = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(invented) : null)), second2 = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(sane) : null))
+  const r12 = await runFeatureWorkflow(deps(c5, mkBuilder(), { testCandidates: [{ label: 'first', model: first2 }, { label: 'second', model: second2 }], maxCandidatesPerFile: 2 }), REQ)
+  check('S42w_the_per_file_candidate_cap_is_configurable_and_a_later_passing_candidate_then_wins', second2.calls.length === 1 && r12.testAuthoring!.candidates.some((k) => k.label === 'second' && k.passed && k.kept) && !(r12.quarantinedTests ?? 0), `${r12.status} q=${r12.quarantinedTests}`)
+  const base2 = makeWorld(); const rb2 = await runFeatureWorkflow(deps(base2, new ScriptedModel(good)), REQ)
+  const c6 = makeWorld(); const cand0 = new ScriptedModel(() => null)
+  const r13 = await runFeatureWorkflow(deps(c6, new ScriptedModel(good), { testCandidates: [{ label: 'idle', model: cand0 }], testWriter: undefined }), REQ)
+  check('S43w_helpers_configured_but_not_needed_cost_nothing_a_clean_first_pass_never_calls_them', r13.status === 'COMPLETED' && cand0.calls.length === 0 && r13.cleanKind === 'CLEAN_LOCAL_ONLY' && r13.modelCalls === rb2.modelCalls, `${r13.status} ${r13.modelCalls} vs ${rb2.modelCalls}`)
+  // escalation criteria met but nothing to serve them: recorded as evidence, never faked
+  const un = makeWorld({ limits: { maxRetries: 5 } }); const evu2: string[] = []
+  const r14 = await runFeatureWorkflow(deps(un, localOnly(), { onEvent: (e) => evu2.push(`${e.kind} ${e.detail}`) }), REQ)
+  const um = r14.frontier!.usage.escalation_needed_unmet
+  check('S44w_a_met_escalation_trigger_in_a_local_only_build_is_recorded_as_unmet_evidence_with_its_trigger_file_and_reason', um.length === 1 && um[0].trigger === 'ACCEPTANCE_FAILED_SAME_COMPONENT' && um[0].file === 'server.mjs' && /no frontier provider is configured/.test(um[0].reason) && evu2.some((e) => e.startsWith('ESCALATION_NEEDED_UNMET')) && r14.frontier!.usage.frontier_calls === 0, JSON.stringify(um))
+  check('S45w_an_accepted_assist_carries_full_governance_fields_reason_local_attempts_files_tokens_cost_and_clean_impact', rec.reasonForEscalation.trigger === 'ACCEPTANCE_FAILED_SAME_COMPONENT' && rec.reasonForEscalation.basis.length > 10 && rec.localAttemptsBefore >= 2 && rec.sharedFiles.join() === 'server.mjs' && rec.tokensEstimated.in > 0 && rec.tokensEstimated.out > 0 && rec.cost === 'UNKNOWN' && rec.artifactHash.length === 16 && rec.cleanOutcomeImpact === 'CLEAN_AFTER_ACCEPTED_ASSIST' && r.frontier!.usage.escalation_needed_unmet.length === 0, JSON.stringify({ a: rec.reasonForEscalation, l: rec.localAttemptsBefore, i: rec.cleanOutcomeImpact }))
+  check('S46w_a_rejected_assist_is_marked_ASSIST_REJECTED', rec3.cleanOutcomeImpact === 'ASSIST_REJECTED')
   check('S34_acceptance_criteria_are_untouched_by_candidates_assist_or_grounding', [r, r6, r7, r8].every((rr, i) => rr.status === 'COMPLETED' && rr.build!.assignmentId.length > 0 && i >= 0) && JSON.stringify(latestCheckpoint(c1.log, c1.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance) && JSON.stringify(latestCheckpoint(x.log, x.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance))
 }
 

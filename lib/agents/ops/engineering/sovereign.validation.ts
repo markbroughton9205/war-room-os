@@ -1,6 +1,6 @@
 /** Foundry Sovereign Build Law: pure policy, bounded request, ingestion records, usage ledger, Forge feedback, contract-grounded test authoring. Run: pnpm run validate:agent-eng-sovereign */
 import { harness } from './engtestkit'
-import { CODE_RETURN_TYPES, FORBIDDEN_ACTIONS, FRONTIER_RETURN_TYPES, FrontierLedger, MAX_FRONTIER_CONTEXT_CHARS, assistJustified, buildFrontierRequest, buildIdentityFor, checkProvenanceAndScope, classifySteps, frontierBudgetFromHistory, renderFrontierRequest, type IngestionRecord } from './sovereign'
+import { ESCALATION_TRIGGERS, helperBudgetLeft, CODE_RETURN_TYPES, FORBIDDEN_ACTIONS, FRONTIER_RETURN_TYPES, FrontierLedger, MAX_FRONTIER_CONTEXT_CHARS, assistJustified, buildFrontierRequest, buildIdentityFor, checkProvenanceAndScope, classifySteps, frontierBudgetFromHistory, renderFrontierRequest, type IngestionRecord } from './sovereign'
 import { groundTests, groundingSummary, ungroundedChallenge } from './testGrounding'
 import { makeFrontierProvider } from './frontierBridge'
 
@@ -27,7 +27,7 @@ const good = checkProvenanceAndScope(rq, { provider: 'claude', model: 'hosted:cl
 const bad = checkProvenanceAndScope(rq, { provider: 'claude', model: 'hosted:claude', text: 'x', targetFile: 'src/other.mjs' })
 const noProv = checkProvenanceAndScope(rq, { provider: '', model: '', text: 'x', targetFile: 'server.mjs' })
 check('S09_ingestion_checks_provenance_and_scope_an_out_of_scope_target_or_missing_provenance_fails', good.every((s) => s.ok) && bad.some((s) => s.stage === 'SCOPE' && !s.ok) && noProv.some((s) => s.stage === 'PROVENANCE' && !s.ok) && checkProvenanceAndScope(rq, { provider: 'c', model: 'm', text: '  ', targetFile: 'server.mjs' }).some((s) => s.stage === 'RECEIVE' && !s.ok))
-const rec = (decision: IngestionRecord['decision'], file = 'server.mjs'): IngestionRecord => ({ subtaskId: 'b:fa1', buildId: B.buildId, missionId: B.missionId, provider: 'claude', model: 'hosted:claude', at: 'now', task: 't', contextScope: { files: [file], contextChars: 10 }, returnType: 'PATCH_PROPOSAL', artifactHash: 'h', artifactPath: null, steps: [], decision, reason: '', measuredBenefit: '' })
+const rec = (decision: IngestionRecord['decision'], file = 'server.mjs'): IngestionRecord => ({ subtaskId: 'b:fa1', buildId: B.buildId, missionId: B.missionId, provider: 'claude', model: 'hosted:claude', at: 'now', task: 't', contextScope: { files: [file], contextChars: 10 }, reasonForEscalation: { trigger: 'LOCAL_HYPOTHESES_REFUTED', basis: 'b' }, localAttemptsBefore: 2, sharedFiles: [file], tokensEstimated: { in: 1, out: 1 }, cost: 'UNKNOWN', cleanOutcomeImpact: 'PENDING', returnType: 'PATCH_PROPOSAL', artifactHash: 'h', artifactPath: null, steps: [], decision, reason: '', measuredBenefit: '' })
 const L = new FrontierLedger(3); L.spend(4000, 2000); L.records.push(rec('ACCEPTED'))
 const u = L.usage(true)
 check('S10_usage_records_calls_estimated_tokens_unknown_cost_tasks_accepted_and_a_positive_clean_delta_only_when_an_accepted_contribution_ended_CLEAN', u.frontier_calls === 1 && u.frontier_tokens.in === 1000 && u.frontier_tokens.out === 500 && u.frontier_tokens.basis === 'ESTIMATED_CHARS_DIV_4' && u.frontier_cost === 'UNKNOWN' && u.accepted_contributions === 1 && u.rejected_contributions === 0 && u.clean_outcome_delta === 1 && u.frontier_tasks.length === 1 && L.assistsOn('server.mjs') === 1)
@@ -46,4 +46,10 @@ check('S14_each_generated_test_is_mapped_to_a_criterion_with_behavior_expected_r
 const ch = ungroundedChallenge(g, ACC.length)
 check('S15_the_reviewer_challenges_exactly_the_ungrounded_tests_and_is_silent_when_everything_is_grounded', !!ch && ch.includes('wording of an internal helper label') && !ch.includes('creates a session') && ungroundedChallenge(g.filter((x) => x.confidence !== 'NONE'), 3) === null && groundingSummary(g).ungrounded === 1 && groundingSummary(g).tagged === 1)
 check('S16_an_out_of_range_tag_is_not_trusted_as_grounding', groundTests('test/x.test.mjs', `import test from 'node:test'\ntest('[C9] anything at all', () => {})\n`, ACC, 'w')[0].confidence === 'NONE')
+
+const hb = (o: Partial<Parameters<typeof helperBudgetLeft>[0]> = {}) => helperBudgetLeft({ helperCalls: 0, modelCalls: 10, maxModelCalls: 60, elapsedMs: 60_000, maxRuntimeMs: 1_500_000, ...o })
+check('S40_helpers_get_a_bounded_share_of_the_assignment_and_never_the_reserve_for_the_main_build_and_final_verifier', hb().ok && !hb({ helperCalls: 15 }).ok && hb({ helperCalls: 14 }).ok && !hb({ modelCalls: 48 }).ok && hb({ modelCalls: 47 }).ok && !hb({ elapsedMs: 1_100_000 }).ok && hb({ elapsedMs: 1_000_000 }).ok)
+check('S41_a_custom_policy_can_tighten_the_reserve_and_the_reserve_never_drops_below_a_fifth_of_the_calls', !hb({ policy: { reserveCalls: 59 } }).ok && !helperBudgetLeft({ helperCalls: 0, modelCalls: 33, maxModelCalls: 40, elapsedMs: 0, maxRuntimeMs: 1000, policy: { reserveCalls: 1 } }).ok)
+const tk = Object.entries(ESCALATION_TRIGGERS)
+check('S42_the_escalation_triggers_are_defined_with_the_implemented_ones_marked_honestly', tk.length === 5 && tk.filter(([, t]) => t.implemented).map(([k]) => k).join() === 'LOCAL_HYPOTHESES_REFUTED,ACCEPTANCE_FAILED_SAME_COMPONENT' && tk.every(([, t]) => t.meaning.length > 10))
 finish()

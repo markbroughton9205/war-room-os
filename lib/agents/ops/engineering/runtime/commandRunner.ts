@@ -1,6 +1,6 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { redactText } from '@/lib/recursive-learning/ingestion/redact'
@@ -66,13 +66,17 @@ export async function startWorkspaceServer(root: string, script: string, tools: 
  * counters, temp files) never persists between runs or pollutes the workspace. Repeated runs of the same failing test therefore see the same clean start,
  * as a fresh checkout would. Output paths are mapped back to the real workspace root so evidence and file candidates stay consistent.
  */
-export async function runHermetic(root: string, argv: string[], tools: EngineeringTool[], opts: { timeoutMs?: number; env?: Record<string, string> } = {}): Promise<CommandRecord> {
+export async function runHermetic(root: string, argv: string[], tools: EngineeringTool[], opts: { timeoutMs?: number; env?: Record<string, string>; /** storage env var names (e.g. ALERTS_FILE) that default to a fresh per-run file; a test that sets the variable itself still wins */ isolateEnv?: string[] } = {}): Promise<CommandRecord> {
   try { authorizeCommand(argv, root, tools) } catch { return runCommand(root, argv, tools, opts) } // refusals are reported by runCommand itself
   const scratch = mkdtempSync(path.join(tmpdir(), 'wr-hermetic-'))
   const copy = path.join(scratch, 'ws')
   try {
     cpSync(root, copy, { recursive: true, filter: (src) => { const rel = path.relative(root, src); return !rel.split(path.sep).some((seg) => seg === 'node_modules' || seg === '.git') } })
-    const rec = await runCommand(copy, argv, tools, opts)
+    // TMPDIR is private to this run, so fixed-name temp files (os.tmpdir()/x.json) never persist between runs or leak into /tmp, and the fixture's storage variables start empty
+    const tmpDir = path.join(scratch, 'tmp'), stateDir = path.join(scratch, 'state')
+    mkdirSync(tmpDir, { recursive: true }); mkdirSync(stateDir, { recursive: true })
+    const iso: Record<string, string> = { TMPDIR: tmpDir, ...Object.fromEntries((opts.isolateEnv ?? []).map((v) => [v, path.join(stateDir, `${v}.json`)])), ...(opts.env ?? {}) }
+    const rec = await runCommand(copy, argv, tools, { ...opts, env: iso })
     const back = (t: string) => t.split(copy).join(root)
     const stdout = back(rec.stdout), stderr = back(rec.stderr)
     return { ...rec, cwd: root, stdout, stderr, outputHash: sha(stdout + '\n' + stderr) }

@@ -1,12 +1,12 @@
 /** Phase 10 continuation: guarded execution runtime. Run: pnpm run validate:agent-eng-runtime */
 import { createServer } from 'node:http'
-import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { harness, tmp } from '../engtestkit'
 import { makeNotesApp } from '../fixtures'
 import { Workspace, WorkspaceError, assertSafeWorkspaceRoot, treeHash } from './workspaceFs'
-import { CommandRefusal, authorizeCommand, runCommand, startWorkspaceServer } from './commandRunner'
+import { CommandRefusal, authorizeCommand, runCommand, runHermetic, startWorkspaceServer } from './commandRunner'
 import { OllamaModelClient, loopbackBaseUrl } from './ollamaModel'
 import type { EngineeringTool } from '../../types'
 
@@ -79,4 +79,17 @@ fake.close()
 const r3 = await new OllamaModelClient('m', 'http://127.0.0.1:1').generate({ system: 's', prompt: 'p', timeoutMs: 500 })
 check('R20_client_reports_actual_executor_real_token_counts_and_UNKNOWN_when_absent_and_honest_failures', r1.ok && r1.executor.model === 'qwen2.5-coder:14b' && r1.outputTokens === 7 && r1.promptTokens === 11 && r2.ok && r2.outputTokens === 'UNKNOWN' && !r3.ok && r3.executor !== 'UNKNOWN')
 mkdirSync(path.join(root, 'x'), { recursive: true }); void readFileSync
+// ---- test-run isolation (Round 16): fixed-name temp files and the fixture's storage variables never persist between hermetic runs or leak into the shared tmp dir
+{
+  const iso = path.join(tmp(), 'iso'); mkdirSync(path.join(iso, 'test'), { recursive: true })
+  writeFileSync(path.join(iso, 'package.json'), '{"type":"module"}')
+  const MARK = `wr-iso-${process.pid}-${Date.now()}.json`
+  writeFileSync(path.join(iso, 'test', 'iso.test.mjs'), `import test from 'node:test'\nimport assert from 'node:assert'\nimport { existsSync, writeFileSync, readFileSync } from 'node:fs'\nimport { tmpdir } from 'node:os'\nimport { join } from 'node:path'\ntest('fixed-name temp file starts absent and the storage variable starts empty', () => {\n  const f = join(tmpdir(), ${JSON.stringify(MARK)})\n  assert.strictEqual(existsSync(f), false, 'leftover temp file from an earlier run')\n  writeFileSync(f, 'dirty')\n  const s = process.env.ISO_DATA_FILE\n  assert.ok(s && s.length > 0, 'storage variable should default to a fresh per-run path')\n  assert.strictEqual(existsSync(s), false, 'leftover storage file')\n  writeFileSync(s, 'dirty')\n})\n`)
+  const a1 = await runHermetic(iso, ['node', '--test', 'test/iso.test.mjs'], ALL, { timeoutMs: 30_000, isolateEnv: ['ISO_DATA_FILE'] })
+  const a2 = await runHermetic(iso, ['node', '--test', 'test/iso.test.mjs'], ALL, { timeoutMs: 30_000, isolateEnv: ['ISO_DATA_FILE'] })
+  check('R40_a_fixed_name_temp_file_and_the_storage_variable_start_clean_on_every_hermetic_run', a1.exitCode === 0 && a2.exitCode === 0, `${a1.exitCode}/${a2.exitCode} ${a2.stdout.slice(-300)}`)
+  check('R41_hermetic_runs_do_not_leak_files_into_the_shared_tmp_dir', !existsSync(path.join(os.tmpdir(), MARK)))
+  const own = await runHermetic(iso, ['node', '--test', 'test/iso.test.mjs'], ALL, { timeoutMs: 30_000 })
+  check('R42_without_isolateEnv_the_storage_variable_is_not_invented', own.exitCode !== 0)
+}
 finish()

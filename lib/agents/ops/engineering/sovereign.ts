@@ -69,10 +69,34 @@ export function assistJustified(e: AssistEvidence): AssistDecision {
   return { justified: true, basis: `${e.refutedLocalHypotheses} distinct local hypotheses were refuted on ${e.file}${e.localEscalationAlreadyTried ? ' after local escalation' : ''}; a bounded assist is justified` }
 }
 
+/** The only evidence that may justify bounded outside help. `implemented` says whether the workflow can currently detect and act on that trigger. */
+export const ESCALATION_TRIGGERS = {
+  LOCAL_HYPOTHESES_REFUTED: { implemented: true, meaning: 'distinct local repair hypotheses on one file were acted on and refuted (the same local failure repeated after bounded repair)' },
+  ACCEPTANCE_FAILED_SAME_COMPONENT: { implemented: true, meaning: 'the independent acceptance keeps failing on the same bounded component after local repairs' },
+  LOCAL_CANDIDATES_DISAGREE: { implemented: false, meaning: 'implementation confidence is low and local alternative attempts disagree' },
+  DEPENDENCY_UNRESOLVED_LOCALLY: { implemented: false, meaning: 'a dependency/version problem remains unresolved by local research' },
+  HARD_SUBPROBLEM_FROM_REVIEW: { implemented: false, meaning: 'local review identified a hard architectural/debugging subproblem' },
+} as const
+export type EscalationTrigger = keyof typeof ESCALATION_TRIGGERS
+
+/** Helpers (competing candidates, writer fallback, frontier) share a bounded slice of the assignment and never touch the reserve held for the main build and the final verifier. */
+export type HelperPolicy = { share?: number; reserveCalls?: number; runtimeShare?: number }
+export const DEFAULT_HELPER_POLICY = { share: 0.25, reserveCalls: 8, runtimeShare: 0.7 } as const
+export function helperBudgetLeft(i: { helperCalls: number; modelCalls: number; maxModelCalls: number; elapsedMs: number; maxRuntimeMs: number; policy?: HelperPolicy }): { ok: boolean; why: string } {
+  const share = i.policy?.share ?? DEFAULT_HELPER_POLICY.share, rsv = Math.max(i.policy?.reserveCalls ?? DEFAULT_HELPER_POLICY.reserveCalls, Math.ceil(i.maxModelCalls * 0.2)), rt = i.policy?.runtimeShare ?? DEFAULT_HELPER_POLICY.runtimeShare
+  const cap = Math.ceil(i.maxModelCalls * share)
+  if (i.helperCalls >= cap) return { ok: false, why: `helper share exhausted (${i.helperCalls}/${cap} calls)` }
+  if (i.modelCalls >= i.maxModelCalls - rsv) return { ok: false, why: `the last ${rsv} model calls are reserved for the main build and the final verifier (${i.modelCalls}/${i.maxModelCalls} used)` }
+  if (i.elapsedMs >= i.maxRuntimeMs * rt) return { ok: false, why: `${Math.round(rt * 100)}% of the runtime is spent; the rest is reserved for the main build and the final verifier` }
+  return { ok: true, why: 'within the helper share' }
+}
+
 export type IngestionStage = 'RECEIVE' | 'PROVENANCE' | 'SCOPE' | 'STATIC_VALIDATION' | 'LOCAL_REVIEW' | 'INTEGRATION_CANDIDATE' | 'TESTS' | 'INDEPENDENT_VERIFICATION'
 export type IngestionStep = { stage: IngestionStage; ok: boolean; note: string }
 export type IngestionRecord = {
   subtaskId: string; buildId: string; missionId: string; provider: string; model: string; at: string; task: string; contextScope: { files: string[]; contextChars: number }
+  /** governance: why Foundry escalated, how much local effort preceded it, what was shared and what it cost */
+  reasonForEscalation: { trigger: EscalationTrigger; basis: string }; localAttemptsBefore: number; sharedFiles: string[]; tokensEstimated: { in: number; out: number }; cost: 'UNKNOWN'; cleanOutcomeImpact: 'PENDING' | 'CLEAN_AFTER_ACCEPTED_ASSIST' | 'ASSIST_REJECTED' | 'NOT_CLEAN'
   returnType: FrontierReturnType; artifactHash: string; artifactPath: string | null; steps: IngestionStep[]
   decision: 'ACCEPTED' | 'REJECTED' | 'PENDING'; reason: string; measuredBenefit: string
 }
@@ -92,17 +116,20 @@ export function checkProvenanceAndScope(req: FrontierRequest, r: { provider: str
 export type FrontierUsage = {
   frontier_calls: number; frontier_tokens: { in: number; out: number; basis: 'ESTIMATED_CHARS_DIV_4' }; frontier_cost: 'UNKNOWN'; frontier_tasks: string[]
   accepted_contributions: number; rejected_contributions: number; clean_outcome_delta: number | 'UNKNOWN'; unavailable: string | null
+  /** escalation criteria that were met but could not be served (no provider / budget): evidence of how often local-only was insufficient */
+  escalation_needed_unmet: { trigger: EscalationTrigger; file: string; basis: string; reason: string }[]
 }
 export class FrontierLedger {
   readonly records: IngestionRecord[] = []
   calls = 0; charsIn = 0; charsOut = 0; unavailable: string | null = null
+  readonly unmet: FrontierUsage['escalation_needed_unmet'] = []
   constructor(readonly maxCalls: number) {}
   spend(inChars: number, outChars: number) { this.calls += 1; this.charsIn += inChars; this.charsOut += outChars }
   assistsOn(file: string) { return this.records.filter((r) => r.contextScope.files.includes(file)).length }
   /** clean_outcome_delta: +1 when a frontier contribution was accepted and the build finished CLEAN; 0 when assist changed nothing; -1 when assists were rejected and cost a call. UNKNOWN without a verdict. */
   usage(finalClean: boolean | null): FrontierUsage {
     const acc = this.records.filter((r) => r.decision === 'ACCEPTED').length, rej = this.records.filter((r) => r.decision === 'REJECTED').length
-    return { frontier_calls: this.calls, frontier_tokens: { in: Math.round(this.charsIn / 4), out: Math.round(this.charsOut / 4), basis: 'ESTIMATED_CHARS_DIV_4' }, frontier_cost: 'UNKNOWN', frontier_tasks: this.records.map((r) => `${r.subtaskId}:${r.task}`), accepted_contributions: acc, rejected_contributions: rej, clean_outcome_delta: finalClean === null || !this.calls ? 'UNKNOWN' : acc > 0 && finalClean ? 1 : acc === 0 ? (rej > 0 ? -1 : 0) : 0, unavailable: this.unavailable }
+    return { frontier_calls: this.calls, frontier_tokens: { in: Math.round(this.charsIn / 4), out: Math.round(this.charsOut / 4), basis: 'ESTIMATED_CHARS_DIV_4' }, frontier_cost: 'UNKNOWN', frontier_tasks: this.records.map((r) => `${r.subtaskId}:${r.task}`), accepted_contributions: acc, rejected_contributions: rej, clean_outcome_delta: finalClean === null || !this.calls ? 'UNKNOWN' : acc > 0 && finalClean ? 1 : acc === 0 ? (rej > 0 ? -1 : 0) : 0, unavailable: this.unavailable, escalation_needed_unmet: this.unmet }
   }
 }
 
