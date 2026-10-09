@@ -26,7 +26,7 @@ export function contractOverlap(testText: string, acceptance: string[]): { overl
 }
 
 type Found = { name: string; start: number; end: number; text: string }
-function testCalls(rel: string, text: string): Found[] {
+export function testCalls(rel: string, text: string): Found[] {
   const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
   const out: Found[] = []
   const visit = (n: ts.Node) => {

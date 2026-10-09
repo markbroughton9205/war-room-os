@@ -16,6 +16,8 @@ import { AgentRegistry } from '../registry'
 import { parseEditReply } from './prompts'
 import { correctContractAssertions } from './testContract'
 import { completionClass } from './completionClass'
+import type { FrontierProvider } from './frontierBridge'
+import { existsSync, readFileSync } from 'node:fs'
 import type { ModelClient, ModelResult } from './runtime/ports'
 import { captureLessons, lessonsFor, measureLessonEffect, learningReport, classifyFailure } from './lessons'
 
@@ -598,6 +600,77 @@ void deriveAssignments; void AgentRegistry
   const unseen = correctContractAssertions('test/c.test.mjs', T1, F(lineOf(T1), '500', '999'), REQ.acceptance)
   check('N80_unit_a_failure_report_that_does_not_carry_the_literal_is_refused', !unseen || unseen.corrections.length === 0)
   check('N81_the_four_completion_classes_stay_separate_and_a_quarantined_completion_is_never_CLEAN', completionClass({ status: 'COMPLETED', quarantinedTests: 0 }, true) === 'CLEAN' && completionClass({ status: 'COMPLETED', quarantinedTests: 2 }, true) === 'WITH_QUARANTINE' && completionClass({ status: 'COMPLETED', quarantinedTests: 0 }, false) === 'UNVERIFIED' && completionClass({ status: 'COMPLETED', quarantinedTests: 0 }, null) === 'UNVERIFIED' && completionClass({ status: 'FAILED' }, true) === 'FAILED' && completionClass({ status: 'COMPLETED', quarantinedTests: 3 }, false) === 'UNVERIFIED')
+}
+// ---- 17. Sovereign Build Law in the workflow: local-first, bounded + isolated frontier assist, Foundry ingestion, independent test writer, competing candidates
+{
+  const buggyServer = CHAT_REFERENCE['server.mjs'].replaceAll("send(res, 404, { error: 'session not found' })", "send(res, 400, { error: 'session not found' })")
+  const noop = (c: ScriptCtx) => { const m = /CURRENT CONTENT:\n```\n([\s\S]*?)\n```/.exec(c.prompt); return m ? fenced(m[1]) : null }
+  const filePhase = (c: ScriptCtx) => (c.kind === 'file' && c.path === 'server.mjs' ? fenced(buggyServer) : good(c))
+  const localOnly = () => new ScriptedModel((c) => (c.kind === 'repair' ? noop(c) : filePhase(c)))
+  // a LABELLED TEST DOUBLE standing in for a hosted provider; it can only return text (the bridge gives it no workspace access)
+  const fakeProvider = (reply: (prompt: string) => string | null, available = true) => { const asked: string[] = []; const p: FrontierProvider = { family: 'claude', model: 'hosted:claude', available: () => available, ask: async (i) => { asked.push(i.prompt); const t = reply(i.prompt); return t === null ? { ok: false, detail: 'no reply' } : { ok: true, text: t } } }; return { p, asked } }
+  const reviewDir = path.join(tmp(), 'frontier-review')
+  const x = makeWorld({ limits: { maxRetries: 5 } }); const ev: string[] = []
+  const fp = fakeProvider(() => fenced(CHAT_REFERENCE['server.mjs']))
+  const r = await runFeatureWorkflow(deps(x, localOnly(), { frontier: { provider: fp.p, reviewDir }, onEvent: (e) => ev.push(`${e.kind} ${e.detail}`) }), REQ)
+  const rec = r.frontier!.records[0]
+  check('S20_after_two_local_hypotheses_are_refuted_a_bounded_frontier_assist_is_requested_for_the_one_file_and_foundry_integrates_it', r.status === 'COMPLETED' && fp.asked.length === 1 && !!rec && rec.decision === 'ACCEPTED' && rec.contextScope.files.join() === 'server.mjs' && ev.some((e) => e.startsWith('FRONTIER_ASSIST_REQUEST')) && ev.some((e) => /^FRONTIER_ASSIST_RESULT .*ACCEPTED/.test(e)), `${r.status} ${r.reason} ${JSON.stringify(rec?.steps)} asked=${fp.asked.length}`)
+  check('S21_the_request_is_bounded_it_names_the_mission_build_subtask_allowed_file_forbidden_actions_and_is_not_the_whole_project', fp.asked[0].includes(r.build!.missionId) && fp.asked[0].includes(r.build!.buildId) && fp.asked[0].includes('ALLOWED FILES (you may only return content for these): server.mjs') && fp.asked[0].includes('FORBIDDEN') && fp.asked[0].length < 12_000 && !fp.asked[0].includes(x.ws.read('public/app.js').slice(0, 300)) && !fp.asked[0].includes(x.ws.read('public/index.html').slice(0, 300)), `len=${fp.asked[0].length} app.js=${fp.asked[0].includes('public/app.js')} mission=${fp.asked[0].includes(r.build!.missionId)} build=${fp.asked[0].includes(r.build!.buildId)} allowed=${fp.asked[0].includes('ALLOWED FILES (you may only return content for these): server.mjs')}`)
+  check('S22_the_frontier_reply_lands_in_the_isolated_review_area_outside_the_workspace_with_provenance_and_hash', !!rec.artifactPath && existsSync(rec.artifactPath) && !rec.artifactPath.startsWith(x.root) && JSON.parse(readFileSync(rec.artifactPath, 'utf8')).provider === 'claude' && rec.artifactHash.length === 16 && rec.provider === 'claude' && rec.model === 'hosted:claude' && rec.steps.map((st) => st.stage).join() === 'RECEIVE,PROVENANCE,SCOPE,STATIC_VALIDATION,LOCAL_REVIEW,INTEGRATION_CANDIDATE,TESTS,INDEPENDENT_VERIFICATION' && rec.steps.every((st) => st.ok))
+  check('S23_acceptance_is_still_decided_by_foundrys_own_independent_verification_not_by_the_frontier', (await x.verification.run()).exitCode === 0 && r.frontier!.usage.accepted_contributions === 1 && r.frontier!.usage.frontier_calls === 1 && r.frontier!.usage.rejected_contributions === 0)
+  check('S24_a_clean_build_that_integrated_a_frontier_contribution_is_reported_as_CLEAN_WITH_FRONTIER_ASSIST_distinct_from_local_only', r.completionClass === 'CLEAN' && r.cleanKind === 'CLEAN_WITH_FRONTIER_ASSIST' && r.frontier!.usage.clean_outcome_delta === 1 && r.subtasks!.some((st) => st.kind === 'FRONTIER_ASSIST_SUBTASK' && st.status === 'ACCEPTED' && st.owner === 'frontier:claude') && r.subtasks!.filter((st) => st.kind === 'MAIN_BUILD').length === 1)
+  // local-first: when local resources fix it, the frontier is never asked
+  const y = makeWorld({ limits: { maxRetries: 5 } })
+  const fp2 = fakeProvider(() => fenced(CHAT_REFERENCE['server.mjs']))
+  const fixesLocally = new ScriptedModel((c) => (c.kind === 'repair' ? (c.path === 'server.mjs' ? fenced(CHAT_REFERENCE['server.mjs']) : noop(c)) : filePhase(c)))
+  const r2 = await runFeatureWorkflow(deps(y, fixesLocally, { frontier: { provider: fp2.p, reviewDir } }), REQ)
+  check('S25_local_first_when_a_local_repair_succeeds_the_frontier_is_never_consulted_and_the_clean_build_is_CLEAN_LOCAL_ONLY', r2.status === 'COMPLETED' && fp2.asked.length === 0 && r2.frontier!.usage.frontier_calls === 0 && r2.cleanKind === 'CLEAN_LOCAL_ONLY', `${r2.status} asked=${fp2.asked.length} ${r2.cleanKind}`)
+  // an unhelpful frontier patch is rejected and reverted
+  const z = makeWorld({ limits: { maxRetries: 5 } }); const evz: string[] = []
+  const fp3 = fakeProvider(() => fenced(buggyServer))
+  const r3 = await runFeatureWorkflow(deps(z, localOnly(), { frontier: { provider: fp3.p, reviewDir }, onEvent: (e) => evz.push(`${e.kind} ${e.detail}`) }), REQ)
+  const rec3 = r3.frontier!.records[0]
+  check('S26_a_frontier_patch_with_no_measurable_benefit_is_rejected_and_the_file_is_restored_and_the_build_is_not_clean', !!rec3 && rec3.decision === 'REJECTED' && rec3.measuredBenefit.length > 0 && r3.frontier!.usage.rejected_contributions === 1 && r3.cleanKind === null && r3.completionClass !== 'CLEAN' && z.ws.read('server.mjs') === buggyServer, `${r3.status} ${rec3?.decision} ${rec3?.measuredBenefit}`)
+  // unavailable provider: honest, local-only
+  const u = makeWorld({ limits: { maxRetries: 5 } }); const evu: string[] = []
+  const fp4 = fakeProvider(() => fenced(CHAT_REFERENCE['server.mjs']), false)
+  const r4 = await runFeatureWorkflow(deps(u, localOnly(), { frontier: { provider: fp4.p, reviewDir }, onEvent: (e) => evu.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('S27_an_unconfigured_provider_is_reported_FRONTIER_UNAVAILABLE_and_is_never_called_or_faked', fp4.asked.length === 0 && r4.frontier!.usage.unavailable !== null && /FRONTIER_UNAVAILABLE/.test(r4.frontier!.usage.unavailable!) && evu.some((e) => e.startsWith('FRONTIER_UNAVAILABLE')) && r4.frontier!.usage.frontier_calls === 0 && r4.status !== 'COMPLETED')
+  const bz = makeWorld({ limits: { maxRetries: 5 } })
+  const fp5 = fakeProvider(() => fenced(CHAT_REFERENCE['server.mjs']))
+  const r5 = await runFeatureWorkflow(deps(bz, localOnly(), { frontier: { provider: fp5.p, reviewDir, maxCalls: 0 } }), REQ)
+  check('S28_a_zero_frontier_budget_forces_a_local_only_build', fp5.asked.length === 0 && r5.frontier!.usage.frontier_calls === 0 && r5.status !== 'COMPLETED')
+
+  // independent test writer: the builder never authors the test file; the writer authors only it
+  const w = makeWorld(); const evw: string[] = []
+  const builder = new ScriptedModel(good), writer = new ScriptedModel(good)
+  const r6 = await runFeatureWorkflow(deps(w, builder, { testWriter: { label: 'writer-model', model: writer }, onEvent: (e) => evw.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('S29_the_independent_test_writer_authors_only_the_tests_layer_files_and_the_builder_never_does', r6.status === 'COMPLETED' && builder.calls.filter((c) => c.kind === 'file').every((c) => !c.path?.startsWith('test/')) && writer.calls.length > 0 && writer.calls.every((c) => c.path?.startsWith('test/')) && r6.testAuthoring!.writer === 'writer-model', `${r6.status} builderTests=${builder.calls.filter((c) => c.path?.startsWith('test/')).length} writer=${writer.calls.map((c) => c.path).join()}`)
+  // contract-grounding challenge before execution
+  const g = makeWorld(); const evg: string[] = []
+  const ungrounded = `import test from 'node:test'\nimport assert from 'node:assert'\ntest('wording of an internal helper label', () => { assert.strictEqual(1, 1) })\n`
+  let asks = 0
+  const writer2 = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'test/chatService.test.mjs') { asks += 1; return /TEST REVIEWER/.test(c.prompt) ? fenced(SOLUTION['test/chatService.test.mjs'].replace(/^test\('/gm, "test('[C1] ")) : fenced(ungrounded) } return good(c) })
+  const r7 = await runFeatureWorkflow(deps(g, new ScriptedModel(good), { testWriter: { label: 'writer-2', model: writer2 }, onEvent: (e) => evg.push(`${e.kind} ${e.detail}`) }), REQ)
+  const grounds = r7.testGrounding!['test/chatService.test.mjs'] ?? []
+  check('S30_a_test_that_maps_to_no_criterion_is_challenged_before_it_runs_and_the_rewrite_replaces_it_with_no_quarantine', r7.status === 'COMPLETED' && asks === 2 && evg.some((e) => e.startsWith('REJECT') && e.includes('TEST REVIEWER')) && !(r7.quarantinedTests ?? 0) && !grounds.some((x) => x.name.includes('wording of an internal helper label')), `${r7.status} asks=${asks} q=${r7.quarantinedTests} ${evg.filter((e) => /REJECT/.test(e)).join('|').slice(0, 200)}`)
+  check('S31_every_generated_test_has_a_grounding_record_with_source_and_confidence', grounds.length > 0 && grounds.every((x) => x.source === 'writer-2' && ['TAGGED', 'INFERRED', 'NONE'].includes(x.confidence) && x.behavior.length > 0))
+
+  // competing local candidates: the invented-expectation test is replaced by a passing competing candidate BEFORE any quarantine
+  const mk = (extra: string) => `import test from 'node:test'\nimport assert from 'node:assert'\nimport { describeStore } from '../src/messageStore.mjs'\ntest('sessions round-trip through the data file', () => { assert.strictEqual(describeStore(), 'store') })\n${extra}`
+  const impl = SOLUTION['src/messageStore.mjs'] + "\nexport function describeStore() { return 'store' }\n"
+  const invented = mk("test('wording of the store label', () => { assert.strictEqual(describeStore(), 'STORE (primary, v2)') })\n")
+  const sane = mk("test('the store label is a string', () => { assert.strictEqual(typeof describeStore(), 'string') })\n")
+  const mkBuilder = () => new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'src/messageStore.mjs') return fenced(impl); if (c.kind === 'file' && c.path === 'test/messageStore.test.mjs') return fenced(invented); if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'the test expects another string', file: 'test/messageStore.test.mjs', differs: 'first attempt' }); if (c.kind === 'repair') return fenced(invented); return good(c) })
+  const c1 = makeWorld({ limits: { maxRetries: 3 } }); const evc: string[] = []
+  const cand = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(sane) : null))
+  const r8 = await runFeatureWorkflow(deps(c1, mkBuilder(), { testCandidates: [{ label: 'cand-a', model: cand }], onEvent: (e) => evc.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('S32_a_passing_competing_local_candidate_replaces_the_failing_test_file_with_no_quarantine_and_the_build_is_CLEAN_LOCAL_ONLY', r8.status === 'COMPLETED' && !(r8.quarantinedTests ?? 0) && c1.ws.read('test/messageStore.test.mjs') === sane && r8.testAuthoring!.candidates.some((k) => k.label === 'cand-a' && k.passed && k.kept) && evc.some((e) => e.startsWith('TEST_CANDIDATE_CHOSEN')) && r8.completionClass === 'CLEAN' && r8.cleanKind === 'CLEAN_LOCAL_ONLY', `${r8.status} ${r8.reason} q=${r8.quarantinedTests} ${JSON.stringify(r8.testAuthoring)}`)
+  const c2 = makeWorld({ limits: { maxRetries: 3 } })
+  const candBad = new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(invented) : null))
+  const r9 = await runFeatureWorkflow(deps(c2, mkBuilder(), { testCandidates: [{ label: 'cand-bad', model: candBad }] }), REQ)
+  check('S33_when_no_competing_candidate_passes_the_existing_quarantine_still_applies_and_the_build_is_WITH_QUARANTINE_never_CLEAN', r9.status === 'COMPLETED' && (r9.quarantinedTests ?? 0) >= 1 && r9.completionClass === 'WITH_QUARANTINE' && r9.cleanKind === null && r9.testAuthoring!.candidates.every((k) => !k.passed), `${r9.status} ${r9.completionClass} q=${r9.quarantinedTests}`)
+  check('S34_acceptance_criteria_are_untouched_by_candidates_assist_or_grounding', [r, r6, r7, r8].every((rr, i) => rr.status === 'COMPLETED' && rr.build!.assignmentId.length > 0 && i >= 0) && JSON.stringify(latestCheckpoint(c1.log, c1.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance) && JSON.stringify(latestCheckpoint(x.log, x.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance))
 }
 
 finish()

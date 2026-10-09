@@ -63,6 +63,10 @@ export type BenchmarkRecord = {
   failureClass?: string
   editRejections?: number
   quarantinedTests?: number
+  /** Sovereign Build Law: frontier assist usage for this build (undefined = local-only record from before the law) and the CLEAN split */
+  frontier?: { frontier_calls: number; accepted_contributions: number; rejected_contributions: number; frontier_tasks: string[] }
+  cleanKind?: 'CLEAN_LOCAL_ONLY' | 'CLEAN_WITH_FRONTIER_ASSIST' | null
+  completionClass?: 'CLEAN' | 'WITH_QUARANTINE' | 'UNVERIFIED' | 'FAILED'
 }
 export type ForgeRecord =
   | ({ type: 'model'; rid: string; at: string } & ModelEntry)
