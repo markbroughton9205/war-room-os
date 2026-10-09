@@ -14,6 +14,9 @@ import { runCommand } from './runtime/commandRunner'
 import type { EngineeringTool } from '../types'
 import { AgentRegistry } from '../registry'
 import { parseEditReply } from './prompts'
+import { correctContractAssertions } from './testContract'
+import { completionClass } from './completionClass'
+import type { ModelClient, ModelResult } from './runtime/ports'
 import { captureLessons, lessonsFor, measureLessonEffect, learningReport, classifyFailure } from './lessons'
 
 const { check, finish } = harness('AGENT_ENG_WORKFLOW_VALIDATION')
@@ -529,6 +532,72 @@ void deriveAssignments; void AgentRegistry
   check('N63_a_prefix_first_server_is_fixed_by_a_structural_route_move_with_one_model_call_for_that_file', at > 0 && r.status === 'COMPLETED' && m.calls.filter((c) => c.kind === 'file' && c.path === 'server.mjs').length === 1 && (r.routeEdits ?? []).length === 1 && r.routeEdits![0].mode === 'ENGINE_DETERMINISTIC_REPAIR' && r.routeEdits![0].ops[0].op === 'MOVE_ROUTE_BEFORE' && ev.some((e) => e.startsWith('ROUTE_EDIT')), `${r.status} ${r.reason} calls=${m.calls.filter((c) => c.path === 'server.mjs').length} edits=${(r.routeEdits ?? []).length}`)
   check('N64_the_structural_edit_is_recorded_with_before_and_after_spans_and_the_original_finding', !!r.routeEdits?.[0] && /route conflict/.test(r.routeEdits[0].finding) && r.routeEdits[0].spanBefore !== r.routeEdits[0].spanAfter && /all static gates pass|remaining gate problem/.test(r.routeEdits[0].resultAfter))
   check('N65_the_handler_body_the_model_wrote_survives_the_structural_move_unchanged', x.ws.read('server.mjs').includes("return send(res, 404, { error: 'not found' })") && x.ws.read('server.mjs').split('\n').sort().join('\n') === prefixFirst.split('\n').sort().join('\n'))
+}
+
+// ---- 15. bounded model-call timeout retry (no lost state, no duplicate side effects, recorded evidence)
+{
+  const TIMEOUT: ModelResult = { ok: false, detail: 'timeout or cancelled', executor: 'UNKNOWN' }
+  const flaky = (inner: ScriptedModel, fail: (path: string | null, seen: number) => boolean) => { const seen = new Map<string, number>(); const prompts: string[] = []; const model: ModelClient = { async generate(input) { const p = /FILE TO (?:EDIT|CREATE): (\S+)/.exec(input.prompt)?.[1] ?? null; const n = (seen.get(String(p)) ?? 0) + 1; seen.set(String(p), n); if (fail(p, n)) { prompts.push(input.prompt); return TIMEOUT } return inner.generate(input) } }; return { model, prompts, seen } }
+  const base = makeWorld(); const rb = await runFeatureWorkflow(deps(base, new ScriptedModel(good)), REQ)
+  const x = makeWorld(); const ev: string[] = []
+  const inner = new ScriptedModel(good); const f = flaky(inner, (p, n) => p === 'server.mjs' && n <= 2)
+  const r = await runFeatureWorkflow({ ...deps(x, inner), model: f.model, onEvent: (e) => ev.push(`${e.kind} ${e.detail}`) }, REQ)
+  const cpBase = latestCheckpoint(base.log, base.asg.id)!, cpX = latestCheckpoint(x.log, x.asg.id)!
+  check('N66_a_timed_out_model_call_is_retried_and_the_workflow_completes_instead_of_failing', r.status === 'COMPLETED' && r.completionClass === 'CLEAN' && (r.modelTimeouts ?? []).map((t) => t.outcome).join(',') === 'RETRIED,RETRIED,RECOVERED', `${r.status} ${r.reason} ${JSON.stringify(r.modelTimeouts?.map((t) => t.outcome))}`)
+  check('N67_a_retry_preserves_prior_state_and_duplicates_no_side_effect_same_files_same_effects_each_done_once_and_the_retry_prompt_is_the_one_that_timed_out', r.modelCalls === rb.modelCalls + 2 && JSON.stringify([...r.filesChanged].sort()) === JSON.stringify([...rb.filesChanged].sort()) && cpX.state.effectsDone.length === cpBase.state.effectsDone.length && new Set(cpX.state.effectsDone).size === cpX.state.effectsDone.length && inner.calls.filter((c) => c.path === 'server.mjs')[0].prompt === f.prompts[0] && Object.entries(base.ws.snapshot()).every(([k, h]) => x.ws.snapshot()[k] === h), `${r.modelCalls} vs ${rb.modelCalls}`)
+  check('N68_timeout_and_retry_evidence_is_recorded_per_attempt_and_emitted_as_events_never_silent', ev.filter((e) => e.startsWith('MODEL_TIMEOUT_RETRY')).length === 2 && ev.some((e) => e.startsWith('MODEL_TIMEOUT_RECOVERED')) && (r.modelTimeouts ?? []).every((t) => t.purpose === 'server.mjs' && t.waitedMs >= 0))
+  const y = makeWorld(); const ev2: string[] = []
+  const inner2 = new ScriptedModel(good); const f2 = flaky(inner2, (p) => p === 'server.mjs')
+  const r2 = await runFeatureWorkflow({ ...deps(y, inner2), model: f2.model, onEvent: (e) => ev2.push(`${e.kind} ${e.detail}`) }, REQ)
+  const cp2 = latestCheckpoint(y.log, y.asg.id)!
+  check('N69_retry_exhaustion_fails_honestly_after_exactly_three_attempts_with_the_exhaustion_recorded', r2.status === 'FAILED' && f2.seen.get('server.mjs') === 3 && /retries exhausted after 3 attempts/.test(r2.reason) && (r2.modelTimeouts ?? []).map((t) => t.outcome).join(',') === 'RETRIED,RETRIED,EXHAUSTED' && ev2.some((e) => e.startsWith('MODEL_TIMEOUT_EXHAUSTED')) && r2.completionClass === 'FAILED', `${r2.status} ${r2.reason} seen=${f2.seen.get('server.mjs')}`)
+  check('N70_after_exhaustion_the_work_already_done_is_preserved_in_the_checkpoint_not_discarded', cp2.state.fileChanges.length >= 1 && cp2.state.steps.some((st) => st.status === 'DONE') && cp2.state.steps.some((st) => st.status === 'FAILED') && r2.filesChanged.length >= 1)
+  const z = makeWorld(); const r3 = await runFeatureWorkflow({ ...deps(z, new ScriptedModel(good)), model: { async generate() { return { ok: false, detail: 'connection refused', executor: 'UNKNOWN' } as ModelResult } } }, REQ)
+  check('N71_a_non_timeout_model_failure_is_not_retried', r3.status === 'FAILED' && (r3.modelTimeouts ?? []).length === 0 && r3.modelCalls === 1, `${r3.status} calls=${r3.modelCalls}`)
+}
+
+// ---- 16. deterministic contract correction before quarantine; ambiguity fails closed; acceptance is never weakened
+{
+  // criterion 2 of CHAT_FEATURE names exactly one status (404); criterion 1 names 201 and 400
+  const caseOf = (name: string, expr: string, code: number) => `import test from 'node:test'\nimport assert from 'node:assert'\nimport { mkdtempSync } from 'node:fs'\nimport { tmpdir } from 'node:os'\nimport path from 'node:path'\nprocess.env.CHAT_DATA_FILE = path.join(mkdtempSync(path.join(tmpdir(), 'chat-')), 'sessions.json')\nconst { createSession, listSessions, getSession } = await import('../src/chatService.mjs')\ntest('${name}', () => {\n  const s = createSession('alpha')\n  assert.ok(listSessions().some((x) => x.id === s.id))\n  const res = { status: ${expr} }\n  assert.strictEqual(res.status, ${code})\n})\ntest('creates and lists sessions', () => {\n  const s = createSession('beta')\n  assert.ok(listSessions().some((x) => x.id === s.id))\n})\n`
+  const unknownName = 'GET sessions lists one session with its messages and unknown ids return not found'
+  const unknownExpr = "(getSession('nope') ? 200 : 404)"
+  const run = async (testBody: string) => {
+    const x = makeWorld({ limits: { maxRetries: 3 } }); const ev: string[] = []
+    const m = new ScriptedModel((c) => {
+      if (c.kind === 'file' && c.path === 'test/chatService.test.mjs') return fenced(testBody)
+      if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'the status expectation is wrong', file: 'test/chatService.test.mjs', differs: 'first attempt' })
+      if (c.kind === 'repair') return fenced(testBody) // the model insists
+      return good(c)
+    })
+    const r = await runFeatureWorkflow(deps(x, m, { onEvent: (e) => ev.push(`${e.kind} ${e.detail}`) }), REQ)
+    return { x, r, ev }
+  }
+  const bad = caseOf(unknownName, unknownExpr, 410)
+  const a = await run(bad)
+  const fixed = a.x.ws.read('test/chatService.test.mjs')
+  check('N72_a_status_assertion_that_clearly_contradicts_the_acceptance_contract_is_corrected_deterministically_not_quarantined', a.r.status === 'COMPLETED' && a.r.correctedTests === 1 && !(a.r.quarantinedTests ?? 0) && a.r.contractCorrections![0].from === 410 && a.r.contractCorrections![0].to === 404 && a.r.contractCorrections![0].criterion === 2 && a.ev.some((e) => e.startsWith('CONTRACT_CORRECTION ')) && !fixed.includes('QUARANTINED'), `${a.r.status} ${a.r.reason} ${JSON.stringify(a.r.contractCorrections)} q=${a.r.quarantinedTests} ${a.ev.filter((e) => /CORRECT|QUARANT/.test(e)).join('|')}`)
+  check('N73_a_contract_corrected_completion_is_CLEAN_and_the_correction_stays_visible_separately_from_quarantine', a.r.completionClass === 'CLEAN' && (a.r.contractCorrections ?? []).length === 1)
+  check('N74_no_silent_weakening_the_correction_changes_one_literal_only_and_assertion_and_test_counts_and_the_acceptance_list_are_unchanged', fixed === bad.replace('res.status, 410', 'res.status, 404') && (fixed.match(/assert\./g) ?? []).length === (bad.match(/assert\./g) ?? []).length && (fixed.match(/^test\(/gm) ?? []).length === (bad.match(/^test\(/gm) ?? []).length && JSON.stringify(latestCheckpoint(a.x.log, a.x.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance))
+  // ambiguous: 201 is a status the contract itself names (criterion 1), so a test expecting 201 where 404 was observed is NOT auto-fixed
+  const amb = caseOf(unknownName, unknownExpr, 201)
+  const b = await run(amb)
+  check('N75_a_test_whose_expected_status_is_named_by_the_contract_is_ambiguous_and_is_not_auto_fixed_it_falls_through_to_quarantine', b.r.status === 'COMPLETED' && !(b.r.correctedTests ?? 0) && b.r.quarantinedTests === 1 && b.r.completionClass === 'WITH_QUARANTINE' && b.ev.some((e) => e.startsWith('CONTRACT_CORRECTION_REFUSED')) && /QUARANTINED/.test(b.x.ws.read('test/chatService.test.mjs')) && !b.x.ws.read('test/chatService.test.mjs').includes('res.status, 404'), `${b.r.status} ${b.r.reason} c=${b.r.correctedTests} q=${b.r.quarantinedTests} ${b.r.completionClass}`)
+  const F = (line: number, actual: string, expected: string) => [{ line, actual, expected }]
+  const T1 = caseOf(unknownName, unknownExpr, 410)
+  const lineOf = (t: string) => t.split('\n').findIndex((l) => l.includes('res.status,')) + 1
+  const ok = correctContractAssertions('test/c.test.mjs', T1, F(lineOf(T1), '404', '410'), REQ.acceptance)
+  check('N76_unit_clear_contradiction_is_corrected', !!ok && ok.corrections.length === 1 && ok.content.includes('res.status, 404'))
+  const twoCodes = correctContractAssertions('test/c.test.mjs', caseOf('POST sessions with a name creates a session and rejects an empty name', '(400)', 410), F(lineOf(caseOf('POST sessions with a name creates a session and rejects an empty name', '(400)', 410)), '400', '410'), REQ.acceptance)
+  check('N77_unit_a_criterion_naming_two_statuses_is_ambiguous_and_refused', !twoCodes || (twoCodes.corrections.length === 0 && twoCodes.refused.some((x) => /exactly the observed status/.test(x))))
+  const nonStatus = "import test from 'node:test'\nimport assert from 'node:assert'\ntest('GET sessions lists one session with its messages and unknown ids return not found', () => {\n  const res = { body: 'x' }\n  assert.strictEqual(res.body, 'y')\n})\n"
+  const ns = correctContractAssertions('test/c.test.mjs', nonStatus, F(5, 'x', 'y'), REQ.acceptance)
+  check('N78_unit_a_non_status_assertion_is_never_touched', !ns || (ns.corrections.length === 0 && ns.content === nonStatus))
+  const unmapped = correctContractAssertions('test/c.test.mjs', caseOf('zebra quartz', unknownExpr, 410), F(lineOf(caseOf('zebra quartz', unknownExpr, 410)), '404', '410'), REQ.acceptance)
+  check('N79_unit_a_test_that_maps_to_no_single_criterion_is_refused', !unmapped || (unmapped.corrections.length === 0 && unmapped.refused.some((x) => /exactly one acceptance criterion/.test(x))))
+  const unseen = correctContractAssertions('test/c.test.mjs', T1, F(lineOf(T1), '500', '999'), REQ.acceptance)
+  check('N80_unit_a_failure_report_that_does_not_carry_the_literal_is_refused', !unseen || unseen.corrections.length === 0)
+  check('N81_the_four_completion_classes_stay_separate_and_a_quarantined_completion_is_never_CLEAN', completionClass({ status: 'COMPLETED', quarantinedTests: 0 }, true) === 'CLEAN' && completionClass({ status: 'COMPLETED', quarantinedTests: 2 }, true) === 'WITH_QUARANTINE' && completionClass({ status: 'COMPLETED', quarantinedTests: 0 }, false) === 'UNVERIFIED' && completionClass({ status: 'COMPLETED', quarantinedTests: 0 }, null) === 'UNVERIFIED' && completionClass({ status: 'FAILED' }, true) === 'FAILED' && completionClass({ status: 'COMPLETED', quarantinedTests: 3 }, false) === 'UNVERIFIED')
 }
 
 finish()

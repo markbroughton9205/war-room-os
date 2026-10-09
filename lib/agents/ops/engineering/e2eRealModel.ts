@@ -16,6 +16,7 @@ import { TASK_FEATURE, TASK_VERIFY_SCRIPT, makeTaskApp } from './taskFixture'
 import { ALERT_FEATURE, ALERT_VERIFY_SCRIPT, makeAlertApp } from './alertFixture'
 import { TICKET_FEATURE, TICKET_VERIFY_SCRIPT, makeTicketApp } from './ticketFixture'
 import { classifyRun } from '../../forge/failureClass'
+import { completionClass } from './completionClass'
 import { execFileSync } from 'node:child_process'
 import { latestCheckpoint } from './continuity'
 import { deriveLedger, debugSummary } from './debugLedger'
@@ -94,6 +95,7 @@ const finalVerify = await verification.run()
 const lessonEffect = lessonStoreDir ? measureLessonEffect(log, assignment.id) : null
 const report = {
   stamp, fixture: FX.id, engineSha, model: modelName, workspace: wsRoot, assignmentId: assignment.id, wallMs: Date.now() - t0,
+  completionClass: completionClass(result, finalVerify.exitCode === 0), // CLEAN | WITH_QUARANTINE | UNVERIFIED | FAILED; the independent verifier run now decides UNVERIFIED
   result, assignmentState: v.state, outcome: v.outcome, stopReason: v.stopReason ?? null,
   independentVerificationNow: { exitCode: finalVerify.exitCode, summary: finalVerify.stdout.split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ') },
   checkpoint: latestCheckpoint(log, assignment.id)?.state.steps.map((s) => `${s.id} ${s.status} ${s.files[0] ?? ''}${s.note ? ' — ' + s.note : ''}`),

@@ -10,7 +10,8 @@ import { runCommand, runHermetic } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 import { collisionFacts, isCollisionProblem } from './collision'
-import { quarantineTests, quarantineAssertions } from './testContract'
+import { quarantineTests, quarantineAssertions, correctContractAssertions, type ContractCorrection } from './testContract'
+import { completionClass, type CompletionClass } from './completionClass'
 import { repairRouteOrder, statusDiagnosis } from './routeEdit'
 import type { RouteEditMode, RouteOp } from './routeEdit'
 import { undefinedNames, routeFindings, routeTable, routeRegion, contractRouteProblems, statusReachability, syntaxProblems, legacyStateDrift, domIds, missingDomIds } from './staticGates'
@@ -42,11 +43,20 @@ export type WorkflowDeps = {
 export type RepairTraceEntry = { step: string; label: string; attempt: number; check: number | null; checkName: string; key: string; hypothesis: string; files: string[]; model: string; contextDepth: 0 | 1; before: string; after: string; outcome: 'TARGET_FIXED' | 'CHANGED' | 'REFUTED' | 'NO_EDIT' }
 export type RouteEditRecord = { step: string; stage: 'EDIT_REJECTION' | 'DEBUG_REPAIR'; file: string; mode: RouteEditMode; ops: RouteOp[]; notes: string[]; finding: string; spanBefore: string; spanAfter: string; originalCheck: string; resultAfter: string }
 export type EscalationRecord = { step: string; attempt: number; reason: string; modelBefore: string; modelAfter: string; contextDepth: 1; outcomeAfter?: string }
+export const MODEL_TIMEOUT_RETRIES = 2
+export type ModelTimeoutRecord = { call: number; attempt: number; outcome: 'RETRIED' | 'RECOVERED' | 'EXHAUSTED' | 'NOT_RETRIED'; waitedMs: number; detail: string; purpose: string }
 export type WorkflowResult = {
   status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'PAUSED' | 'CONFLICT' | 'BLOCKED' | 'CRASHED'
   reason: string
   modelCalls: number
   quarantinedTests?: number
+  /** deterministic contract corrections of model-written status assertions (not quarantines; coverage is kept) */
+  correctedTests?: number
+  contractCorrections?: ContractCorrection[]
+  /** every model-call timeout, retry and outcome (bounded, recorded, never silent) */
+  modelTimeouts?: ModelTimeoutRecord[]
+  /** CLEAN / WITH_QUARANTINE / UNVERIFIED / FAILED, derived from the workflow's own evidence; the independent verifier decides UNVERIFIED */
+  completionClass?: CompletionClass
   repairTrace?: RepairTraceEntry[]
   escalations?: EscalationRecord[]
   routeEdits?: RouteEditRecord[]
@@ -73,6 +83,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   let executor: WorkflowResult['executor'] = 'UNKNOWN'
   let repairs = 0
   let quarantined = 0
+  const corrections: ContractCorrection[] = []
+  const timeouts: ModelTimeoutRecord[] = []
   const trace: RepairTraceEntry[] = []
   const escalations: EscalationRecord[] = []
   const routeEdits: RouteEditRecord[] = []
@@ -80,7 +92,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   let stepsDone = 0
   const changed = new Set<string>()
   const emit = (kind: string, detail: string) => deps.onEvent?.({ at: clock().toISOString(), kind, detail })
-  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => ({ status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor })
+  let verifiedAtEnd: boolean | null = null
+  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => ({ status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, completionClass: completionClass({ status, quarantinedTests: quarantined }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor })
 
   // ---- state: resume from the latest checkpoint when one exists
   const baselineSnap = ws.snapshot()
@@ -137,10 +150,25 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const budgetLeft = () => modelCalls < limits.maxModelCalls && Date.now() - t0 < limits.maxRuntimeMs
   const call = async (system: string, prompt: string, json = false, sampling: { temperature?: number; seed?: number } = {}): Promise<ModelResult> => {
     if (!deps.tools.includes('model_local')) return { ok: false, detail: 'model_local not granted', executor: 'UNKNOWN' }
-    modelCalls += 1
-    const ac = new AbortController()
-    const poll = setInterval(() => { const g = executionGate(log, assignmentId); if (!g.proceed && g.reason !== 'OK') ac.abort() }, 400)
-    try { const r = await activeModel.generate({ system, prompt, json, ...sampling, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }); return r } finally { clearInterval(poll) }
+    // A timed-out model call is retried a bounded number of times. The call has no side effects (nothing is written until a reply is parsed), the prompt and
+    // sampling are reused unchanged, and every attempt counts against the model-call budget, so no state is lost and no effect is duplicated.
+    const purpose = (/FILE TO (?:EDIT|CREATE|FIX): (\S+)/.exec(prompt)?.[1] ?? system.slice(0, 40)).slice(0, 80)
+    for (let attempt = 0; ; attempt++) {
+      modelCalls += 1
+      const callNo = modelCalls
+      const ac = new AbortController()
+      const poll = setInterval(() => { const g = executionGate(log, assignmentId); if (!g.proceed && g.reason !== 'OK') ac.abort() }, 400)
+      const started = Date.now()
+      let r: ModelResult
+      try { r = await activeModel.generate({ system, prompt, json, ...sampling, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }) } finally { clearInterval(poll) }
+      const waitedMs = Date.now() - started
+      if (r.ok) { if (attempt > 0) { timeouts.push({ call: callNo, attempt, outcome: 'RECOVERED', waitedMs, detail: 'reply received after retry', purpose }); emit('MODEL_TIMEOUT_RECOVERED', `${purpose}: reply on attempt ${attempt + 1}`) } return r }
+      // a gate-driven abort (pause/cancel) is never a timeout; only the model's own timeout is retried
+      if (ac.signal.aborted || !/timeout/.test(r.detail)) return r
+      if (attempt >= MODEL_TIMEOUT_RETRIES) { timeouts.push({ call: callNo, attempt, outcome: 'EXHAUSTED', waitedMs, detail: r.detail, purpose }); emit('MODEL_TIMEOUT_EXHAUSTED', `${purpose}: ${attempt + 1} attempts timed out`); return { ...r, detail: `${r.detail}; retries exhausted after ${attempt + 1} attempts` } }
+      if (!budgetLeft() || !executionGate(log, assignmentId).proceed) { timeouts.push({ call: callNo, attempt, outcome: 'NOT_RETRIED', waitedMs, detail: `${r.detail}; budget or gate stopped the retry`, purpose }); return r }
+      timeouts.push({ call: callNo, attempt, outcome: 'RETRIED', waitedMs, detail: r.detail, purpose }); emit('MODEL_TIMEOUT_RETRY', `${purpose}: attempt ${attempt + 1} timed out after ${Math.round(waitedMs / 1000)}s; retrying (${attempt + 1}/${MODEL_TIMEOUT_RETRIES})`)
+    }
   }
   const noteTokens = (r: ModelResult) => { if (r.ok) { executor = r.executor; tokens = tokens === 'UNKNOWN' || r.outputTokens === 'UNKNOWN' ? 'UNKNOWN' : tokens + r.outputTokens + (r.promptTokens === 'UNKNOWN' ? 0 : r.promptTokens); if (r.promptTokens === 'UNKNOWN') tokens = 'UNKNOWN' } }
   type Gate = { stop: WorkflowResult | null }
@@ -586,6 +614,27 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             if (!stepOk && acceptPassed) {
               // The implementation PASSED the independent acceptance and only the model-written test still fails: the test asserts something the contract does not require.
               // Quarantine exactly the failing cases (recorded, reviewable, never silent) so an invented expectation cannot block a feature that meets its acceptance criteria.
+              // First, a deterministic correction where the test CLEARLY contradicts the authoritative acceptance contract (see correctContractAssertions: fail closed otherwise).
+              {
+                const r0 = await runCheck(tests)
+                const cc = correctContractAssertions(path, ws.read(path), parseTestFailures(`${r0.stdout}\n${r0.stderr}`).filter((f) => f.file === path), req.acceptance)
+                if (cc?.refused.length) emit('CONTRACT_CORRECTION_REFUSED', `${path}: ${cc.refused.join('; ').slice(0, 300)}`)
+                if (cc?.corrections.length) {
+                  const before = ws.read(path), failsBefore = parseTestFailures(`${r0.stdout}\n${r0.stderr}`).length
+                  await writeFile(step.id, path, cc.content)
+                  const r1 = await runCheck(tests)
+                  const failsAfter = r1.exitCode === 0 ? 0 : parseTestFailures(`${r1.stdout}\n${r1.stderr}`).length
+                  if (failsAfter < failsBefore) {
+                    corrections.push(...cc.corrections)
+                    const note = cc.corrections.map((c) => `line ${c.line}: ${c.from} -> ${c.to} (criterion ${c.criterion})`).join('; ')
+                    state.doNotRepeat.push({ key: `contract-correction:${path}`, reason: `corrected ${cc.corrections.length} model-written status assertion(s) that contradicted the acceptance contract: ${note}` })
+                    emit('CONTRACT_CORRECTION', `${path}: ${note}`)
+                    if (r1.exitCode === 0) { state.validations.push({ stepId: step.id, command: tests.join(' '), status: 'PASSED', at: clock().toISOString(), outputHash: r1.outputHash, summary: `after correcting ${cc.corrections.length} assertion(s) to the acceptance contract; no test removed` }); stepOk = true }
+                  } else { await writeFile(step.id, path, before, `:restore${++restoreSeq}`); emit('CONTRACT_CORRECTION_REVERTED', `${path}: the correction did not reduce the failures`) }
+                }
+              }
+            }
+            if (!stepOk && acceptPassed) {
               const last = await runCheck(tests)
               const failing = parseToolOutput(last.stdout, last.stderr).failures.map((f) => f.name)
               const orig = ws.read(path)
@@ -641,6 +690,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
 
   // ---- completion: only when every step is done/skipped and validations passed
   const lastVerify = [...state.validations].reverse().find((v) => v.stepId === 'verify')
+  verifiedAtEnd = !!deps.finalVerification && lastVerify?.status === 'PASSED'
   completeAssignment(log, assignmentId, actor, { validation: 'PASSED', summary: `feature implemented across ${[...changed].length} file(s); ${state.validations.filter((v) => v.status === 'PASSED').length} validations passed${lastVerify ? `; final: ${lastVerify.summary}` : ''}`, artifacts: [...changed], executor, tokens, latencyMs: Date.now() - t0, retries: repairs }, clock())
   return result('COMPLETED', 'all steps validated')
 }
