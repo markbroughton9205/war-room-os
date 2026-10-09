@@ -5,7 +5,7 @@ import { harness, tmp } from './engtestkit'
 import { persistenceProblems, persistenceProbe, storageFacts, wantsPersistence, storageEnvVars } from './persistenceContract'
 import { acceptanceRoutes, contractRouteProblems, legacyStateDrift, routeFindings, routeTable, statusReachability, syntaxProblems } from './staticGates'
 import { buildEvidence, parseChecks, parseTestFailures } from './failureEvidence'
-import { quarantineAssertions } from './testContract'
+import { quarantineAssertions, correctContractAssertions } from './testContract'
 import { startupProbe } from './startupProbe'
 import { CHAT_FEATURE, CHAT_REFERENCE, makeChatApp } from './chatFixture'
 import { TASK_FEATURE, TASK_REFERENCE } from './taskFixture'
@@ -141,5 +141,31 @@ void cpSync
   check('R51_a_corrected_retry_is_accepted_after_a_rejected_layout', routeFindings('server.mjs', bad).length === 1 && routeFindings('server.mjs', good).length === 0)
   const region = routeRegion(bad)
   check('R52_the_rejection_feedback_shows_the_numbered_route_layout_not_the_head_of_the_file', /\d+: +if \(url\.pathname\.startsWith\('\/api\/orders\/'\)/.test(region) && /\d+: +if \(url\.pathname === '\/api\/orders\/export'/.test(region) && !/createServer/.test(region))
+}
+
+// ---- bare imported assertion functions (strictEqual / deepStrictEqual) get the same quarantine and contract-correction safety rules as assert.*
+{
+  const BARE = `import { test } from 'node:test'\nimport { strictEqual, ok } from 'node:assert'\ntest('a', () => {\n  ok(true)\n  strictEqual(1, 2)\n  ok(2 > 1)\n})\n`
+  const q = quarantineAssertions('test/b.test.mjs', BARE, [5])
+  check('R53_a_failing_bare_imported_strictEqual_is_disabled_by_line_and_the_other_bare_assertions_stay', !!q && q.removed.length === 1 && q.removed[0].line === 5 && q.content.includes('ok(true)') && q.content.includes('ok(2 > 1)') && q.content.split('\n')[4].trim().startsWith('// QUARANTINED ASSERTION'))
+  check('R54_bare_assertion_quarantine_still_refuses_to_leave_a_file_with_no_assertion', quarantineAssertions('test/b.test.mjs', `import { test } from 'node:test'\nimport { strictEqual } from 'node:assert'\ntest('a', () => {\n  strictEqual(1, 2)\n})\n`, [4]) === null)
+  check('R55_a_same_named_function_from_another_module_is_not_an_assertion', quarantineAssertions('test/b.test.mjs', `import { test } from 'node:test'\nimport { strictEqual } from './mine.mjs'\nimport { ok } from 'node:assert'\ntest('a', () => {\n  strictEqual(1, 2)\n  ok(true)\n})\n`, [5]) === null)
+  const ACC = ['GET /api/sessions lists sessions; GET /api/sessions/:id returns one session with its messages; unknown ids return 404', 'POST /api/sessions with a name creates a session (201) and rejects an empty name (400)']
+  const mk = (imp: string, call: string, code: number) => `import { test } from 'node:test'\n${imp}\ntest('GET sessions lists one session with its messages and unknown ids return not found', () => {\n  const res = { status: 404 }\n  ${call}(res.status, ${code})\n})\n`
+  const lineOf = (t: string) => t.split('\n').findIndex((l) => l.includes('res.status,')) + 1
+  for (const [label, imp, call] of [['named', "import { strictEqual } from 'node:assert'", 'strictEqual'], ['alias', "import { strictEqual as eq } from 'node:assert'", 'eq'], ['strict_module', "import { equal } from 'node:assert/strict'", 'equal'], ['default', "import assert from 'node:assert'", 'assert.strictEqual'], ['strict_member', "import assert from 'node:assert'", 'assert.strict.equal']] as const) {
+    const t = mk(imp, call, 410)
+    const c = correctContractAssertions('test/c.test.mjs', t, [{ line: lineOf(t), actual: '404', expected: '410' }], ACC)
+    check(`R56_${label}_form_contract_contradiction_is_corrected_by_one_literal`, !!c && c.corrections.length === 1 && c.content === t.replace('res.status, 410', 'res.status, 404'))
+  }
+  const named = mk("import { strictEqual } from 'node:assert'", 'strictEqual', 201)
+  const amb = correctContractAssertions('test/c.test.mjs', named, [{ line: lineOf(named), actual: '404', expected: '201' }], ACC)
+  check('R57_bare_form_keeps_the_fail_closed_rule_when_the_expected_status_is_named_by_the_contract', !amb || (amb.corrections.length === 0 && amb.content === named))
+  const foreign = mk("import { strictEqual } from './mine.mjs'", 'strictEqual', 410)
+  const fc = correctContractAssertions('test/c.test.mjs', foreign, [{ line: lineOf(foreign), actual: '404', expected: '410' }], ACC)
+  check('R58_a_bare_function_that_is_not_from_node_assert_is_never_corrected', !fc || (fc.corrections.length === 0 && fc.content === foreign))
+  const deep = mk("import { deepStrictEqual } from 'node:assert'", 'deepStrictEqual', 410)
+  const dc = correctContractAssertions('test/c.test.mjs', deep, [{ line: lineOf(deep), actual: '404', expected: '410' }], ACC)
+  check('R59_bare_deepStrictEqual_is_covered_with_the_same_single_literal_rule', !!dc && dc.corrections.length === 1 && dc.content === deep.replace('res.status, 410', 'res.status, 404'))
 }
 finish()

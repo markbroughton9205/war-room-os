@@ -43,6 +43,31 @@ function testCalls(rel: string, text: string): Found[] {
 }
 export const testNames = (rel: string, text: string): string[] => testCalls(rel, text).map((t) => t.name)
 
+const ASSERT_MODULES = new Set(['node:assert', 'assert', 'node:assert/strict', 'assert/strict'])
+/** Local names bound to node's assert module: whole-module bindings (`import assert from`, `import * as assert from`) and bare function imports (`import { strictEqual as eq } from`). Only imports from node's assert count. */
+export function assertBindings(sf: ts.SourceFile): { objs: Set<string>; fns: Map<string, string> } {
+  const objs = new Set<string>(), fns = new Map<string, string>()
+  for (const st of sf.statements) {
+    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || !ASSERT_MODULES.has(st.moduleSpecifier.text) || !st.importClause) continue
+    const ic = st.importClause
+    if (ic.name) objs.add(ic.name.text)
+    if (ic.namedBindings && ts.isNamespaceImport(ic.namedBindings)) objs.add(ic.namedBindings.name.text)
+    if (ic.namedBindings && ts.isNamedImports(ic.namedBindings)) for (const el of ic.namedBindings.elements) { const imported = (el.propertyName ?? el.name).text; if (imported === 'default' || imported === 'strict') objs.add(el.name.text); else fns.set(el.name.text, imported) }
+  }
+  return { objs, fns }
+}
+/** The assert function a call invokes (`assert.strictEqual(..)`, `assert.strict.equal(..)`, bare `strictEqual(..)`), or null when it is not a node assert call. */
+export function assertCallName(call: ts.CallExpression, b: { objs: Set<string>; fns: Map<string, string> }): string | null {
+  const c = call.expression
+  if (ts.isIdentifier(c)) return b.objs.has(c.text) ? 'ok' : (b.fns.get(c.text) ?? null)
+  if (ts.isPropertyAccessExpression(c)) {
+    const o = c.expression
+    if (ts.isIdentifier(o) && b.objs.has(o.text)) return c.name.text
+    if (ts.isPropertyAccessExpression(o) && ts.isIdentifier(o.expression) && b.objs.has(o.expression.text) && o.name.text === 'strict') return c.name.text
+  }
+  return null
+}
+
 export type Quarantined = { name: string; overlap: number; criterion: number | null; reason: string }
 /** Remove the named failing test cases from a test file. Refuses (returns null) unless at least `minKeep` named tests remain. */
 export function quarantineTests(rel: string, text: string, failing: string[], acceptance: string[], minKeep = 1): { content: string; removed: Quarantined[]; kept: string[] } | null {
@@ -64,7 +89,9 @@ export function quarantineAssertions(rel: string, text: string, lines: number[])
   if (!lines.length) return null
   const sf = ts.createSourceFile(rel, text, ts.ScriptTarget.ES2022, true)
   const stmts: ts.ExpressionStatement[] = []
-  const walk = (n: ts.Node) => { if (ts.isExpressionStatement(n) && /\bassert\b/.test(n.expression.getText(sf).slice(0, 40))) stmts.push(n); ts.forEachChild(n, walk) }
+  const bind = assertBindings(sf)
+  const isAssertStmt = (n: ts.ExpressionStatement) => { const e = ts.isAwaitExpression(n.expression) ? n.expression.expression : n.expression; return (ts.isCallExpression(e) && assertCallName(e, bind) !== null) || /\bassert\b/.test(n.expression.getText(sf).slice(0, 40)) }
+  const walk = (n: ts.Node) => { if (ts.isExpressionStatement(n) && isAssertStmt(n)) stmts.push(n); ts.forEachChild(n, walk) }
   walk(sf)
   const hit = stmts.filter((st) => { const a = sf.getLineAndCharacterOfPosition(st.getStart(sf)).line + 1, b = sf.getLineAndCharacterOfPosition(st.getEnd()).line + 1; return lines.some((l) => l >= a && l <= b) })
   if (!hit.length || stmts.length - hit.length < 1) return null
@@ -77,7 +104,7 @@ export type ContractCorrection = { line: number; from: number; to: number; crite
 export type ContractCorrectionResult = { content: string; corrections: ContractCorrection[]; refused: string[] }
 const STATUS_CODE = /(?<![\w./-])([1-5]\d\d)(?![\w./-])/g
 const statusCodesIn = (t: string): number[] => [...t.matchAll(STATUS_CODE)].map((m) => Number(m[1]))
-const EQ_ASSERT = /^assert(?:\.strict)?\.(equal|strictEqual|deepEqual|deepStrictEqual)$/
+const EQ_FNS = new Set(['equal', 'strictEqual', 'deepEqual', 'deepStrictEqual'])
 
 /**
  * Deterministic correction of a model-written HTTP status assertion that CLEARLY contradicts the authoritative acceptance contract, applied before any quarantine.
@@ -95,7 +122,8 @@ export function correctContractAssertions(rel: string, text: string, failures: {
   const contractCodes = new Set(acceptance.flatMap(statusCodesIn))
   const edits: { start: number; end: number; to: number; rec: ContractCorrection }[] = []
   const stmts: ts.CallExpression[] = []
-  const walk = (n: ts.Node) => { if (ts.isCallExpression(n) && EQ_ASSERT.test(n.expression.getText(sf))) stmts.push(n); ts.forEachChild(n, walk) }
+  const bind = assertBindings(sf)
+  const walk = (n: ts.Node) => { if (ts.isCallExpression(n) && EQ_FNS.has(assertCallName(n, bind) ?? '')) stmts.push(n); ts.forEachChild(n, walk) }
   walk(sf)
   for (const f of failures) {
     if (!f.line) { refused.push('failure has no test-file line'); continue }
