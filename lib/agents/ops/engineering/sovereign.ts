@@ -21,10 +21,10 @@ export function classifySteps(steps: { id: string; title: string; status: string
   return out
 }
 
-export const FRONTIER_RETURN_TYPES = ['PATCH_PROPOSAL', 'CODE_FRAGMENT', 'TEST_PLAN', 'REVIEW_REPORT', 'BUG_HYPOTHESIS', 'REFACTOR_PLAN', 'DEPENDENCY_RESEARCH', 'ALTERNATE_BUILD'] as const
+export const FRONTIER_RETURN_TYPES = ['PATCH_PROPOSAL', 'CODE_FRAGMENT', 'TEST_PLAN', 'REVIEW_REPORT', 'BUG_HYPOTHESIS', 'REFACTOR_PLAN', 'DEPENDENCY_RESEARCH', 'ALTERNATE_BUILD', 'TEST_PATCH_PROPOSAL'] as const
 export type FrontierReturnType = (typeof FRONTIER_RETURN_TYPES)[number]
 /** Return types that carry code and may, after the ingestion gate, become a Foundry-written change. Everything else is advisory text: stored and hashed, never applied. */
-export const CODE_RETURN_TYPES: FrontierReturnType[] = ['PATCH_PROPOSAL', 'CODE_FRAGMENT']
+export const CODE_RETURN_TYPES: FrontierReturnType[] = ['PATCH_PROPOSAL', 'CODE_FRAGMENT', 'TEST_PATCH_PROPOSAL']
 export const FORBIDDEN_ACTIONS = ['write or modify any file other than the allowed files', 'commit, push, merge or deploy', 'read or request credentials, environment files or secrets', 'run commands or install dependencies', 'change or relax the acceptance criteria or any test expectation to make a failure pass', 'act on the rest of the project'] as const
 export const MAX_FRONTIER_CONTEXT_CHARS = 14_000
 export const MAX_FRONTIER_FILES = 3
@@ -73,6 +73,7 @@ export function assistJustified(e: AssistEvidence): AssistDecision {
 export const ESCALATION_TRIGGERS = {
   LOCAL_HYPOTHESES_REFUTED: { implemented: true, meaning: 'distinct local repair hypotheses on one file were acted on and refuted (the same local failure repeated after bounded repair)' },
   ACCEPTANCE_FAILED_SAME_COMPONENT: { implemented: true, meaning: 'the independent acceptance keeps failing on the same bounded component after local repairs' },
+  TEST_CANDIDATES_EXHAUSTED: { implemented: true, meaning: 'the implementation already passes the independent acceptance, a test grounded in an acceptance criterion still fails, and the primary local writer plus a bounded local competing candidate could not produce a passing version' },
   LOCAL_CANDIDATES_DISAGREE: { implemented: false, meaning: 'implementation confidence is low and local alternative attempts disagree' },
   DEPENDENCY_UNRESOLVED_LOCALLY: { implemented: false, meaning: 'a dependency/version problem remains unresolved by local research' },
   HARD_SUBPROBLEM_FROM_REVIEW: { implemented: false, meaning: 'local review identified a hard architectural/debugging subproblem' },
@@ -91,6 +92,21 @@ export function helperBudgetLeft(i: { helperCalls: number; modelCalls: number; m
   return { ok: true, why: 'within the helper share' }
 }
 
+/** TEST_AUTHORING escalation: only for a grounded failing test, on a verified implementation, after the local candidate failed. Ungrounded weak tests never qualify. */
+export type TestAssistEvidence = { implementationVerified: boolean; failingGroundedTests: number; failingUngroundedTests: number; localCandidatesTried: number; localCandidatePassed: boolean; file: string; assistsOnThisFile: number; callsSoFar: number; maxCalls: number; providerAvailable: boolean }
+export function testAssistJustified(e: TestAssistEvidence): AssistDecision & { opportunity: boolean } {
+  const opp = (basis: string, justified = false, opportunity = false) => ({ justified, basis, opportunity })
+  if (!e.implementationVerified) return opp('the implementation has not passed the independent acceptance; a failing test is not yet a test-authoring problem')
+  if (e.failingGroundedTests < 1) return opp(e.failingUngroundedTests ? `${e.failingUngroundedTests} failing test(s) map to no acceptance criterion; weak tests are not worth outside help` : 'no failing test in this file')
+  if (e.localCandidatesTried < 1) return opp('the bounded local competing candidate has not been tried yet (local-first)')
+  if (e.localCandidatePassed) return opp('a local candidate already passes')
+  if (e.assistsOnThisFile >= 1) return opp(`${e.file} already received one bounded test assist`)
+  const basis = `implementation verified; ${e.failingGroundedTests} contract-grounded test(s) still fail in ${e.file} after the primary writer and ${e.localCandidatesTried} local candidate(s)`
+  if (!e.providerAvailable) return opp(`${basis}; no frontier provider is available`, false, true)
+  if (e.callsSoFar >= e.maxCalls) return opp(`${basis}; per-build frontier budget exhausted (${e.callsSoFar}/${e.maxCalls})`, false, true)
+  return opp(basis, true, true)
+}
+
 export type IngestionStage = 'RECEIVE' | 'PROVENANCE' | 'SCOPE' | 'STATIC_VALIDATION' | 'LOCAL_REVIEW' | 'INTEGRATION_CANDIDATE' | 'TESTS' | 'INDEPENDENT_VERIFICATION'
 export type IngestionStep = { stage: IngestionStage; ok: boolean; note: string }
 export type IngestionRecord = {
@@ -107,7 +123,7 @@ export function checkProvenanceAndScope(req: FrontierRequest, r: { provider: str
   const steps: IngestionStep[] = []
   steps.push({ stage: 'RECEIVE', ok: r.text.trim().length > 0, note: r.text.trim() ? `${r.text.length} chars received` : 'empty reply' })
   steps.push({ stage: 'PROVENANCE', ok: !!r.provider && !!r.model, note: `${r.provider}/${r.model} @ hash ${sha(r.text)}` })
-  const inScope = req.expectedReturn in { PATCH_PROPOSAL: 1, CODE_FRAGMENT: 1 } ? !!r.targetFile && req.allowedFiles.includes(r.targetFile) : true
+  const inScope = (CODE_RETURN_TYPES as string[]).includes(req.expectedReturn) ? !!r.targetFile && req.allowedFiles.includes(r.targetFile) : true
   steps.push({ stage: 'SCOPE', ok: inScope, note: inScope ? `target ${r.targetFile ?? 'n/a (advisory)'} is within the allowed files` : `target ${r.targetFile ?? 'none'} is outside the allowed files ${req.allowedFiles.join(', ')}` })
   return steps
 }

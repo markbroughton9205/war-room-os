@@ -703,5 +703,92 @@ void deriveAssignments; void AgentRegistry
   check('S46w_a_rejected_assist_is_marked_ASSIST_REJECTED', rec3.cleanOutcomeImpact === 'ASSIST_REJECTED')
   check('S34_acceptance_criteria_are_untouched_by_candidates_assist_or_grounding', [r, r6, r7, r8].every((rr, i) => rr.status === 'COMPLETED' && rr.build!.assignmentId.length > 0 && i >= 0) && JSON.stringify(latestCheckpoint(c1.log, c1.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance) && JSON.stringify(latestCheckpoint(x.log, x.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance))
 }
+// ---- 18. test-authoring escalation (grounded, local-first, isolated, Foundry-integrated) and transient local-model 5xx retry
+{
+  const impl = SOLUTION['src/messageStore.mjs'] + "\nexport function describeStore() { return 'store' }\n"
+  const head = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { describeStore } from '../src/messageStore.mjs'\n`
+  const base = `test('[C4] sessions round-trip through the data file', () => { assert.strictEqual(describeStore(), 'store') })\n`
+  const groundedBad = head + base + `test('[C4] sessions and their messages are persisted to disk and survive a server restart', () => { assert.strictEqual(describeStore(), 'STORE (primary, v2)') })\n`
+  const groundedGood = head + base + `test('[C4] sessions and their messages are persisted to disk and survive a server restart', () => { assert.strictEqual(typeof describeStore(), 'string') })\n`
+  const ungroundedBad = head + base + `test('wording of the store label', () => { assert.strictEqual(describeStore(), 'STORE (primary, v2)') })\n`
+  const lostCoverage = head + `test('[C5] the data file path comes from the CHAT_DATA_FILE environment variable', () => { assert.strictEqual(typeof describeStore(), 'string') })\n`
+  const mkBuilder = (body: string) => new ScriptedModel((c) => { if (c.kind === 'file' && c.path === 'src/messageStore.mjs') return fenced(impl); if (c.kind === 'file' && c.path === 'test/messageStore.test.mjs') return fenced(body); if (c.kind === 'analyst') return JSON.stringify({ hypothesis: 'the test expects another string', file: 'test/messageStore.test.mjs', differs: 'first attempt' }); if (c.kind === 'repair') return fenced(body); return good(c) })
+  const failingCandidate = (body: string) => new ScriptedModel((c) => (c.kind === 'file' && c.path === 'test/messageStore.test.mjs' ? fenced(body) : null))
+  const fakeProv = (reply: (prompt: string) => string | null, available = true, onAsk?: () => void) => { const asked: string[] = []; const p: FrontierProvider = { family: 'claude', model: 'hosted:claude', available: () => available, ask: async (i) => { asked.push(i.prompt); onAsk?.(); const t = reply(i.prompt); return t === null ? { ok: false, detail: 'no reply' } : { ok: true, text: t } } }; return { p, asked } }
+  const reviewDir = path.join(tmp(), 'ta-review')
+  const run = async (body: string, prov: ReturnType<typeof fakeProv> | null, extra: Partial<WorkflowDeps> = {}) => {
+    const x = makeWorld({ limits: { maxRetries: 3 } }); const ev: string[] = []
+    const cand = failingCandidate(body)
+    const r = await runFeatureWorkflow(deps(x, mkBuilder(body), { testCandidates: [{ label: 'local-cand', model: cand }], ...(prov ? { frontier: { provider: prov.p, reviewDir } } : {}), onEvent: (e) => ev.push(`${e.kind} ${e.detail}`), ...extra }), REQ)
+    return { x, r, ev, cand }
+  }
+  // 1. grounded, candidate failed, assist accepted
+  let seenInAsk = ''
+  const x1 = makeWorld({ limits: { maxRetries: 3 } })
+  const p1 = fakeProv(() => fenced(groundedGood), true, () => { seenInAsk = x1.ws.read('test/messageStore.test.mjs') })
+  const ev1: string[] = []
+  const r1 = await runFeatureWorkflow(deps(x1, mkBuilder(groundedBad), { testCandidates: [{ label: 'local-cand', model: failingCandidate(groundedBad) }], frontier: { provider: p1.p, reviewDir }, onEvent: (e) => ev1.push(`${e.kind} ${e.detail}`) }), REQ)
+  const rec1 = r1.frontier!.records.find((k) => k.returnType === 'TEST_PATCH_PROPOSAL')
+  check('T01_a_grounded_failing_test_on_a_verified_implementation_triggers_the_test_authoring_assist_and_Foundry_integrates_it_with_no_quarantine', r1.status === 'COMPLETED' && p1.asked.length === 1 && !!rec1 && rec1.decision === 'ACCEPTED' && !(r1.quarantinedTests ?? 0) && x1.ws.read('test/messageStore.test.mjs') === groundedGood && rec1.reasonForEscalation.trigger === 'TEST_CANDIDATES_EXHAUSTED', `${r1.status} ${r1.reason} asked=${p1.asked.length} q=${r1.quarantinedTests} ${rec1?.decision} ${rec1?.reason}`)
+  check('T02_a_local_candidate_is_tried_before_any_assist', ev1.findIndex((e) => e.startsWith('TEST_CANDIDATE ')) >= 0 && ev1.findIndex((e) => e.startsWith('TEST_CANDIDATE ')) < ev1.findIndex((e) => e.startsWith('FRONTIER_ASSIST_REQUEST')) && r1.testAuthoring!.candidates.some((k) => k.label === 'local-cand' && !k.passed))
+  check('T03_the_assist_request_carries_only_the_bounded_test_context_criteria_failing_file_assertions_observed_values_implementation_and_candidate_results', p1.asked[0].includes('SUBTASK') && p1.asked[0].includes('FAILING TEST FILE test/messageStore.test.mjs') && p1.asked[0].includes('FAILING ASSERTIONS') && p1.asked[0].includes('IMPLEMENTATION THAT ALREADY PASSES') && p1.asked[0].includes('LOCAL CANDIDATE RESULTS') && p1.asked[0].includes('ACCEPTANCE CRITERIA') && p1.asked[0].includes('FORBIDDEN') && p1.asked[0].includes('TEST_PATCH_PROPOSAL') && !p1.asked[0].includes('public/app.js') && p1.asked[0].length < 16_000)
+  check('T04_the_assist_output_stays_isolated_the_workspace_test_file_is_unchanged_while_the_request_is_outstanding_and_the_artifact_is_outside_the_workspace', seenInAsk.includes('STORE (primary, v2)') && !!rec1!.artifactPath && existsSync(rec1!.artifactPath) && !rec1!.artifactPath.startsWith(x1.root) && rec1!.steps.map((st) => st.stage).join() === 'RECEIVE,PROVENANCE,SCOPE,STATIC_VALIDATION,LOCAL_REVIEW,INTEGRATION_CANDIDATE,TESTS,INDEPENDENT_VERIFICATION' && rec1!.steps.every((st) => st.ok))
+  check('T05_an_accepted_test_assist_is_CLEAN_WITH_FRONTIER_ASSIST_acceptance_criteria_are_unchanged_and_the_verifier_still_passes', r1.completionClass === 'CLEAN' && r1.cleanKind === 'CLEAN_WITH_FRONTIER_ASSIST' && JSON.stringify(latestCheckpoint(x1.log, x1.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance) && (await x1.verification.run()).exitCode === 0 && rec1!.cleanOutcomeImpact === 'CLEAN_AFTER_ACCEPTED_ASSIST')
+  // 2. ungrounded weak test: no assist
+  const p2 = fakeProv(() => fenced(groundedGood))
+  const a2 = await run(ungroundedBad, p2)
+  check('T06_an_ungrounded_weak_test_does_not_trigger_any_assist_and_is_quarantined_as_before', p2.asked.length === 0 && a2.r.frontier!.usage.escalation_needed_unmet.length === 0 && a2.r.completionClass === 'WITH_QUARANTINE' && (a2.r.quarantinedTests ?? 0) >= 1, `${a2.r.status} asked=${p2.asked.length} unmet=${a2.r.frontier!.usage.escalation_needed_unmet.length}`)
+  // 3. assist must not lose criterion coverage / is rejected and the workspace is left as it was
+  const p3 = fakeProv(() => fenced(lostCoverage))
+  const a3 = await run(groundedBad, p3)
+  const rec3 = a3.r.frontier!.records.find((k) => k.returnType === 'TEST_PATCH_PROPOSAL')
+  check('T07_an_assist_that_drops_a_covered_criterion_is_rejected_at_the_grounding_check_and_nothing_is_written', !!rec3 && rec3.decision === 'REJECTED' && rec3.steps.some((st) => st.stage === 'LOCAL_REVIEW' && !st.ok && /lose coverage/.test(st.note)) && !a3.x.ws.read('test/messageStore.test.mjs').includes('[C5] the data file path') && a3.r.completionClass === 'WITH_QUARANTINE' && JSON.stringify(latestCheckpoint(a3.x.log, a3.x.asg.id)!.state.acceptanceCriteria) === JSON.stringify(REQ.acceptance), `${rec3?.decision} ${rec3?.reason}`)
+  const p4 = fakeProv(() => fenced(groundedBad))
+  const a4 = await run(groundedBad, p4)
+  const rec4 = a4.r.frontier!.records.find((k) => k.returnType === 'TEST_PATCH_PROPOSAL')
+  check('T08_an_assist_whose_tests_still_fail_locally_is_rejected_and_the_workspace_is_restored_then_quarantine_applies', !!rec4 && rec4.decision === 'REJECTED' && rec4.steps.some((st) => st.stage === 'TESTS' && !st.ok) && rec4.cleanOutcomeImpact === 'ASSIST_REJECTED' && a4.r.completionClass === 'WITH_QUARANTINE' && a4.r.cleanKind === null, `${rec4?.decision} ${rec4?.reason} ${a4.r.completionClass}`)
+  const p5 = fakeProv(() => fenced(groundedGood.replace('import { describeStore } from', 'import { describeStore, nothingHere } from') + '\nconst x = (\n'))
+  const a5 = await run(groundedBad, p5)
+  const rec5 = a5.r.frontier!.records.find((k) => k.returnType === 'TEST_PATCH_PROPOSAL')
+  check('T09_an_assist_with_a_syntax_error_fails_Foundrys_static_validation_and_is_never_written', !!rec5 && rec5.decision === 'REJECTED' && rec5.steps.some((st) => st.stage === 'STATIC_VALIDATION' && !st.ok) && !a5.x.ws.read('test/messageStore.test.mjs').includes('const x = ('))
+  // 4. no provider / unavailable provider: honest, unserved opportunity, not a failure of the bridge
+  const a6 = await run(groundedBad, null)
+  const um6 = a6.r.frontier!.usage.escalation_needed_unmet
+  check('T10_with_no_provider_the_met_trigger_is_recorded_as_an_unserved_opportunity_and_no_assist_is_simulated', um6.length === 1 && um6[0].trigger === 'TEST_CANDIDATES_EXHAUSTED' && um6[0].file === 'test/messageStore.test.mjs' && /no frontier provider is configured/.test(um6[0].reason) && a6.r.frontier!.usage.frontier_calls === 0 && a6.r.frontier!.records.length === 0 && a6.r.completionClass === 'WITH_QUARANTINE' && a6.ev.some((e) => e.startsWith('ESCALATION_NEEDED_UNMET')))
+  const p7 = fakeProv(() => fenced(groundedGood), false)
+  const a7 = await run(groundedBad, p7)
+  check('T11_an_unconfigured_provider_reports_FRONTIER_UNAVAILABLE_and_is_never_called', p7.asked.length === 0 && a7.ev.some((e) => e.startsWith('FRONTIER_UNAVAILABLE')) && /FRONTIER_UNAVAILABLE/.test(a7.r.frontier!.usage.unavailable ?? '') && a7.r.frontier!.usage.escalation_needed_unmet.length === 1)
+  check('T12_the_unserved_opportunity_is_attributable_the_implementation_was_independently_verified', a7.r.completionClass === 'WITH_QUARANTINE' && (await a7.x.verification.run()).exitCode === 0)
+  check('T13_budget_accounting_assist_calls_never_consume_model_call_budget_and_the_local_flow_is_identical', a7.r.modelCalls === r1.modelCalls && a6.r.modelCalls === r1.modelCalls && r1.frontier!.usage.frontier_calls === 1 && a7.r.frontier!.usage.frontier_calls === 0, `${a7.r.modelCalls}/${a6.r.modelCalls}/${r1.modelCalls}`)
+
+  // ---- transient local-model errors
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+  const failing = (inner: ScriptedModel, failFor: (path: string | null, n: number) => string | null) => { const seen = new Map<string, number>(); const inputs: { prompt: string; temperature?: number; seed?: number }[] = []; const model: ModelClient = { async generate(input) { const p = /FILE TO (?:EDIT|CREATE): (\S+)/.exec(input.prompt)?.[1] ?? null; const n = (seen.get(String(p)) ?? 0) + 1; seen.set(String(p), n); const d = failFor(p, n); if (d) { inputs.push({ prompt: input.prompt, temperature: input.temperature, seed: input.seed }); return { ok: false, detail: d, executor: 'UNKNOWN' } as ModelResult } return inner.generate(input) } }; return { model, seen, inputs } }
+  const bw = makeWorld(); const rbase = await runFeatureWorkflow(deps(bw, new ScriptedModel(good)), REQ)
+  for (const code of [500, 503]) {
+    const w = makeWorld(); const ev: string[] = []
+    const inner = new ScriptedModel(good); const f = failing(inner, (p, n) => (p === 'server.mjs' && n <= (code === 500 ? 2 : 1) ? `HTTP ${code}` : null))
+    const r = await runFeatureWorkflow({ ...deps(w, inner), model: f.model, onEvent: (e) => ev.push(`${e.kind} ${e.detail}`) }, REQ)
+    const exp = code === 500 ? 'RETRIED,RETRIED,RECOVERED' : 'RETRIED,RECOVERED'
+    check(`T20_http_${code}_is_retried_and_the_workflow_completes`, r.status === 'COMPLETED' && (r.modelTransients ?? []).map((t) => t.outcome).join() === exp && (r.modelTransients ?? []).every((t) => t.kind === 'TRANSIENT') && ev.some((e) => e.startsWith('MODEL_TRANSIENT_RETRY')) && ev.some((e) => e.startsWith('MODEL_TRANSIENT_RECOVERED')) && (r.modelTimeouts ?? []).length === 0, `${r.status} ${JSON.stringify(r.modelTransients?.map((t) => t.outcome))}`)
+    check(`T21_http_${code}_retries_preserve_state_repeat_the_same_prompt_and_sampling_and_count_honestly_against_the_budget`, r.modelCalls === rbase.modelCalls + (code === 500 ? 2 : 1) && f.inputs.every((i) => i.prompt === f.inputs[0].prompt && i.temperature === f.inputs[0].temperature && i.seed === f.inputs[0].seed) && JSON.stringify([...r.filesChanged].sort()) === JSON.stringify([...rbase.filesChanged].sort()) && Object.entries(bw.ws.snapshot()).every(([k, h]) => w.ws.snapshot()[k] === h))
+  }
+  const ex = makeWorld(); const evx: string[] = []
+  const innerX = new ScriptedModel(good); const fx = failing(innerX, (p) => (p === 'server.mjs' ? 'HTTP 502' : null))
+  const rx = await runFeatureWorkflow({ ...deps(ex, innerX), model: fx.model, onEvent: (e) => evx.push(`${e.kind} ${e.detail}`) }, REQ)
+  check('T22_transient_retry_exhaustion_fails_honestly_after_exactly_three_attempts', rx.status === 'FAILED' && fx.seen.get('server.mjs') === 3 && /retries exhausted after 3 attempts/.test(rx.reason) && (rx.modelTransients ?? []).map((t) => t.outcome).join() === 'RETRIED,RETRIED,EXHAUSTED' && evx.some((e) => e.startsWith('MODEL_TRANSIENT_EXHAUSTED')) && rx.completionClass === 'FAILED')
+  const bad400 = makeWorld(); const innerB = new ScriptedModel(good); const fb = failing(innerB, (p) => (p === 'server.mjs' ? 'HTTP 400' : null))
+  const rb4 = await runFeatureWorkflow({ ...deps(bad400, innerB), model: fb.model }, REQ)
+  check('T23_http_400_is_a_request_error_and_is_not_retried', rb4.status === 'FAILED' && fb.seen.get('server.mjs') === 1 && (rb4.modelTransients ?? []).length === 0 && (rb4.modelTimeouts ?? []).length === 0)
+  const nm = makeWorld(); const innerN = new ScriptedModel(good); const fn = failing(innerN, (p) => (p === 'server.mjs' ? 'HTTP 404' : null))
+  const rn = await runFeatureWorkflow({ ...deps(nm, innerN), model: fn.model }, REQ)
+  check('T24_an_invalid_model_name_http_404_is_not_retried', rn.status === 'FAILED' && fn.seen.get('server.mjs') === 1 && (rn.modelTransients ?? []).length === 0)
+  for (const mode of ['pause', 'cancel'] as const) {
+    const gw = makeWorld(); let calls = 0
+    const gm: ModelClient = { async generate() { calls += 1; if (mode === 'pause') pauseAssignment(gw.log, gw.asg.id, C, 'operator pause'); else requestCancel(gw.log, gw.asg.id, C, 'operator cancel'); await sleep(900); return { ok: false, detail: 'HTTP 503', executor: 'UNKNOWN' } as ModelResult } }
+    const rg = await runFeatureWorkflow({ ...deps(gw, new ScriptedModel(good)), model: gm }, REQ)
+    check(`T25_${mode}_is_never_retried_even_when_the_model_error_looks_transient`, calls === 1 && (rg.modelTransients ?? []).length === 0 && (rg.modelTimeouts ?? []).length === 0 && rg.status !== 'COMPLETED', `${mode} calls=${calls} ${rg.status} ${rg.reason}`)
+  }
+}
 
 finish()

@@ -12,7 +12,8 @@ import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspac
 import { collisionFacts, isCollisionProblem } from './collision'
 import { quarantineTests, quarantineAssertions, correctContractAssertions, type ContractCorrection } from './testContract'
 import { completionClass, type CompletionClass } from './completionClass'
-import { buildIdentityFor, buildFrontierRequest, renderFrontierRequest, assistJustified, ASSIST_MIN_REFUTED, helperBudgetLeft, type EscalationTrigger, type HelperPolicy, checkProvenanceAndScope, classifySteps, FrontierLedger, sha, type BuildIdentity, type FrontierUsage, type IngestionRecord, type SubtaskRecord } from './sovereign'
+import { classifyModelFailure, MODEL_MAX_ATTEMPTS } from './modelFailure'
+import { testAssistJustified, buildIdentityFor, buildFrontierRequest, renderFrontierRequest, assistJustified, ASSIST_MIN_REFUTED, helperBudgetLeft, type EscalationTrigger, type HelperPolicy, checkProvenanceAndScope, classifySteps, FrontierLedger, sha, type BuildIdentity, type FrontierUsage, type IngestionRecord, type SubtaskRecord } from './sovereign'
 import type { FrontierProvider } from './frontierBridge'
 import { groundTests, ungroundedChallenge, type TestGrounding } from './testGrounding'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -62,8 +63,7 @@ export type WorkflowDeps = {
 export type RepairTraceEntry = { step: string; label: string; attempt: number; check: number | null; checkName: string; key: string; hypothesis: string; files: string[]; model: string; contextDepth: 0 | 1; before: string; after: string; outcome: 'TARGET_FIXED' | 'CHANGED' | 'REFUTED' | 'NO_EDIT' }
 export type RouteEditRecord = { step: string; stage: 'EDIT_REJECTION' | 'DEBUG_REPAIR'; file: string; mode: RouteEditMode; ops: RouteOp[]; notes: string[]; finding: string; spanBefore: string; spanAfter: string; originalCheck: string; resultAfter: string }
 export type EscalationRecord = { step: string; attempt: number; reason: string; modelBefore: string; modelAfter: string; contextDepth: 1; outcomeAfter?: string }
-export const MODEL_TIMEOUT_RETRIES = 2
-export type ModelTimeoutRecord = { call: number; attempt: number; outcome: 'RETRIED' | 'RECOVERED' | 'EXHAUSTED' | 'NOT_RETRIED'; waitedMs: number; detail: string; purpose: string }
+export type ModelTimeoutRecord = { kind?: 'TIMEOUT' | 'TRANSIENT'; call: number; attempt: number; outcome: 'RETRIED' | 'RECOVERED' | 'EXHAUSTED' | 'NOT_RETRIED'; waitedMs: number; detail: string; purpose: string }
 export type WorkflowResult = {
   status: 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'PAUSED' | 'CONFLICT' | 'BLOCKED' | 'CRASHED'
   reason: string
@@ -74,6 +74,8 @@ export type WorkflowResult = {
   contractCorrections?: ContractCorrection[]
   /** every model-call timeout, retry and outcome (bounded, recorded, never silent) */
   modelTimeouts?: ModelTimeoutRecord[]
+  /** transient local-model errors (HTTP 500/502/503/504): same bounded retry, same evidence */
+  modelTransients?: ModelTimeoutRecord[]
   /** CLEAN / WITH_QUARANTINE / UNVERIFIED / FAILED, derived from the workflow's own evidence; the independent verifier decides UNVERIFIED */
   completionClass?: CompletionClass
   /** Sovereign identity: every record of this build carries mission_id / build_id / workspace_id / assignment_id */
@@ -112,6 +114,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   let quarantined = 0
   const corrections: ContractCorrection[] = []
   const timeouts: ModelTimeoutRecord[] = []
+  const transients: ModelTimeoutRecord[] = []
+  let lastKind: 'TIMEOUT' | 'TRANSIENT' = 'TIMEOUT'
   const trace: RepairTraceEntry[] = []
   const escalations: EscalationRecord[] = []
   const routeEdits: RouteEditRecord[] = []
@@ -125,7 +129,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const groundingByFile: Record<string, TestGrounding[]> = {}
   const candidateLog: NonNullable<WorkflowResult['testAuthoring']>['candidates'] = []
   const writerLabel = deps.testWriter?.label ?? 'builder'
-  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => { const isClean = status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true; for (const r of ledger.records) r.cleanOutcomeImpact = r.decision === 'ACCEPTED' ? (isClean ? 'CLEAN_AFTER_ACCEPTED_ASSIST' : 'NOT_CLEAN') : r.decision === 'REJECTED' ? 'ASSIST_REJECTED' : 'PENDING'; return {  build, subtasks: classifySteps(((state as CheckpointState | undefined)?.steps ?? []) as never, build, ledger.records.map((r) => ({ subtaskId: r.subtaskId, file: r.contextScope.files[0] ?? '', accepted: r.decision === 'PENDING' ? null : r.decision === 'ACCEPTED', family: r.provider }))), frontier: { usage: ledger.usage(status === 'COMPLETED' ? (quarantined === 0 && verifiedAtEnd === true) : null), records: ledger.records }, cleanKind: status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true ? (ledger.records.some((r) => r.decision === 'ACCEPTED') ? 'CLEAN_WITH_FRONTIER_ASSIST' : 'CLEAN_LOCAL_ONLY') : null, testGrounding: groundingByFile, testAuthoring: { writer: writerLabel, candidates: candidateLog }, status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, completionClass: completionClass({ status, quarantinedTests: quarantined }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor } }
+  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => { const isClean = status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true; for (const r of ledger.records) r.cleanOutcomeImpact = r.decision === 'ACCEPTED' ? (isClean ? 'CLEAN_AFTER_ACCEPTED_ASSIST' : 'NOT_CLEAN') : r.decision === 'REJECTED' ? 'ASSIST_REJECTED' : 'PENDING'; return {  build, subtasks: classifySteps(((state as CheckpointState | undefined)?.steps ?? []) as never, build, ledger.records.map((r) => ({ subtaskId: r.subtaskId, file: r.contextScope.files[0] ?? '', accepted: r.decision === 'PENDING' ? null : r.decision === 'ACCEPTED', family: r.provider }))), frontier: { usage: ledger.usage(status === 'COMPLETED' ? (quarantined === 0 && verifiedAtEnd === true) : null), records: ledger.records }, cleanKind: status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true ? (ledger.records.some((r) => r.decision === 'ACCEPTED') ? 'CLEAN_WITH_FRONTIER_ASSIST' : 'CLEAN_LOCAL_ONLY') : null, testGrounding: groundingByFile, testAuthoring: { writer: writerLabel, candidates: candidateLog }, status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, modelTransients: transients, completionClass: completionClass({ status, quarantinedTests: quarantined }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor } }
 
   // ---- state: resume from the latest checkpoint when one exists
   const baselineSnap = ws.snapshot()
@@ -194,12 +198,16 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       let r: ModelResult
       try { r = await (via ?? activeModel).generate({ system, prompt, json, ...sampling, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }) } finally { clearInterval(poll) }
       const waitedMs = Date.now() - started
-      if (r.ok) { if (attempt > 0) { timeouts.push({ call: callNo, attempt, outcome: 'RECOVERED', waitedMs, detail: 'reply received after retry', purpose }); emit('MODEL_TIMEOUT_RECOVERED', `${purpose}: reply on attempt ${attempt + 1}`) } return r }
-      // a gate-driven abort (pause/cancel) is never a timeout; only the model's own timeout is retried
-      if (ac.signal.aborted || !/timeout/.test(r.detail)) return r
-      if (attempt >= MODEL_TIMEOUT_RETRIES) { timeouts.push({ call: callNo, attempt, outcome: 'EXHAUSTED', waitedMs, detail: r.detail, purpose }); emit('MODEL_TIMEOUT_EXHAUSTED', `${purpose}: ${attempt + 1} attempts timed out`); return { ...r, detail: `${r.detail}; retries exhausted after ${attempt + 1} attempts` } }
-      if (!budgetLeft() || !executionGate(log, assignmentId).proceed) { timeouts.push({ call: callNo, attempt, outcome: 'NOT_RETRIED', waitedMs, detail: `${r.detail}; budget or gate stopped the retry`, purpose }); return r }
-      timeouts.push({ call: callNo, attempt, outcome: 'RETRIED', waitedMs, detail: r.detail, purpose }); emit('MODEL_TIMEOUT_RETRY', `${purpose}: attempt ${attempt + 1} timed out after ${Math.round(waitedMs / 1000)}s; retrying (${attempt + 1}/${MODEL_TIMEOUT_RETRIES})`)
+      const note = (kind: 'TIMEOUT' | 'TRANSIENT', rec: Omit<ModelTimeoutRecord, 'kind'>) => (kind === 'TIMEOUT' ? timeouts : transients).push({ ...rec, kind })
+      if (r.ok) { if (attempt > 0) { const kind = lastKind; note(kind, { call: callNo, attempt, outcome: 'RECOVERED', waitedMs, detail: 'reply received after retry', purpose }); emit(kind === 'TIMEOUT' ? 'MODEL_TIMEOUT_RECOVERED' : 'MODEL_TRANSIENT_RECOVERED', `${purpose}: reply on attempt ${attempt + 1}`) } return r }
+      // only the model's own timeout or a transient HTTP 5xx is retried; a Foundry-gate abort (pause/cancel), 4xx, invalid model, malformed replies and policy refusals fail at once
+      const kind = classifyModelFailure(r.detail, ac.signal.aborted)
+      if (kind === 'NO_RETRY') return r
+      lastKind = kind
+      const word = kind === 'TIMEOUT' ? 'timed out' : `failed transiently (${r.detail})`
+      if (attempt + 1 >= MODEL_MAX_ATTEMPTS) { note(kind, { call: callNo, attempt, outcome: 'EXHAUSTED', waitedMs, detail: r.detail, purpose }); emit(kind === 'TIMEOUT' ? 'MODEL_TIMEOUT_EXHAUSTED' : 'MODEL_TRANSIENT_EXHAUSTED', `${purpose}: ${attempt + 1} attempts ${kind === 'TIMEOUT' ? 'timed out' : 'failed'}`); return { ...r, detail: `${r.detail}; retries exhausted after ${attempt + 1} attempts` } }
+      if (!budgetLeft() || !executionGate(log, assignmentId).proceed) { note(kind, { call: callNo, attempt, outcome: 'NOT_RETRIED', waitedMs, detail: `${r.detail}; budget or gate stopped the retry`, purpose }); return r }
+      note(kind, { call: callNo, attempt, outcome: 'RETRIED', waitedMs, detail: r.detail, purpose }); emit(kind === 'TIMEOUT' ? 'MODEL_TIMEOUT_RETRY' : 'MODEL_TRANSIENT_RETRY', `${purpose}: attempt ${attempt + 1} ${word} after ${Math.round(waitedMs / 1000)}s; retrying (${attempt + 1}/${MODEL_MAX_ATTEMPTS - 1})`)
     }
   }
   const noteTokens = (r: ModelResult) => { if (r.ok) { executor = r.executor; tokens = tokens === 'UNKNOWN' || r.outputTokens === 'UNKNOWN' ? 'UNKNOWN' : tokens + r.outputTokens + (r.promptTokens === 'UNKNOWN' ? 0 : r.promptTokens); if (r.promptTokens === 'UNKNOWN') tokens = 'UNKNOWN' } }
@@ -753,6 +761,76 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                     if (r1.exitCode === 0) { state.validations.push({ stepId: step.id, command: tests.join(' '), status: 'PASSED', at: clock().toISOString(), outputHash: r1.outputHash, summary: `after correcting ${cc.corrections.length} assertion(s) to the acceptance contract; no test removed` }); stepOk = true }
                   } else { await writeFile(step.id, path, before, `:restore${++restoreSeq}`); emit('CONTRACT_CORRECTION_REVERTED', `${path}: the correction did not reduce the failures`) }
                 }
+              }
+            }
+            // TEST-AUTHORING ESCALATION (last step of the local-first order: writer + repairs -> one local candidate -> deterministic contract correction -> optional bounded assist).
+            // Only a failing test that is GROUNDED in an acceptance criterion, on an implementation the independent verifier already passed, whose local candidate also failed, qualifies.
+            if (!stepOk && acceptPassed) {
+              const ar = await runCheck(tests)
+              const testText = ws.read(path)
+              const fails = parseTestFailures(`${ar.stdout}\n${ar.stderr}`).filter((f) => f.file === path)
+              const groundedNow = groundTests(path, testText, req.acceptance, writerLabel)
+              const isGrounded = (n: string) => groundedNow.some((g) => g.name.trim() === n.trim() && g.confidence !== 'NONE')
+              const gFail = fails.filter((f) => isGrounded(f.name)), uFail = fails.filter((f) => !isGrounded(f.name))
+              const cands = candidateLog.filter((c) => c.file === path)
+              const td = testAssistJustified({ implementationVerified: true, failingGroundedTests: gFail.length, failingUngroundedTests: uFail.length, localCandidatesTried: cands.length, localCandidatePassed: cands.some((c) => c.passed), file: path, assistsOnThisFile: ledger.assistsOn(path), callsSoFar: ledger.calls, maxCalls: ledger.maxCalls, providerAvailable: !!deps.frontier && deps.frontier.provider.available() })
+              if (td.opportunity && !td.justified && !ledger.unmet.some((u) => u.file === path)) {
+                const why = !deps.frontier ? 'no frontier provider is configured for this build (local-only)' : !deps.frontier.provider.available() ? `FRONTIER_UNAVAILABLE: ${deps.frontier.provider.family} is not configured in this process` : 'frontier budget exhausted'
+                ledger.unmet.push({ trigger: 'TEST_CANDIDATES_EXHAUSTED', file: path, basis: td.basis, reason: why })
+                if (deps.frontier && !ledger.unavailable && !deps.frontier.provider.available()) ledger.unavailable = why
+                emit('ESCALATION_NEEDED_UNMET', `TEST_CANDIDATES_EXHAUSTED on ${path}: ${why}`)
+                if (deps.frontier && !deps.frontier.provider.available()) emit('FRONTIER_UNAVAILABLE', why)
+              }
+              if (td.justified && deps.frontier && Date.now() - t0 < limits.maxRuntimeMs * 0.85) {
+                const idxT = buildWorkspaceIndex(ws.root)
+                const impl = (idxT.files[path]?.imports ?? []).map((i) => i.resolved).filter((x): x is string => !!x && ws.exists(x)).slice(0, 2)
+                const subtaskId = `${build.buildId}:ta${ledger.calls + 1}`
+                const context = [
+                  `FAILING TEST FILE ${path}:\n\`\`\`\n${testText.slice(0, 5000)}\n\`\`\``,
+                  `FAILING ASSERTIONS (observed behavior of the verified implementation):\n${gFail.map((f) => `- "${f.name}" line ${f.line ?? '?'}: ${f.message}${f.actual !== null ? ` | actual ${f.actual}` : ''}${f.expected !== null ? ` | expected ${f.expected}` : ''}`).join('\n')}`,
+                  `IMPLEMENTATION THAT ALREADY PASSES THE INDEPENDENT ACCEPTANCE (do not change it):\n${impl.map((f) => `--- ${f} ---\n${ws.read(f).slice(0, 2500)}`).join('\n\n')}`,
+                  `LOCAL CANDIDATE RESULTS: ${cands.map((c) => `${c.label}: ${c.passed ? 'passes' : `${c.failing} failing`}`).join('; ') || 'none'}`,
+                ].join('\n\n')
+                const treq = buildFrontierRequest(build, { subtaskId, objective: `Correct the failing contract-grounded tests in ${path} so they prove the acceptance criteria against the verified implementation`, context, constraints: ['return the complete corrected test file in a single fenced code block', 'every test must prove one numbered acceptance criterion and be named with [C<number>]', 'keep every criterion that the current file covers covered', 'do not weaken, remove or reword the acceptance criteria and do not assert behavior the criteria do not state'], acceptance: req.acceptance, allowedFiles: [path], expectedReturn: 'TEST_PATCH_PROPOSAL' })
+                const tprompt = renderFrontierRequest(treq)
+                emit('FRONTIER_ASSIST_REQUEST', `${subtaskId} -> ${deps.frontier.provider.model}: ${td.basis}`)
+                const started = Date.now()
+                const fr = await deps.frontier.provider.ask({ system: ENGINEER_REWRITE_SYSTEM, prompt: tprompt, maxTokens: 3500, timeoutMs: Math.min(180_000, limits.maxRuntimeMs) })
+                ledger.spend(tprompt.length, fr.ok ? fr.text.length : 0)
+                const text = fr.ok ? fr.text : ''
+                let artifactPath: string | null = null
+                try { mkdirSync(deps.frontier.reviewDir, { recursive: true }); artifactPath = pathJoin(deps.frontier.reviewDir, `${subtaskId.replace(/[^\w.-]/g, '_')}.json`); writeFileSync(artifactPath, JSON.stringify({ request: treq, provider: deps.frontier.provider.family, model: deps.frontier.provider.model, at: clock().toISOString(), reply: text, error: fr.ok ? null : fr.detail }, null, 1)) } catch { artifactPath = null }
+                const rec: IngestionRecord = { subtaskId, buildId: build.buildId, missionId: build.missionId, provider: deps.frontier.provider.family, model: deps.frontier.provider.model, at: clock().toISOString(), task: treq.objective.slice(0, 160), contextScope: { files: [path], contextChars: context.length }, reasonForEscalation: { trigger: 'TEST_CANDIDATES_EXHAUSTED', basis: td.basis }, localAttemptsBefore: cands.length + 1, sharedFiles: [path, ...impl], tokensEstimated: { in: Math.round(tprompt.length / 4), out: Math.round(text.length / 4) }, cost: 'UNKNOWN', cleanOutcomeImpact: 'PENDING', returnType: 'TEST_PATCH_PROPOSAL', artifactHash: sha(text), artifactPath, steps: checkProvenanceAndScope(treq, { provider: deps.frontier.provider.family, model: deps.frontier.provider.model, text, targetFile: fr.ok ? path : null }), decision: 'PENDING', reason: fr.ok ? 'received; awaiting Foundry ingestion gate' : `no reply: ${fr.detail}`, measuredBenefit: 'not yet measured' }
+                ledger.records.push(rec)
+                const reject = (why: string, stage: 'SCOPE' | 'STATIC_VALIDATION' | 'LOCAL_REVIEW' | 'TESTS' | 'INDEPENDENT_VERIFICATION', benefit = 'none (workspace unchanged)') => { rec.steps.push({ stage, ok: false, note: why.slice(0, 200) }); rec.decision = 'REJECTED'; rec.reason = why.slice(0, 200); rec.measuredBenefit = benefit; emit('FRONTIER_ASSIST_RESULT', `${subtaskId}: REJECTED (${why.slice(0, 100)})`) }
+                const pt = fr.ok ? parseEditReply(text, testText, path) : ({ kind: 'invalid', reason: fr.ok ? '' : fr.detail } as ReturnType<typeof parseEditReply>)
+                if (!fr.ok) reject(`frontier call failed: ${fr.detail}`, 'SCOPE')
+                else if (pt.kind !== 'code') reject(`reply is not a usable single test file: ${pt.kind === 'invalid' ? pt.reason : 'NO_CHANGE'}`, 'SCOPE')
+                else {
+                  const staticProblem = gateProblem(path, pt.content)
+                  const proposed = groundTests(path, pt.content, req.acceptance, `${deps.frontier.provider.model}`)
+                  const before = new Set(groundedNow.filter((g) => g.confidence !== 'NONE').map((g) => g.criterion_id)), after = new Set(proposed.filter((g) => g.confidence !== 'NONE').map((g) => g.criterion_id))
+                  const lost = [...before].filter((c) => !after.has(c)), ungroundedNew = proposed.filter((g) => g.confidence === 'NONE')
+                  if (staticProblem) reject(`failed Foundry static validation: ${staticProblem}`, 'STATIC_VALIDATION')
+                  else if (!proposed.length || ungroundedNew.length || lost.length) reject(`contract grounding check failed: ${!proposed.length ? 'no tests' : ungroundedNew.length ? `${ungroundedNew.length} test(s) map to no criterion` : `criteria ${lost.join(',')} would lose coverage`}`, 'LOCAL_REVIEW')
+                  else {
+                    rec.steps.push({ stage: 'STATIC_VALIDATION', ok: true, note: 'syntax and export gates passed' }, { stage: 'LOCAL_REVIEW', ok: true, note: `every test grounded; criteria covered ${[...after].join(',')} (no coverage lost)` }, { stage: 'INTEGRATION_CANDIDATE', ok: true, note: 'written by Foundry through its own effect ledger' })
+                    await writeFile(step.id, path, pt.content, `:testassist${++restoreSeq}`)
+                    const tr = await runCheck(tests)
+                    const vr = tr.exitCode === 0 && deps.finalVerification ? await deps.finalVerification.run() : null
+                    if (tr.exitCode === 0 && vr && vr.exitCode === 0) {
+                      rec.steps.push({ stage: 'TESTS', ok: true, note: 'all tests pass locally with nothing quarantined' }, { stage: 'INDEPENDENT_VERIFICATION', ok: true, note: 'the independent verifier still passes the implementation' })
+                      rec.decision = 'ACCEPTED'; rec.reason = 'integrated by Foundry: tests pass locally, grounded, nothing quarantined'; rec.measuredBenefit = `${gFail.length} grounded failing test(s) -> 0; no quarantine`
+                      state.validations.push({ stepId: step.id, command: tests.join(' '), status: 'PASSED', at: clock().toISOString(), outputHash: tr.outputHash, summary: 'after a bounded test-authoring assist; nothing quarantined' })
+                      emit('FRONTIER_ASSIST_RESULT', `${subtaskId}: ACCEPTED (${rec.measuredBenefit})`)
+                      stepOk = true
+                    } else {
+                      await writeFile(step.id, path, testText, `:restore${++restoreSeq}`)
+                      reject(tr.exitCode !== 0 ? `the proposed tests still fail locally (${failCount(tr)} failing)` : 'the independent verifier no longer passes after the proposed tests', tr.exitCode !== 0 ? 'TESTS' : 'INDEPENDENT_VERIFICATION', `failing ${gFail.length} -> ${tr.exitCode !== 0 ? failCount(tr) : 0}; workspace restored`)
+                    }
+                  }
+                }
+                if (rec.artifactPath) { try { writeFileSync(rec.artifactPath.replace(/\.json$/, '.decision.json'), JSON.stringify(rec, null, 1)) } catch { /* review area is best effort */ } }
               }
             }
             if (!stepOk && acceptPassed) {
