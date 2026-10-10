@@ -874,6 +874,12 @@ void deriveAssignments; void AgentRegistry
   const rrp = await runFeatureWorkflow(deps(rp, wp, { contractTests: true, reuseImplementation: true }), REQ)
   check('P45_replay_reuses_the_verified_implementation_regenerates_nothing_and_only_authors_the_contract_tests', rrp.status === 'COMPLETED' && wp.calls.length === 2 && wp.calls.every((c) => /^test\/contract\./.test(c.path ?? '')) && !rrp.filesChanged.some((f) => /^(src|public)\//.test(f) || f === 'server.mjs') && rrp.completionClass === 'CLEAN', `${rrp.status} ${rrp.reason} calls=${wp.calls.map((c) => c.path).join(',')}`)
 
+  // P47: a per-clause test that asserts the wrong status for ITS clause is corrected deterministically in the workflow (criterion reported as the parent), classified TEST_DEFECT, and the run stays CLEAN
+  const pc = makeWorld(); const evp: string[] = []
+  const C1split = `test('[C1] POST /api/sessions with a name creates a session (201)', () => withApp(async (app) => {\n  const r = await app.post('/api/sessions', { name: 'alpha' })\n  assert.strictEqual(r.status, 201)\n  assert.strictEqual(r.body.name, 'alpha')\n}))\ntest('[C1] rejects an empty name (400)', () => withApp(async (app) => {\n  const r = await app.post('/api/sessions', { name: '' })\n  assert.strictEqual(r.status, 200)\n}))\n`
+  const rpc = await runFeatureWorkflow(deps(pc, mkWriter({ [F1]: () => head + C1split + C2 + C3 + C4 }), { contractTests: true, onEvent: ev(evp) }), REQ)
+  check('P47_a_wrong_status_in_a_per_clause_test_is_corrected_against_its_own_clause_and_reported_under_the_parent_criterion', rpc.status === 'COMPLETED' && (rpc.correctedTests ?? 0) === 1 && rpc.contractCorrections![0].criterion === 1 && rpc.contractCorrections![0].from === 200 && rpc.contractCorrections![0].to === 400 && (rpc.quarantinedTests ?? 0) === 0 && rpc.completionClass === 'CLEAN' && pc.ws.read(F1).includes('assert.strictEqual(r.status, 400)'), `${rpc.status} ${rpc.completionClass} corr=${rpc.correctedTests} q=${rpc.quarantinedTests} ${evp.filter((e) => /CORREC|QUAR/.test(e)).join('|').slice(0, 300)}`)
+
   // P46: the legacy flow (no contractTests) is unchanged: unit-style test files, no plan, no harness
   const lg = makeWorld()
   const rl = await runFeatureWorkflow(deps(lg, new ScriptedModel(good)), REQ)

@@ -16,7 +16,7 @@ import { classifyModelFailure, MODEL_MAX_ATTEMPTS } from './modelFailure'
 import { testAssistJustified, buildIdentityFor, buildFrontierRequest, renderFrontierRequest, assistJustified, ASSIST_MIN_REFUTED, helperBudgetLeft, type EscalationTrigger, type HelperPolicy, checkProvenanceAndScope, classifySteps, FrontierLedger, sha, type BuildIdentity, type FrontierUsage, type IngestionRecord, type SubtaskRecord } from './sovereign'
 import type { FrontierProvider } from './frontierBridge'
 import { groundTests, ungroundedChallenge, type TestGrounding } from './testGrounding'
-import { REVIEWER_SYSTEM, buildTestPlan, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
+import { REVIEWER_SYSTEM, buildTestPlan, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { repairRouteOrder, statusDiagnosis } from './routeEdit'
@@ -147,6 +147,13 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const tplan: TestPlan | null = deps.contractTests ? buildTestPlan(req.acceptance, ws.exists('package.json') ? ws.read('package.json') : null) : null
   function traceability(): NonNullable<WorkflowResult['testTraceability']> {
     return Object.entries(groundingByFile).flatMap(([file, gs]) => gs.map((g, i) => ({ test_id: `${file}#${i + 1}`, file, criterion_ids: g.criterion_id ? [g.criterion_id] : [], behavior: g.behavior, generated_by: g.source, reviewed_by: tplan ? ['foundry:deterministic-review', ...testReviews.filter((r) => r.file === file && r.reviewer !== 'foundry:deterministic-review').map((r) => r.reviewer)] : [], confidence: g.confidence })))
+  }
+  /** Deterministic status correction judges each assertion against the clause it proves: criteria that name several statuses are also offered as single-status clauses (contract-mode only; the whole criterion stays in the list, so an assertion that spans clauses is still refused). */
+  const correctionList = tplan ? correctionAcceptance(req.acceptance) : { list: req.acceptance, parent: req.acceptance.map((_, i) => i) }
+  const correctToContract = (path: string, text: string, fails: { line: number | null; actual: string | null; expected: string | null }[]) => {
+    const r = correctContractAssertions(path, text, fails, correctionList.list)
+    if (r) for (const c of r.corrections) c.criterion = (correctionList.parent[c.criterion - 1] ?? c.criterion - 1) + 1
+    return r
   }
   /** Everything besides quarantine that keeps a verified run from CLEAN: required criteria without a grounded test, ungrounded tests, unresolved ambiguity, order dependence. */
   const cleanBlockersNow = (): string[] => {
@@ -783,7 +790,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             const verifierPassed = state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED')
             const fails = parseTestFailures(`${r.stdout}\n${r.stderr}`).filter((f) => f.file === path || f.file === null)
             const g = groundTests(path, ws.read(path), req.acceptance, writerLabel)
-            const cc = correctContractAssertions(path, ws.read(path), fails.map((f) => ({ line: f.line, actual: f.actual, expected: f.expected })), req.acceptance)
+            const cc = correctToContract(path, ws.read(path), fails.map((f) => ({ line: f.line, actual: f.actual, expected: f.expected })))
             const out: DefectVerdict[] = []
             for (const f of fails) {
               const grounded = g.some((x) => x.name.trim() === f.name.trim() && x.confidence !== 'NONE')
@@ -852,7 +859,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
               // First, a deterministic correction where the test CLEARLY contradicts the authoritative acceptance contract (see correctContractAssertions: fail closed otherwise).
               {
                 const r0 = await runCheck(tests)
-                const cc = correctContractAssertions(path, ws.read(path), parseTestFailures(`${r0.stdout}\n${r0.stderr}`).filter((f) => f.file === path), req.acceptance)
+                const cc = correctToContract(path, ws.read(path), parseTestFailures(`${r0.stdout}\n${r0.stderr}`).filter((f) => f.file === path))
                 if (cc?.refused.length) emit('CONTRACT_CORRECTION_REFUSED', `${path}: ${cc.refused.join('; ').slice(0, 300)}`)
                 if (cc?.corrections.length) {
                   const before = ws.read(path), failsBefore = parseTestFailures(`${r0.stdout}\n${r0.stderr}`).length

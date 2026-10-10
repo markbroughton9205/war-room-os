@@ -21,6 +21,8 @@ export type PlannedTest = {
   source: 'acceptance-contract'
   covered_by?: string
   file?: string
+  /** a criterion that names several statuses is split into one clause per status so each test proves exactly one expectation */
+  clauses?: string[]
 }
 export type TestPlan = {
   entry: string
@@ -42,6 +44,33 @@ export function startEntry(packageJson: string | null): string | null {
   try { const s = (JSON.parse(packageJson).scripts ?? {}).start; const m = typeof s === 'string' ? /^node\s+(\S+\.m?js)\s*$/.exec(s.trim()) : null; return m ? m[1] : null } catch { return null }
 }
 
+const STATUS_IN = /(?<![\w./-])([1-5]\d\d)(?![\w./-])/g
+const codesOf = (t: string): number[] => [...t.matchAll(STATUS_IN)].map((m) => Number(m[1]))
+/**
+ * Splits a criterion that names SEVERAL distinct statuses into clauses (';' and ',' boundaries; text without a status is carried by the clause it leads into, leading text
+ * without a status becomes its own clause). Each coded clause names exactly one status, so a mismatching assertion can be judged against that clause alone. [] when the
+ * criterion names fewer than two distinct statuses (nothing to split).
+ */
+export function clausesOf(criterion: string): string[] {
+  if (new Set(codesOf(criterion)).size < 2) return []
+  const split = (t: string) => t.split(/;\s*|,\s+(?:and\s+)?/).map((x) => x.trim()).filter(Boolean)
+  // a piece that still carries two distinct statuses is split at " and "
+  const pieces = split(criterion).flatMap((p) => (new Set(codesOf(p)).size > 1 ? p.split(/\s+and\s+/).map((x) => x.trim()).filter(Boolean) : [p]))
+  const head: string[] = [], out: string[] = []
+  for (const piece of pieces) {
+    if (codesOf(piece).length) out.push(piece)
+    else if (out.length) out[out.length - 1] = `${out[out.length - 1]}; ${piece}`
+    else head.push(piece)
+  }
+  return [...(head.length ? [head.join('; ')] : []), ...out].filter((c) => c.length > 3)
+}
+/** The acceptance list used ONLY for deterministic status correction: the original criteria first (indices unchanged), then the clauses of multi-status criteria, with the parent criterion of every entry. */
+export function correctionAcceptance(acceptance: string[]): { list: string[]; parent: number[] } {
+  const list = [...acceptance], parent = acceptance.map((_, i) => i)
+  acceptance.forEach((a, i) => { for (const c of clausesOf(a)) { list.push(c); parent.push(i) } })
+  return { list, parent }
+}
+
 export function buildTestPlan(acceptance: string[], packageJson: string | null): TestPlan | null {
   const entry = startEntry(packageJson)
   if (!entry) return null
@@ -53,11 +82,14 @@ export function buildTestPlan(acceptance: string[], packageJson: string | null):
     if (!http && UI.test(a)) return { criterion_id: id, behavior: a, level: 'NOT_IN_SUITE', preconditions: 'n/a', action: 'n/a', expected_result: 'n/a', state_requirements: [], isolation_requirements: [], priority: 'COVERED_ELSEWHERE', source: 'acceptance-contract', covered_by: 'the independent verifier (page and browser-script checks)' } as PlannedTest
     const persists = /\b(persist|restart|survive|disk)\w*/i.test(a)
     const envNamed = vars.filter((v) => a.includes(v))
+    const defaultPath = /default:?\s*([\w./-]+\.\w+)/i.exec(a)?.[1]
+    const recipe = envNamed.length ? `STORAGE LOCATION RECIPE: create data through the API, then assert.ok(existsSync(app.storageFile('${envNamed[0]}'))) (import { existsSync } from 'node:fs'). app.storageFile(VAR) is a path inside a temp directory and its file NAME is not the default name, so never assert anything about the name${defaultPath ? `. For the default location use withApp(async (app) => { ...create data through the API...; assert.ok(existsSync(app.cwd + '/${defaultPath}')) }, { defaultStorage: true })` : ''}` : ''
     const state = [...(persists ? ['the data must be on disk: call app.restart() and read it back'] : []), ...envNamed.map((v) => `storage location comes from ${v}`)]
     return {
       criterion_id: id, behavior: a, level: 'HTTP',
       preconditions: persists ? 'a fresh server with an empty data directory' : 'a fresh server with an empty data directory (create what the request needs through the API first)',
-      action: persists ? 'create data through the API, app.restart(), read it back through the API' : 'send the HTTP request(s) the criterion names',
+      action: `${persists ? 'create data through the API, app.restart(), read it back through the API' : 'send the HTTP request(s) the criterion names'}${recipe ? `. ${recipe}` : ''}`,
+      ...(clausesOf(a).length ? { clauses: clausesOf(a) } : {}),
       expected_result: 'exactly what the criterion states (status codes, named fields and values, counts); nothing else',
       state_requirements: state,
       isolation_requirements: ['own server process', 'own port', 'own empty data directory (withApp)', ...envNamed.map((v) => `${v} points at a file inside that directory`)],
@@ -146,14 +178,14 @@ export function planPromptFor(plan: TestPlan, file: string): string {
   const elsewhere = plan.tests.filter((t) => t.priority === 'COVERED_ELSEWHERE')
   return [
     `APPROVED TEST PLAN FOR ${file} (implement exactly these tests; invent no behaviour that is not in a row):`,
-    ...rows.map((t) => `  [C${t.criterion_id}] ${t.behavior}\n     preconditions: ${t.preconditions}\n     action: ${t.action}\n     expected: ${t.expected_result}${t.state_requirements.length ? `\n     state: ${t.state_requirements.join('; ')}` : ''}`),
+    ...rows.map((t) => `  [C${t.criterion_id}] ${t.behavior}${t.clauses?.length ? `\n     CLAUSES (write ONE separate test per clause, each named [C${t.criterion_id}] followed by the clause words; each test asserts only that clause's status and nothing from the other clauses): ${t.clauses.map((c, k) => `(${k + 1}) ${c}`).join(' | ')}` : ''}\n     preconditions: ${t.preconditions}\n     action: ${t.action}\n     expected: ${t.expected_result}${t.state_requirements.length ? `\n     state: ${t.state_requirements.join('; ')}` : ''}`),
     elsewhere.length ? `NOT TESTED IN THIS FILE (covered elsewhere, do not write tests for them): ${elsewhere.map((t) => `[C${t.criterion_id}] ${t.covered_by}`).join('; ')}` : '',
     `HOW TO WRITE THEM: every test talks to the real server through the harness. Do NOT import anything from ../src or ../server; do NOT create files, temp paths or ports yourself; do NOT keep state in variables outside a test. Every test starts its own fresh server with withApp, so tests are independent by construction.`,
     `HARNESS API (import { withApp } from './support/harness.mjs'):`,
     `  await withApp(async (app) => { ... })  -> app.get(path) | app.post(path, body) | app.put(path, body) | app.patch(path, body) | app.del(path) each return { status, body, text } (body = parsed JSON or null)`,
     `  app.restart() restarts the server on the SAME data (persistence); app.storageFile(VARIABLE) is the data file path; withApp(fn, { defaultStorage: true }) runs without the storage variables in a private working directory (app.cwd).`,
     `EXAMPLE (shape only):\nimport test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\n\ntest('[C${rows[0]?.criterion_id ?? 1}] <behavior from the plan>', () => withApp(async (app) => {\n  const r = await app.post('/api/things', { name: 'a' })\n  assert.strictEqual(r.status, 201)\n  assert.strictEqual(r.body.name, 'a')\n}))`,
-    `RULES: name each test starting with [C<number>] of the single plan row it proves; cover EVERY row above with at least one test; at most two tests per row; assert only what the row's criterion states (status codes, named fields and values, counts) and never exact error wording, id values (beyond numeric/increasing), ordering of unrelated fields or timing; no test.skip, test.todo or .only; every test must contain a real assertion about the response; at most about ${40 + 25 * rows.length} lines in total.`,
+    `STATE RULE: before the request a test is about, bring the data to the state it needs using ONLY requests the contract allows (for a state machine, walk the allowed moves one step at a time from the initial state; never jump straight to a state, and never assume a state you did not create in that same test). A request the contract forbids is the thing being tested, never the way to get ready.\n    RULES: name each test starting with [C<number>] of the single plan row it proves; cover EVERY row above with at least one test; at most two tests per row; assert only what the row's criterion states (status codes, named fields and values, counts) and never exact error wording, id values (beyond numeric/increasing), ordering of unrelated fields or timing; no test.skip, test.todo or .only; every test must contain a real assertion about the response; at most about ${40 + 25 * rows.length} lines in total.`,
   ].filter(Boolean).join('\n')
 }
 

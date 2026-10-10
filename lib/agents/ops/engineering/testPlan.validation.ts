@@ -7,7 +7,8 @@ import { TASK_FEATURE } from './taskFixture'
 import { ALERT_FEATURE } from './alertFixture'
 import { completionClass } from './completionClass'
 import { runHermetic } from './runtime/commandRunner'
-import { HARNESS_PATH, buildTestPlan, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, startEntry, uncoveredCriteria } from './testPlan'
+import { correctContractAssertions } from './testContract'
+import { HARNESS_PATH, buildTestPlan, clausesOf, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, startEntry, uncoveredCriteria } from './testPlan'
 import type { EngineeringTool } from '../types'
 
 const { check, finish } = harness('AGENT_ENG_TESTPLAN_VALIDATION')
@@ -75,4 +76,20 @@ check('P27_the_reviewer_prompt_judges_against_the_plan_rows_only_and_asks_for_qu
 
 // ---- clean classification
 check('P28_clean_blockers_other_than_quarantine_also_keep_a_run_out_of_CLEAN_and_none_means_CLEAN', completionClass({ status: 'COMPLETED', quarantinedTests: 0, cleanBlockers: [] }, true) === 'CLEAN' && completionClass({ status: 'COMPLETED', quarantinedTests: 0, cleanBlockers: ['required criteria without a grounded passing test: C4'] }, true) === 'WITH_QUARANTINE' && completionClass({ status: 'COMPLETED', quarantinedTests: 0 }, false) === 'UNVERIFIED' && completionClass({ status: 'FAILED' }, null) === 'FAILED')
+// ---- fix 1: storage-location recipe; fix 2: multi-status criteria become single-status clauses
+const chatPrompt = planPromptFor(plan, plan.files[1].path)
+check('P50_a_storage_location_row_carries_the_exact_recipe_the_default_path_and_the_warning_about_the_file_name', chatPrompt.includes("existsSync(app.storageFile('CHAT_DATA_FILE'))") && chatPrompt.includes("app.cwd + '/data/sessions.json'") && chatPrompt.includes('{ defaultStorage: true }') && /never assert anything about the name/.test(chatPrompt) && !planPromptFor(plan, plan.files[0].path).includes('STORAGE LOCATION RECIPE'))
+const cl = (a: string) => clausesOf(a)
+check('P51_a_criterion_naming_several_statuses_is_split_into_clauses_each_with_one_status_and_a_single_status_criterion_is_not_split', cl(CHAT_FEATURE.acceptance[0]).length === 2 && cl(CHAT_FEATURE.acceptance[0])[1] === 'rejects an empty name (400)' && cl(TASK_FEATURE.acceptance[1]).length === 4 && cl(TASK_FEATURE.acceptance[1]).slice(1).every((c) => (c.match(/\b[1-5]\d\d\b/g) ?? []).length === 1) && cl(TASK_FEATURE.acceptance[1])[0].includes('allowed moves') && cl(CHAT_FEATURE.acceptance[3]).length === 0 && cl('GET /api/x returns 404 for an unknown id').length === 0)
+const tprompt = planPromptFor(tp, tp.files[0].path)
+check('P52_the_plan_prompt_asks_for_one_test_per_clause_and_states_the_rule_to_reach_each_state_only_through_allowed_requests', tprompt.includes('CLAUSES (write ONE separate test per clause') && tprompt.includes('rejected with 409') && tprompt.includes('an unknown task id with 404') && /STATE RULE/.test(tprompt) && /one step at a time/.test(tprompt) && !planPromptFor(plan, plan.files[1].path).includes('CLAUSES ('))
+const ca = correctionAcceptance(CHAT_FEATURE.acceptance)
+check('P53_the_correction_list_keeps_the_original_criteria_in_place_and_appends_clauses_with_their_parent', ca.list.slice(0, 8).join('|') === CHAT_FEATURE.acceptance.join('|') && ca.list.length === 10 && ca.parent.slice(8).join() === '0,0' && ca.parent.slice(0, 8).join() === '0,1,2,3,4,5,6,7')
+const perClause = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\ntest('[C1] rejects an empty name (400)', () => withApp(async (app) => {\n  const r = await app.post('/api/sessions', { name: '' })\n  assert.strictEqual(r.status, 200)\n}))\n`
+const failure = [{ line: 6, actual: '400', expected: '200' }]
+const fixed = correctContractAssertions('test/c.test.mjs', perClause, failure, ca.list), unsplit = correctContractAssertions('test/c.test.mjs', perClause, failure, CHAT_FEATURE.acceptance)
+check('P54_a_per_clause_test_with_a_wrong_status_is_corrected_against_its_own_clause_while_the_unsplit_criterion_stays_refused', !!fixed && fixed.corrections.length === 1 && fixed.corrections[0].to === 400 && fixed.content.includes('r.status, 400') && (!unsplit || unsplit.corrections.length === 0), JSON.stringify(fixed?.refused))
+const combined = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\ntest('[C1] creates a session and rejects an empty name', () => withApp(async (app) => {\n  const a = await app.post('/api/sessions', { name: 'x' })\n  assert.strictEqual(a.status, 201)\n  const r = await app.post('/api/sessions', { name: '' })\n  assert.strictEqual(r.status, 200)\n}))\n`
+const comb = correctContractAssertions('test/c.test.mjs', combined, [{ line: 8, actual: '400', expected: '200' }], ca.list)
+check('P55_a_test_that_spans_clauses_is_still_refused_the_fail_closed_rule_is_unchanged', !comb || comb.corrections.length === 0, JSON.stringify(comb?.corrections))
 finish()
