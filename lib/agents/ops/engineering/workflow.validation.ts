@@ -791,4 +791,93 @@ void deriveAssignments; void AgentRegistry
   }
 }
 
+// ---- 6. contract-first test authoring (Phase 10): plan -> writer -> reviewer -> static -> execute; quarantine last
+{
+  const { harnessSource, HARNESS_PATH } = await import('./testPlan')
+  const head = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { existsSync } from 'node:fs'\nimport { withApp } from './support/harness.mjs'\n`
+  const C1 = `test('[C1] creates a named session and rejects an empty name', () => withApp(async (app) => {\n  const r = await app.post('/api/sessions', { name: 'alpha' })\n  assert.strictEqual(r.status, 201)\n  assert.strictEqual(r.body.name, 'alpha')\n  assert.strictEqual((await app.post('/api/sessions', { name: '' })).status, 400)\n}))\n`
+  const C2 = `test('[C2] lists sessions, returns one with its messages and answers 404 for unknown ids', () => withApp(async (app) => {\n  const a = await app.post('/api/sessions', { name: 'a' })\n  const list = await app.get('/api/sessions')\n  assert.strictEqual(list.status, 200)\n  assert.ok(list.body.some((s) => s.id === a.body.id))\n  const one = await app.get('/api/sessions/' + a.body.id)\n  assert.strictEqual(one.status, 200)\n  assert.deepStrictEqual(one.body.messages, [])\n  assert.strictEqual((await app.get('/api/sessions/nope')).status, 404)\n}))\n`
+  const C3 = `test('[C3] stores a message in that session only', () => withApp(async (app) => {\n  const a = await app.post('/api/sessions', { name: 'a' }), b = await app.post('/api/sessions', { name: 'b' })\n  const m = await app.post('/api/sessions/' + a.body.id + '/messages', { text: 'hi', author: 'x' })\n  assert.strictEqual(m.status, 201)\n  assert.strictEqual((await app.get('/api/sessions/' + a.body.id)).body.messages.length, 1)\n  assert.strictEqual((await app.get('/api/sessions/' + b.body.id)).body.messages.length, 0)\n}))\n`
+  const C4 = `test('[C4] sessions and messages survive a restart', () => withApp(async (app) => {\n  const a = await app.post('/api/sessions', { name: 'keep' })\n  await app.post('/api/sessions/' + a.body.id + '/messages', { text: 'still here', author: 'x' })\n  await app.restart()\n  const after = await app.get('/api/sessions/' + a.body.id)\n  assert.strictEqual(after.status, 200)\n  assert.strictEqual(after.body.messages.length, 1)\n}))\n`
+  const C5 = `test('[C5] the data file comes from CHAT_DATA_FILE', () => withApp(async (app) => {\n  await app.post('/api/sessions', { name: 'x' })\n  assert.ok(existsSync(app.storageFile('CHAT_DATA_FILE')))\n}))\n`
+  const C6 = `test('[C6] the legacy messages endpoints keep working', () => withApp(async (app) => {\n  const p = await app.post('/api/messages', { text: 'legacy' })\n  assert.strictEqual(p.status, 201)\n  assert.strictEqual((await app.get('/api/messages')).body.length, 1)\n}))\n`
+  const F1 = 'test/contract.api-1.test.mjs', F2 = 'test/contract.api-2.test.mjs'
+  const FILE1 = head + C1 + C2 + C3 + C4, FILE2 = head + C5 + C6
+  const mkWriter = (over: Record<string, (n: number) => string> = {}) => { const seen = new Map<string, number>(); return new ScriptedModel((c) => { if (c.kind === 'file' && c.path && /^test\/contract\./.test(c.path)) { const n = (seen.get(c.path) ?? 0) + 1; seen.set(c.path, n); if (over[c.path]) return fenced(over[c.path](n)); return fenced(c.path === F1 ? FILE1 : FILE2) } return good(c) }) }
+  const ev = (list: string[]) => (e: { kind: string; detail: string }) => { list.push(`${e.kind} ${e.detail}`) }
+
+  // P30: the success path
+  const x = makeWorld(); const evs: string[] = []; const w = mkWriter()
+  const r = await runFeatureWorkflow(deps(x, w, { contractTests: true, onEvent: ev(evs) }), REQ)
+  check('P30_contract_mode_builds_the_implementation_then_authors_planned_contract_tests_and_the_run_is_CLEAN_LOCAL_ONLY', r.status === 'COMPLETED' && r.completionClass === 'CLEAN' && r.cleanKind === 'CLEAN_LOCAL_ONLY' && (r.quarantinedTests ?? 0) === 0 && (r.cleanBlockers ?? []).length === 0, `${r.status} ${r.reason} ${r.completionClass} blockers=${(r.cleanBlockers ?? []).join('|')} q=${r.quarantinedTests}`)
+  check('P31_the_plan_is_in_the_result_unit_style_test_files_are_not_created_and_the_harness_is_Foundry_text_exactly', r.testPlan!.files.length === 2 && !r.filesChanged.includes('test/messageStore.test.mjs') && !x.ws.exists('test/messageStore.test.mjs') && x.ws.exists(F1) && x.ws.exists(F2) && x.ws.read(HARNESS_PATH) === harnessSource('server.mjs', ['CHAT_DATA_FILE']) && evs.some((e) => e.startsWith('HARNESS_WRITTEN')))
+  check('P32_every_generated_test_is_traceable_to_a_criterion_with_generator_reviewer_and_confidence', r.testTraceability!.length === 6 && r.testTraceability!.every((t) => t.criterion_ids.length === 1 && t.generated_by && t.reviewed_by.includes('foundry:deterministic-review') && t.confidence === 'TAGGED') && r.testTraceability!.map((t) => t.criterion_ids[0]).sort().join() === '1,2,3,4,5,6')
+  check('P33_the_writer_prompt_carries_only_the_rows_of_its_own_file_and_the_harness_api', (() => { const p1 = w.calls.find((c) => c.path === F1)!.prompt, p2 = w.calls.find((c) => c.path === F2)!.prompt; return p1.includes('APPROVED TEST PLAN FOR ' + F1) && p1.includes('[C4]') && !p1.includes('[C5] the data file') && p2.includes('[C5]') && p2.includes('[C6]') && p1.includes('withApp') && !p1.includes('TEST OBLIGATIONS') })())
+  check('P34_the_reverse_order_run_agrees_with_the_forward_run_so_no_hidden_shared_state_is_recorded', evs.some((e) => /^ORDER_CHECK .*passes like the forward run/.test(e)) && !(r.cleanBlockers ?? []).some((b) => /order/.test(b)))
+  check('P35_the_independent_verifier_passed_before_the_tests_were_authored_so_the_implementation_is_verified_ground_truth', x.ws.exists(F1) && (await x.verification.run()).exitCode === 0 && evs.findIndex((e) => e.startsWith('WRITE ' + F1)) > evs.findIndex((e) => e.startsWith('WRITE public/index.html')))
+
+  // P36: rejected before execution when the file breaks the plan (imports the implementation); the second try is the one that runs
+  const y = makeWorld(); const evy: string[] = []
+  const wy = mkWriter({ [F1]: (n) => (n === 1 ? FILE1.replace("import { withApp }", "import { allMessages } from '../src/messageStore.mjs'\nimport { withApp }") : FILE1) })
+  const ry = await runFeatureWorkflow(deps(y, wy, { contractTests: true, onEvent: ev(evy) }), REQ)
+  check('P36_a_test_file_that_breaks_the_plan_is_rejected_by_the_reviewer_BEFORE_it_runs_and_the_corrected_file_completes_CLEAN', ry.completionClass === 'CLEAN' && evy.some((e) => e.startsWith('REJECT ' + F1) && /TEST REVIEWER: IMPORTS_IMPLEMENTATION/.test(e)) && wy.calls.filter((c) => c.path === F1).length === 2, `${ry.status} ${ry.completionClass} ${evy.filter((e) => e.startsWith('REJECT')).join('|').slice(0, 300)}`)
+
+  // P37: ungrounded tests are removed BEFORE execution (recorded; not a quarantine because they never ran)
+  const z = makeWorld(); const evz: string[] = []
+  const extra = `test('internal helper label wording', () => withApp(async (app) => { assert.strictEqual((await app.get('/')).status, 200) }))\n`
+  const rz = await runFeatureWorkflow(deps(z, mkWriter({ [F1]: () => FILE1 + extra }), { contractTests: true, onEvent: ev(evz) }), REQ)
+  check('P37_an_ungrounded_test_is_rejected_before_execution_and_recorded_while_every_grounded_test_stays', rz.status === 'COMPLETED' && evz.some((e) => e.startsWith('TEST_REJECTED_BEFORE_EXECUTION')) && (rz.testReviews ?? []).some((t) => t.verdict === 'REJECTED_UNGROUNDED' && t.findings.includes('internal helper label wording')) && !z.ws.read(F1).includes("test('internal helper label wording'") && z.ws.read(F1).includes('REJECTED BEFORE EXECUTION') && rz.completionClass === 'CLEAN' && (rz.quarantinedTests ?? 0) === 0, `${rz.status} ${rz.completionClass} ${evz.filter((e) => /REJECT|QUAR/.test(e)).join('|').slice(0, 300)}`)
+
+  // P38/P39/P40: a SEPARATE local reviewer judges the file before it runs; one bounded revision, accepted only if it still passes the static and plan checks
+  const rv1 = makeWorld(); const reviewer = new ScriptedModel(() => JSON.stringify({ verdict: 'REVISE', problems: ['C2 should also assert the list contains the new session'] }))
+  const w3 = mkWriter({ [F1]: (n) => (n === 1 ? FILE1 : FILE1 + '// revised after review\n') })
+  const r3 = await runFeatureWorkflow(deps(rv1, w3, { contractTests: true, testReviewer: { label: 'reviewer-model', model: reviewer } }), REQ)
+  check('P38_the_reviewer_is_a_different_model_than_the_writer_and_an_accepted_revision_is_recorded_with_its_reviewer', r3.status === 'COMPLETED' && reviewer.calls.length === 2 && r3.testReviews!.some((t) => t.reviewer === 'reviewer-model' && t.verdict === 'REVISE' && t.findings[0].includes('C2')) && r3.testReviews!.some((t) => t.verdict === 'REVISION_ACCEPTED') && rv1.ws.read(F1).includes('revised after review') && r3.testTraceability!.every((t) => t.reviewed_by.includes('reviewer-model')), `${r3.status} ${r3.reason} reviewerCalls=${reviewer.calls.length}`)
+  const rv2 = makeWorld()
+  const w4 = mkWriter({ [F1]: (n) => (n === 1 ? FILE1 : FILE1.replace("import { withApp }", "import { allMessages } from '../src/messageStore.mjs'\nimport { withApp }")) })
+  const r4 = await runFeatureWorkflow(deps(rv2, w4, { contractTests: true, testReviewer: { label: 'reviewer-model', model: new ScriptedModel(() => JSON.stringify({ verdict: 'REVISE', problems: ['rewrite it'] })) } }), REQ)
+  check('P39_a_reviewer_driven_revision_that_breaks_the_plan_is_rejected_and_the_already_reviewed_file_is_kept', r4.status === 'COMPLETED' && r4.testReviews!.some((t) => t.verdict === 'REVISION_REJECTED') && !rv2.ws.read(F1).includes('../src/messageStore.mjs') && r4.completionClass === 'CLEAN', `${r4.status} ${r4.reason}`)
+  const rv3 = makeWorld(); const quiet = new ScriptedModel(() => JSON.stringify({ verdict: 'OK' })); const w5 = mkWriter()
+  const r5 = await runFeatureWorkflow(deps(rv3, w5, { contractTests: true, testReviewer: { label: 'reviewer-model', model: quiet } }), REQ)
+  check('P40_an_OK_verdict_costs_one_review_call_per_file_and_no_extra_writer_call', r5.completionClass === 'CLEAN' && quiet.calls.length === 2 && w5.calls.filter((c) => c.path === F1).length === 1 && w5.calls.filter((c) => c.path === F2).length === 1, `${r5.completionClass} reviewerCalls=${quiet.calls.length}`)
+
+  // P41: a status literal that contradicts the contract is CORRECTED deterministically (coverage kept, not a quarantine) and classified TEST_DEFECT
+  const cx = makeWorld(); const evc: string[] = []
+  const wrong = FILE1.replace("assert.strictEqual((await app.get('/api/sessions/nope')).status, 404)", "assert.strictEqual((await app.get('/api/sessions/nope')).status, 410)")
+  const rc = await runFeatureWorkflow(deps(cx, mkWriter({ [F1]: () => wrong }), { contractTests: true, onEvent: ev(evc) }), REQ)
+  check('P41_a_contract_contradicting_status_assertion_is_corrected_not_quarantined_and_the_defect_is_classified_TEST_DEFECT', rc.status === 'COMPLETED' && (rc.correctedTests ?? 0) >= 1 && (rc.quarantinedTests ?? 0) === 0 && rc.completionClass === 'CLEAN' && (rc.testDefects ?? []).some((d) => d.kind === 'TEST_DEFECT' && d.file === F1) && cx.ws.read(F1).includes("'/api/sessions/nope')).status, 404)"), `${rc.status} ${rc.completionClass} corr=${rc.correctedTests} q=${rc.quarantinedTests} defects=${JSON.stringify(rc.testDefects)} ${evc.filter((e) => /CORRECT|QUAR/.test(e)).join('|').slice(0, 300)}`)
+
+  // P42: an invented expectation the contract does not state: ONE alternate candidate is tried AFTER the writer's own retries and the correction attempt; the better candidate wins and nothing is quarantined
+  const order: string[] = []
+  const invented = FILE1.replace('assert.deepStrictEqual(one.body.messages, [])', "assert.strictEqual(one.body.nickname, 'alpha')")
+  const w6 = mkWriter({ [F1]: () => invented }); const origGen = w6.generate.bind(w6); w6.generate = async (i) => { order.push(/debugging analyst/.test(i.system) ? 'analyst' : 'writer'); return origGen(i) }
+  const alt = mkWriter(); const altGen = alt.generate.bind(alt); alt.generate = async (i) => { order.push('candidate'); return altGen(i) }
+  const cd = makeWorld(); const evd: string[] = []
+  const rd = await runFeatureWorkflow(deps(cd, w6, { contractTests: true, testCandidates: [{ label: 'alt-local', model: alt }], onEvent: ev(evd) }), REQ)
+  const candAt = order.indexOf('candidate')
+  check('P42_the_alternate_local_candidate_is_the_LAST_local_step_before_quarantine_and_a_passing_candidate_avoids_quarantine_entirely', rd.status === 'COMPLETED' && candAt > 0 && order.slice(0, candAt).includes('analyst') && alt.calls.length === 1 && (rd.quarantinedTests ?? 0) === 0 && rd.completionClass === 'CLEAN' && (rd.testAuthoring?.candidates ?? []).some((k) => k.label === 'alt-local' && k.passed && k.kept) && (rd.testDefects ?? []).some((d) => d.file === F1), `${rd.status} ${rd.completionClass} order=${order.join(',')} q=${rd.quarantinedTests} ${evd.filter((e) => /CANDID|QUAR/.test(e)).join('|').slice(0, 300)}`)
+
+  // P43: when the candidate also fails, QUARANTINE is the final fallback; the lost coverage keeps the run out of CLEAN
+  const qx = makeWorld(); const evq: string[] = []
+  const rq = await runFeatureWorkflow(deps(qx, mkWriter({ [F1]: () => invented }), { contractTests: true, testCandidates: [{ label: 'alt-bad', model: mkWriter({ [F1]: () => invented }) }], onEvent: ev(evq) }), REQ)
+  check('P43_quarantine_comes_last_after_the_candidate_failed_and_the_run_is_not_CLEAN', rq.status === 'COMPLETED' && (rq.quarantinedTests ?? 0) >= 1 && rq.completionClass === 'WITH_QUARANTINE' && rq.cleanKind === null && evq.findIndex((e) => e.startsWith('TEST_CANDIDATE ')) >= 0 && evq.findIndex((e) => e.startsWith('QUARANTINE')) > evq.findIndex((e) => e.startsWith('TEST_CANDIDATE ')), `${rq.status} ${rq.completionClass} q=${rq.quarantinedTests} ${evq.filter((e) => /CANDID|QUAR/.test(e)).join('|').slice(0, 300)}`)
+
+  // P44: omitting a required criterion cannot produce CLEAN (weakening by omission)
+  const om = makeWorld()
+  const rm = await runFeatureWorkflow(deps(om, mkWriter({ [F1]: () => head + C1 + C2 + C3 }), { contractTests: true }), REQ)
+  check('P44_a_file_that_still_omits_a_required_criterion_after_the_bounded_rewrites_is_never_CLEAN', rm.status === 'COMPLETED' && rm.completionClass !== 'CLEAN' && (rm.cleanBlockers ?? []).some((b) => /C4/.test(b)) && rm.cleanKind === null, `${rm.status} ${rm.completionClass} ${(rm.cleanBlockers ?? []).join('|')}`)
+
+  // P45: replay reuses the independently verified implementation: no implementation file is regenerated and only the contract test files cost model calls
+  const rp = makeWorld()
+  for (const [f, t] of Object.entries(SOLUTION)) if (!f.startsWith('test/')) rp.ws.write(f, t)
+  const wp = mkWriter()
+  const rrp = await runFeatureWorkflow(deps(rp, wp, { contractTests: true, reuseImplementation: true }), REQ)
+  check('P45_replay_reuses_the_verified_implementation_regenerates_nothing_and_only_authors_the_contract_tests', rrp.status === 'COMPLETED' && wp.calls.length === 2 && wp.calls.every((c) => /^test\/contract\./.test(c.path ?? '')) && !rrp.filesChanged.some((f) => /^(src|public)\//.test(f) || f === 'server.mjs') && rrp.completionClass === 'CLEAN', `${rrp.status} ${rrp.reason} calls=${wp.calls.map((c) => c.path).join(',')}`)
+
+  // P46: the legacy flow (no contractTests) is unchanged: unit-style test files, no plan, no harness
+  const lg = makeWorld()
+  const rl = await runFeatureWorkflow(deps(lg, new ScriptedModel(good)), REQ)
+  check('P46_without_contractTests_the_legacy_flow_is_unchanged_no_plan_no_harness_no_contract_files', rl.status === 'COMPLETED' && rl.testPlan === null && !lg.ws.exists(HARNESS_PATH) && !lg.ws.exists(F1) && (rl.cleanBlockers ?? []).length === 0)
+}
+
 finish()

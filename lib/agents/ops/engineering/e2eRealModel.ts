@@ -3,7 +3,7 @@
  * isolated chat-app workspace, with an independent verifier. Records every attempt honestly (success or failure).
  * Usage: node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/e2eRealModel.ts <outDir> [model]
  */
-import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { appendFileSync, cpSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { AgentOpsLog } from '../log'
@@ -49,7 +49,12 @@ mkdirSync(outDir, { recursive: true })
 const stamp = new Date().toISOString().replace(/[:.]/g, '-')
 const wsRoot = path.join(os.homedir(), 'WarRoomProjects', 'p10-acceptance', `${FX.id}-${stamp}`)
 mkdirSync(wsRoot, { recursive: true })
-FX.make(wsRoot)
+// REPLAY_FROM=<finished workspace>: the independently verified implementation in that workspace is REUSED (its test/ directory and data are dropped); only test authoring runs again.
+const replayFrom = process.env.REPLAY_FROM
+if (replayFrom) { cpSync(replayFrom, wsRoot, { recursive: true, filter: (src) => !/(^|\/)(node_modules|\.git)(\/|$)/.test(src) }); rmSync(path.join(wsRoot, 'test'), { recursive: true, force: true }); rmSync(path.join(wsRoot, 'data'), { recursive: true, force: true })
+  // the fixture's ORIGINAL test files come back (the model-written ones from the first run are dropped): existing tests must keep passing
+  const pristine = path.join(os.tmpdir(), `replay-base-${Date.now()}`); FX.make(pristine); cpSync(path.join(pristine, 'test'), path.join(wsRoot, 'test'), { recursive: true }); rmSync(pristine, { recursive: true, force: true })
+} else FX.make(wsRoot)
 const dataDir = path.join(outDir, `agent-ops-${stamp}`)
 const log = new AgentOpsLog(dataDir)
 const reg = new AgentRegistry(log)
@@ -82,6 +87,7 @@ const escalation = escalationName ? { label: escalationName, model: ((): ModelCl
 //   FRONTIER_FAMILY=<claude|chatgpt|grok|gemini>  bounded outside assist; unavailable (reported, never faked) unless that provider is configured in this process
 const localClient = (name: string): ModelClient => { const c = new OllamaModelClient(name); return { async generate(input) { const t1 = Date.now(); const r = await c.generate(input); appendFileSync(trace, JSON.stringify({ at: new Date().toISOString(), ms: Date.now() - t1, model: name, promptChars: input.prompt.length, ok: r.ok, ...(r.ok ? { reply: r.text } : { detail: r.detail }) }) + '\n'); return r } } }
 const testWriter = process.env.TEST_WRITER_MODEL ? { label: process.env.TEST_WRITER_MODEL, model: localClient(process.env.TEST_WRITER_MODEL) } : undefined
+const testReviewer = process.env.TEST_REVIEWER_MODEL ? { label: process.env.TEST_REVIEWER_MODEL, model: localClient(process.env.TEST_REVIEWER_MODEL) } : undefined
 const testCandidates = (process.env.TEST_CANDIDATE_MODELS ?? '').split(',').map((x) => x.trim()).filter(Boolean).map((label) => ({ label, model: localClient(label) }))
 const frontierFamily = process.env.FRONTIER_FAMILY as DirectProviderFamily | undefined
 const frontierDeps = frontierFamily ? { provider: await defaultFrontierProvider(frontierFamily), reviewDir: path.join(outDir, `frontier-review-${stamp}`), maxCalls: frontierBudgetFromHistory([]).maxCalls } : undefined
@@ -102,12 +108,12 @@ const t0 = Date.now()
 let peakGpu: number | 'UNKNOWN' = 'UNKNOWN', peakRam: number | 'UNKNOWN' = 'UNKNOWN'
 const sampler = setInterval(() => { const g = gpuUsedMiB(), r = ramUsedMiB(); if (typeof g === 'number' && (peakGpu === 'UNKNOWN' || g > peakGpu)) peakGpu = g; if (typeof r === 'number' && (peakRam === 'UNKNOWN' || r > peakRam)) peakRam = r }, 3000)
 const evCount: Record<string, number> = {}
-const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(escalation ? { escalation } : {}), ...(testWriter ? { testWriter } : {}), ...(testCandidates.length ? { testCandidates } : {}), ...(frontierDeps ? { frontier: frontierDeps } : {}), missionId: FX.mission, groundTests: process.env.GROUND_TESTS === '1', ...(process.env.MAX_CANDIDATES_PER_FILE ? { maxCandidatesPerFile: Number(process.env.MAX_CANDIDATES_PER_FILE) } : {}), ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => { evCount[e.kind] = (evCount[e.kind] ?? 0) + 1; console.log(`[${e.kind}] ${e.detail}`) } }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
+const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(escalation ? { escalation } : {}), ...(testWriter ? { testWriter } : {}), ...(testCandidates.length ? { testCandidates } : {}), ...(frontierDeps ? { frontier: frontierDeps } : {}), missionId: FX.mission, ...(process.env.CONTRACT_TESTS === '1' ? { contractTests: true } : {}), ...(testReviewer ? { testReviewer } : {}), ...(replayFrom ? { reuseImplementation: true } : {}), groundTests: process.env.GROUND_TESTS === '1', ...(process.env.MAX_CANDIDATES_PER_FILE ? { maxCandidatesPerFile: Number(process.env.MAX_CANDIDATES_PER_FILE) } : {}), ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => { evCount[e.kind] = (evCount[e.kind] ?? 0) + 1; console.log(`[${e.kind}] ${e.detail}`) } }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
 const v = deriveAssignments(log).assignments.get(assignment.id)!
 const finalVerify = await verification.run()
 const lessonEffect = lessonStoreDir ? measureLessonEffect(log, assignment.id) : null
 const report = {
-  stamp, fixture: FX.id, engineSha, model: modelName, workspace: wsRoot, assignmentId: assignment.id, wallMs: Date.now() - t0,
+  stamp, fixture: FX.id, replayFrom: replayFrom ?? null, engineSha, model: modelName, workspace: wsRoot, assignmentId: assignment.id, wallMs: Date.now() - t0,
   completionClass: completionClass(result, finalVerify.exitCode === 0), // CLEAN | WITH_QUARANTINE | UNVERIFIED | FAILED; the independent verifier run now decides UNVERIFIED
   result, assignmentState: v.state, outcome: v.outcome, stopReason: v.stopReason ?? null,
   independentVerificationNow: { exitCode: finalVerify.exitCode, summary: finalVerify.stdout.split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ') },

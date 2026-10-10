@@ -16,6 +16,7 @@ import { classifyModelFailure, MODEL_MAX_ATTEMPTS } from './modelFailure'
 import { testAssistJustified, buildIdentityFor, buildFrontierRequest, renderFrontierRequest, assistJustified, ASSIST_MIN_REFUTED, helperBudgetLeft, type EscalationTrigger, type HelperPolicy, checkProvenanceAndScope, classifySteps, FrontierLedger, sha, type BuildIdentity, type FrontierUsage, type IngestionRecord, type SubtaskRecord } from './sovereign'
 import type { FrontierProvider } from './frontierBridge'
 import { groundTests, ungroundedChallenge, type TestGrounding } from './testGrounding'
+import { REVIEWER_SYSTEM, buildTestPlan, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { repairRouteOrder, statusDiagnosis } from './routeEdit'
@@ -59,6 +60,12 @@ export type WorkflowDeps = {
   helperPolicy?: HelperPolicy
   /** Competing candidates per test file (default 1: helpers are selective, not exhaustive). */
   maxCandidatesPerFile?: number
+  /** Contract-first test authoring: a structured test plan, a Foundry-owned isolation harness, a pre-execution review, and quarantine only as the last fallback. */
+  contractTests?: boolean
+  /** A separate local model that reviews each generated test file against its plan row BEFORE it runs (builder and reviewer are different roles). */
+  testReviewer?: { label: string; model: ModelClient }
+  /** Replay: the implementation already in the workspace is independently verified and reused; only the test-authoring steps run. */
+  reuseImplementation?: boolean
 }
 export type RepairTraceEntry = { step: string; label: string; attempt: number; check: number | null; checkName: string; key: string; hypothesis: string; files: string[]; model: string; contextDepth: 0 | 1; before: string; after: string; outcome: 'TARGET_FIXED' | 'CHANGED' | 'REFUTED' | 'NO_EDIT' }
 export type RouteEditRecord = { step: string; stage: 'EDIT_REJECTION' | 'DEBUG_REPAIR'; file: string; mode: RouteEditMode; ops: RouteOp[]; notes: string[]; finding: string; spanBefore: string; spanAfter: string; originalCheck: string; resultAfter: string }
@@ -86,6 +93,12 @@ export type WorkflowResult = {
   cleanKind?: 'CLEAN_LOCAL_ONLY' | 'CLEAN_WITH_FRONTIER_ASSIST' | null
   testGrounding?: Record<string, TestGrounding[]>
   testAuthoring?: { writer: string; candidates: { label: string; file: string; failing: number; passed: boolean; kept: boolean }[] }
+  /** the structured plan the tests were written from, the per-test traceability and review record, the defect classification of every failing test, and what kept a run from CLEAN */
+  testPlan?: { entry: string; files: { path: string; criteria: number[] }[]; tests: TestPlan['tests'] } | null
+  testTraceability?: { test_id: string; file: string; criterion_ids: number[]; behavior: string; generated_by: string; reviewed_by: string[]; confidence: string }[]
+  testReviews?: { file: string; reviewer: string; verdict: string; findings: string[] }[]
+  testDefects?: { file: string; test: string; kind: string; basis: string; resolved: boolean }[]
+  cleanBlockers?: string[]
   repairTrace?: RepairTraceEntry[]
   escalations?: EscalationRecord[]
   routeEdits?: RouteEditRecord[]
@@ -128,8 +141,28 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const ledger = new FrontierLedger(deps.frontier?.maxCalls ?? 3)
   const groundingByFile: Record<string, TestGrounding[]> = {}
   const candidateLog: NonNullable<WorkflowResult['testAuthoring']>['candidates'] = []
+  const testReviews: NonNullable<WorkflowResult['testReviews']> = []
+  const testDefects: NonNullable<WorkflowResult['testDefects']> = []
+  let orderIndependent: boolean | null = null
+  const tplan: TestPlan | null = deps.contractTests ? buildTestPlan(req.acceptance, ws.exists('package.json') ? ws.read('package.json') : null) : null
+  function traceability(): NonNullable<WorkflowResult['testTraceability']> {
+    return Object.entries(groundingByFile).flatMap(([file, gs]) => gs.map((g, i) => ({ test_id: `${file}#${i + 1}`, file, criterion_ids: g.criterion_id ? [g.criterion_id] : [], behavior: g.behavior, generated_by: g.source, reviewed_by: tplan ? ['foundry:deterministic-review', ...testReviews.filter((r) => r.file === file && r.reviewer !== 'foundry:deterministic-review').map((r) => r.reviewer)] : [], confidence: g.confidence })))
+  }
+  /** Everything besides quarantine that keeps a verified run from CLEAN: required criteria without a grounded test, ungrounded tests, unresolved ambiguity, order dependence. */
+  const cleanBlockersNow = (): string[] => {
+    if (!tplan) return []
+    const b: string[] = []
+    const files = Object.fromEntries(tplan.files.filter((f) => ws.exists(f.path)).map((f) => [f.path, ws.read(f.path)]))
+    const missing = uncoveredCriteria(tplan, files, req.acceptance)
+    if (missing.length) b.push(`required criteria without a grounded passing test: ${missing.map((n) => 'C' + n).join(', ')}`)
+    const ungrounded = Object.values(groundingByFile).flat().filter((g) => g.confidence === 'NONE')
+    if (ungrounded.length) b.push(`${ungrounded.length} ungrounded test(s)`)
+    if (testDefects.some((d) => d.kind === 'AMBIGUOUS' && !d.resolved)) b.push('unresolved ambiguity between a test and the contract')
+    if (orderIndependent === false) b.push('test results depend on test order (hidden shared state)')
+    return b
+  }
   const writerLabel = deps.testWriter?.label ?? 'builder'
-  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => { const isClean = status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true; for (const r of ledger.records) r.cleanOutcomeImpact = r.decision === 'ACCEPTED' ? (isClean ? 'CLEAN_AFTER_ACCEPTED_ASSIST' : 'NOT_CLEAN') : r.decision === 'REJECTED' ? 'ASSIST_REJECTED' : 'PENDING'; return {  build, subtasks: classifySteps(((state as CheckpointState | undefined)?.steps ?? []) as never, build, ledger.records.map((r) => ({ subtaskId: r.subtaskId, file: r.contextScope.files[0] ?? '', accepted: r.decision === 'PENDING' ? null : r.decision === 'ACCEPTED', family: r.provider }))), frontier: { usage: ledger.usage(status === 'COMPLETED' ? (quarantined === 0 && verifiedAtEnd === true) : null), records: ledger.records }, cleanKind: status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true ? (ledger.records.some((r) => r.decision === 'ACCEPTED') ? 'CLEAN_WITH_FRONTIER_ASSIST' : 'CLEAN_LOCAL_ONLY') : null, testGrounding: groundingByFile, testAuthoring: { writer: writerLabel, candidates: candidateLog }, status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, modelTransients: transients, completionClass: completionClass({ status, quarantinedTests: quarantined }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor } }
+  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => { const blockers = status === 'COMPLETED' ? cleanBlockersNow() : []; const clean = status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true && blockers.length === 0; const isClean = clean; for (const r of ledger.records) r.cleanOutcomeImpact = r.decision === 'ACCEPTED' ? (isClean ? 'CLEAN_AFTER_ACCEPTED_ASSIST' : 'NOT_CLEAN') : r.decision === 'REJECTED' ? 'ASSIST_REJECTED' : 'PENDING'; return {  build, subtasks: classifySteps(((state as CheckpointState | undefined)?.steps ?? []) as never, build, ledger.records.map((r) => ({ subtaskId: r.subtaskId, file: r.contextScope.files[0] ?? '', accepted: r.decision === 'PENDING' ? null : r.decision === 'ACCEPTED', family: r.provider }))), frontier: { usage: ledger.usage(status === 'COMPLETED' ? clean : null), records: ledger.records }, cleanKind: clean ? (ledger.records.some((r) => r.decision === 'ACCEPTED') ? 'CLEAN_WITH_FRONTIER_ASSIST' : 'CLEAN_LOCAL_ONLY') : null, testGrounding: groundingByFile, testAuthoring: { writer: writerLabel, candidates: candidateLog }, testPlan: tplan ? { entry: tplan.entry, files: tplan.files, tests: tplan.tests } : null, testTraceability: traceability(), testReviews, testDefects, cleanBlockers: blockers, status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, modelTransients: transients, completionClass: completionClass({ status, quarantinedTests: quarantined, cleanBlockers: blockers }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor } }
 
   // ---- state: resume from the latest checkpoint when one exists
   const baselineSnap = ws.snapshot()
@@ -162,12 +195,14 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     const fileSteps: CheckpointStep[] = []
     let n = 0
     for (const layer of LAYER_ORDER) {
+      if (layer === 'tests' && tplan) { for (const f of tplan.files) { n += 1; fileSteps.push({ id: `s${n}`, title: `tests: create ${f.path}`, status: 'PENDING', layer: 'tests', files: [f.path], note: `contract tests for ${f.criteria.map((c) => 'C' + c).join(', ')}` }) } continue }
       const sl = plan.slices.find((s) => s.layer === layer)
       if (!sl) continue
       // the page that loads a changed client script is part of the UI surface: it must be a step even when the planner ranking missed it
       const uiHosts = layer === 'ui' ? sl.files.flatMap((f) => (index0.dependents[f.path] ?? []).filter((h) => index0.files[h]?.isHtml && !sl.files.some((x) => x.path === h)).map((h) => ({ path: h, action: 'modify' as const, rationale: `loads ${f.path}` }))).filter((h, i, a) => a.findIndex((x) => x.path === h.path) === i) : []
       for (const f of [...sl.files, ...uiHosts]) { n += 1; fileSteps.push({ id: `s${n}`, title: `${layer}: ${f.action} ${f.path}`, status: 'PENDING', layer, files: [f.path], note: f.rationale.slice(0, 120) }) }
     }
+    if (deps.reuseImplementation) for (const st of fileSteps) if (st.layer !== 'tests') { st.status = 'DONE'; st.note = 'implementation reused (replay); verified by the independent verifier below' }
     if (!fileSteps.length) { failAssignment(log, assignmentId, actor, 'the code-aware plan found no files to change: ' + (plan.uncertainties[0] ?? 'UNDETERMINED'), undefined, clock()); return result('FAILED', 'no plan: ' + (plan.uncertainties[0] ?? 'UNDETERMINED')) }
     // Acceptance runs BEFORE model-written tests: the independent verifier is ground truth for the implementation, so implementation defects are repaired against it first.
     if (deps.finalVerification) { const at = fileSteps.findIndex((x) => x.layer === 'tests'); fileSteps.splice(at < 0 ? fileSteps.length : at, 0, { id: 'accept', title: 'acceptance: independent verification', status: 'PENDING', files: [] }) }
@@ -620,6 +655,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         if (tests) {
           const run = await runCheck(tests)
           state.validations.push({ stepId: 'verify', command: tests.join(' '), status: run.exitCode === 0 ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: run.outputHash, summary: `${parseToolOutput(run.stdout, run.stderr).pass} pass / ${parseToolOutput(run.stdout, run.stderr).fail} fail` })
+          if (tplan && tests.length > 3 && run.exitCode === 0) {
+            // order independence: the same files in reverse order must give the same outcome (every test has its own server and data, so this proves no hidden shared state)
+            const rev = await runCheck([tests[0], tests[1], ...tests.slice(2).reverse()])
+            orderIndependent = rev.exitCode === 0 && failCount(rev) === failCount(run)
+            emit('ORDER_CHECK', `reverse-order run ${rev.exitCode === 0 ? 'passes like the forward run' : 'DIFFERS from the forward run'}`)
+          }
           if (run.exitCode !== 0) { const ok = await debugLoop(run, [...changed].filter((f) => !/^test\//.test(f)).concat([...changed].filter((f) => /^test\//.test(f))), step.id, 'full test suite'); if (!ok) { step.status = 'FAILED'; step.note = 'test suite still failing (UNDETERMINED)'; checkpoint(); failAssignment(log, assignmentId, actor, 'the full test suite fails and the cause is UNDETERMINED after bounded evidence-based repairs', { validation: 'FAILED', summary: 'tests failing', artifacts: [...changed], executor, tokens, latencyMs: Date.now() - t0, retries: repairs }, clock()); return result('FAILED', 'test suite failing; UNDETERMINED') } }
         }
         if (deps.finalVerification) {
@@ -643,7 +684,25 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       let routeKept = ''
       const keep = keepExportsFor(path)
       const mode = chooseMode(job.exists, job.current.split('\n').length, keep)
-      const askFile = async (extra: string[], retry = 0, viaOverride?: ModelClient) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}, viaOverride ?? (job.role === 'test' ? deps.testWriter?.model : undefined)); noteTokens(r); return r }
+      const contractFile = !!tplan && step.layer === 'tests' && tplan.files.some((f) => f.path === path)
+      if (contractFile && tplan) {
+        // the harness is Foundry's, not the model's: deterministic text, rewritten whenever it differs
+        const hsrc = harnessSource(tplan.entry, tplan.storageVars)
+        if (!ws.exists(tplan.harnessPath) || ws.read(tplan.harnessPath) !== hsrc) { await writeFile(step.id, tplan.harnessPath, hsrc); emit('HARNESS_WRITTEN', `${tplan.harnessPath}: per-test server process, port and empty data directory`) }
+      }
+      const implRelated = (): { path: string; text: string }[] => {
+        const idx = buildWorkspaceIndex(ws.root), out: { path: string; text: string }[] = []
+        let budget = 8000
+        const queue = [tplan?.entry ?? '']
+        for (let depth = 0; depth < 3 && queue.length; depth++) for (const q of queue.splice(0)) {
+          if (!q || out.some((o) => o.path === q) || /^test\//.test(q) || !ws.exists(q)) continue
+          const t = ws.read(q); if (budget - t.length < 0) continue
+          budget -= t.length; out.push({ path: q, text: t })
+          for (const i of idx.files[q]?.imports ?? []) if (i.resolved) queue.push(i.resolved)
+        }
+        return out
+      }
+      const askFile = async (extra: string[], retry = 0, viaOverride?: ModelClient) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: contractFile ? implRelated() : relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode, ...(contractFile && tplan ? { testPlanText: planPromptFor(tplan, path) } : {}) }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}, viaOverride ?? (job.role === 'test' ? deps.testWriter?.model : undefined)); noteTokens(r); return r }
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       for (let rej = 0; rej < 3 && reply.ok; rej++) {
@@ -653,7 +712,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
           if (sfix !== null) { parsedReply = { ...parsedReply, content: sfix }; problem = gateProblem(path, sfix); if (problem) routeKept = routeRegion(sfix) }
         }
         // TEST REVIEWER (deterministic contract-grounding challenge): a test that maps to no numbered criterion is sent back before it is ever executed
-        if (!problem && job.role === 'test' && (deps.testWriter || deps.groundTests) && rej < 2 && parsedReply.kind === 'code') { const ch = ungroundedChallenge(groundTests(path, parsedReply.content, req.acceptance, writerLabel), req.acceptance.length); if (ch) problem = `TEST REVIEWER: ${ch}` }
+        if (!problem && contractFile && tplan && rej < 2 && parsedReply.kind === 'code') { const rv = reviewTestFile(path, parsedReply.content, tplan); const rp = reviewProblem(rv); if (rp) { problem = `TEST REVIEWER: ${rp}`; testReviews.push({ file: path, reviewer: 'foundry:deterministic-review', verdict: 'REVISE', findings: rv.map((f) => `${f.code}: ${f.detail}`.slice(0, 200)) }) } }
+        if (!problem && job.role === 'test' && (deps.testWriter || deps.groundTests || contractFile) && rej < 2 && parsedReply.kind === 'code') { const ch = ungroundedChallenge(groundTests(path, parsedReply.content, req.acceptance, writerLabel), req.acceptance.length); if (ch) problem = `TEST REVIEWER: ${ch}` }
         if (!problem) break
         if (rej >= 2 && !isCollisionProblem(problem) && !FACT_BEARING.test(problem)) break // the third, targeted retry is reserved for problems that carry exact facts (collisions, route conflicts, contract routes/statuses, state drift, persistence, syntax, undeclared names); bounded
         feedback = problem
@@ -683,7 +743,25 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const pr = parsedReply
       if (pr.kind === 'no_change') { step.status = 'SKIPPED'; step.note = 'model: NO_CHANGE needed for this file'; checkpoint(); emit('NO_CHANGE', path); continue }
       if (pr.kind === 'invalid') { step.status = 'FAILED'; step.note = `unusable reply: ${pr.reason}`; checkpoint(); failAssignment(log, assignmentId, actor, `model reply unusable for ${path}: ${pr.reason}`, undefined, clock()); return result('FAILED', `unusable reply for ${path}`) }
-      await writeFile(step.id, path, pr.content)
+      let toWrite = pr.content
+      if (contractFile && tplan) {
+        const dropped = dropUngrounded(path, toWrite, req.acceptance)
+        if (dropped) { toWrite = dropped.content; testReviews.push({ file: path, reviewer: 'foundry:deterministic-review', verdict: 'REJECTED_UNGROUNDED', findings: dropped.names.map((n) => n.slice(0, 120)) }); emit('TEST_REJECTED_BEFORE_EXECUTION', `${path}: ${dropped.names.length} test(s) map to no acceptance criterion`) }
+        // LOCAL TEST REVIEWER: a separate local model judges the file against its plan rows BEFORE it runs; at most one revision, accepted only if it still passes every static and plan check
+        if (deps.testReviewer && budgetLeft() && helperOk(`${path}: local test review`)) {
+          helperCalls += 1
+          const rv = await call(REVIEWER_SYSTEM, reviewerPrompt(tplan, path, toWrite), true, { temperature: 0 }, deps.testReviewer.model)
+          const verdict = rv.ok ? parseReviewerVerdict(rv.text) : null
+          testReviews.push({ file: path, reviewer: deps.testReviewer.label, verdict: verdict?.verdict ?? 'NO_VERDICT', findings: verdict?.problems ?? [] })
+          emit('TEST_REVIEW', `${path}: ${deps.testReviewer.label}: ${verdict?.verdict ?? 'NO_VERDICT'}`)
+          if (verdict?.verdict === 'REVISE' && budgetLeft()) {
+            const r2 = await askFile([`THE LOCAL REVIEWER FOUND THESE PROBLEMS (fix exactly these and keep everything else): ${verdict.problems.join(' | ')}`, `THE FILE TO REVISE:\n${toWrite.slice(0, 6000)}`], 1)
+            const p2 = r2.ok ? parseEditReply(r2.text, job.exists ? job.current : null, path) : null
+            if (p2?.kind === 'code' && !gateProblem(path, p2.content) && !reviewProblem(reviewTestFile(path, p2.content, tplan))) { toWrite = dropUngrounded(path, p2.content, req.acceptance)?.content ?? p2.content; testReviews.push({ file: path, reviewer: deps.testReviewer.label, verdict: 'REVISION_ACCEPTED', findings: [] }) } else testReviews.push({ file: path, reviewer: deps.testReviewer.label, verdict: 'REVISION_REJECTED', findings: ['the revision failed a static or plan check; the original (already reviewed deterministically) is kept'] })
+          }
+        }
+      }
+      await writeFile(step.id, path, toWrite)
       emit('WRITE', path)
       // validate this step
       let stepOk = true
@@ -699,7 +777,24 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
           state.validations.push({ stepId: step.id, command: tests.join(' '), status: run.exitCode === 0 ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: run.outputHash, summary: `${parseToolOutput(run.stdout, run.stderr).pass} pass / ${parseToolOutput(run.stdout, run.stderr).fail} fail` })
           // COMPETING LOCAL ATTEMPTS: once the implementation is independently verified, a failing test file is a test defect. Other local writers get one bounded try each BEFORE
           // any repair, correction or quarantine; the candidate that satisfies the verified implementation with the most contract-grounded tests wins, everything else is discarded.
-          if (run.exitCode !== 0 && deps.testCandidates?.length && state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED') && helperOk(`${path}: competing test candidates`)) {
+          // env/flake handling and defect classification (evidence first: whose fault is each failing test?)
+          const classifyRun = (r: CommandRecord): DefectVerdict[] => {
+            if (!contractFile) return []
+            const verifierPassed = state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED')
+            const fails = parseTestFailures(`${r.stdout}\n${r.stderr}`).filter((f) => f.file === path || f.file === null)
+            const g = groundTests(path, ws.read(path), req.acceptance, writerLabel)
+            const cc = correctContractAssertions(path, ws.read(path), fails.map((f) => ({ line: f.line, actual: f.actual, expected: f.expected })), req.acceptance)
+            const out: DefectVerdict[] = []
+            for (const f of fails) {
+              const grounded = g.some((x) => x.name.trim() === f.name.trim() && x.confidence !== 'NONE')
+              const v = classifyTestDefect({ verifierPassed, grounded, message: `${f.message} ${r.stderr.slice(-400)}`, contradictsContract: !!cc?.corrections.some((c) => c.line === f.line) })
+              out.push(v)
+              if (!testDefects.some((d) => d.file === path && d.test === f.name && d.kind === v.kind)) testDefects.push({ file: path, test: f.name, kind: v.kind, basis: v.basis, resolved: false })
+            }
+            return out
+          }
+          const runCandidates = async () => {
+            if (run.exitCode !== 0 && deps.testCandidates?.length && state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED') && helperOk(`${path}: competing test candidates`)) {
             const base = ws.read(path)
             const pool: { label: string; content: string; failing: number; passed: boolean; grounded: number }[] = [{ label: writerLabel, content: base, failing: failCount(run), passed: false, grounded: groundTests(path, base, req.acceptance, writerLabel).filter((g) => g.confidence !== 'NONE').length }]
             for (const alt of deps.testCandidates.slice(0, deps.maxCandidatesPerFile ?? 1)) {
@@ -724,6 +819,17 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             run = await runCheck(tests)
             state.validations.push({ stepId: step.id, command: tests.join(' '), status: run.exitCode === 0 ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: run.outputHash, summary: `after competing test candidates: kept ${best.label}` })
           }
+          }
+          if (run.exitCode !== 0 && contractFile) {
+            const first = classifyRun(run)
+            if (first.some((d) => d.kind === 'ENVIRONMENT_DEFECT')) {
+              emit('ENVIRONMENT_RERUN', `${path}: a failure looks like a server start/connection problem of the isolated run; re-running once on fresh state`)
+              const again = await runCheck(tests)
+              state.validations.push({ stepId: step.id, command: tests.join(' '), status: again.exitCode === 0 ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: again.outputHash, summary: 'environment re-run on fresh isolated state' })
+              if (again.exitCode === 0 || failCount(again) < failCount(run)) { run = again; if (run.exitCode === 0) for (const d of testDefects) if (d.file === path && d.kind === 'ENVIRONMENT_DEFECT') d.resolved = true }
+            }
+          }
+          if (!(tplan && contractFile)) await runCandidates()
           if (run.exitCode !== 0) {
             // Once the independent acceptance has PASSED, the implementation is verified ground truth: a failure that only implicates the NEW test is a test defect,
             // so the repair is confined to that test file instead of risking the verified behaviour.
@@ -762,6 +868,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                   } else { await writeFile(step.id, path, before, `:restore${++restoreSeq}`); emit('CONTRACT_CORRECTION_REVERTED', `${path}: the correction did not reduce the failures`) }
                 }
               }
+            }
+            // CONTRACT-MODE ORDER: reviewer (before the run) -> writer retry with evidence (debug loop) -> deterministic correction -> ONE alternate local candidate -> isolated re-run -> only then quarantine
+            if (!stepOk && acceptPassed && tplan && contractFile) {
+              run = await runCheck(tests)
+              if (run.exitCode !== 0) await runCandidates()
+              stepOk = run.exitCode === 0
             }
             // TEST-AUTHORING ESCALATION (last step of the local-first order: writer + repairs -> one local candidate -> deterministic contract correction -> optional bounded assist).
             // Only a failing test that is GROUNDED in an acceptance criterion, on an implementation the independent verifier already passed, whose local candidate also failed, qualifies.
@@ -875,6 +987,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         }
       }
       if (!stepOk) { step.status = 'FAILED'; checkpoint(); failAssignment(log, assignmentId, actor, `step ${step.id} (${path}) could not be validated; cause UNDETERMINED after bounded evidence-based repairs`, { validation: 'FAILED', summary: `${path} failing`, artifacts: [...changed], executor, tokens, latencyMs: Date.now() - t0, retries: repairs }, clock()); return result('FAILED', `${path}: UNDETERMINED`) }
+      if (contractFile) for (const d of testDefects) if (d.file === path) d.resolved = true
       if (step.layer === 'tests' && ws.exists(path)) groundingByFile[path] = groundTests(path, ws.read(path), req.acceptance, writerLabel)
       step.status = 'DONE'; stepsDone += 1; checkpoint()
     }
