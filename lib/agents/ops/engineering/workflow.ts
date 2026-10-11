@@ -830,7 +830,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             for (const v of tplan.storageVars) {
               const def = /default:?\s*([\w./-]+\.\w+)/i.exec(req.acceptance.find((a) => a.includes(v)) ?? '')?.[1]
               if (!def) continue
-              for (const f of [...changed].filter((x) => !/^test\//.test(x) && ws.exists(x) && ws.read(x).includes(`process.env.${v}`))) {
+              for (const f of Object.keys(ws.snapshot()).filter((x) => /\.m?js$/.test(x) && !/^(?:test|public|node_modules)\//.test(x) && ws.read(x).includes(`process.env.${v}`))) {
                 const fx = repairDefaultStoragePath(ws.read(f), v, def)
                 if (!fx) continue
                 snap[f] = ws.read(f)
