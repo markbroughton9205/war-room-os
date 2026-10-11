@@ -825,7 +825,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const fpStep: ImplStep | null = fpOn && fpContract && job.role === 'feature' ? buildImplStep(fpContract, fpRecipes, { file: path, layer: step.layer ?? 'domain', exists: job.exists, current: job.current, step: state.steps.findIndex((x) => x.id === step.id) + 1, dependsOn: state.steps.filter((x) => x.status === 'DONE' && x.files[0] && !/^test\//.test(x.files[0])).map((x) => x.files[0]) }) : null
       if (fpStep && !fpSteps.some((x) => x.TARGET_FILE === path)) fpSteps.push(fpStep)
       let fpForceRewrite = false // first-pass: edits that cannot be applied fall back to ONE whole-file reply (counted as a rewrite, never silent)
-      const fpPrompt = (): { firstPass?: { contractText: string; recipeText: string; stepText: string; manifest: boolean } } => (fpStep && fpContract ? { firstPass: { contractText: renderContract(fpContract, 1300), recipeText: renderRecipes(fpContract, fpRecipes, step.layer ?? 'domain', 2300, { path, text: job.current }), stepText: renderImplStep(fpStep, 1500), manifest: true } } : {})
+      const fpPrompt = (): { firstPass?: { contractText: string; recipeText: string; stepText: string; manifest: boolean } } => (fpStep && fpContract ? { firstPass: { contractText: renderContract(fpContract, 1300), recipeText: renderRecipes(fpContract, fpRecipes, step.layer ?? 'domain', 3000, { path, text: job.current }), stepText: renderImplStep(fpStep, 1500), manifest: true } } : {})
       const contractFile = !!tplan && step.layer === 'tests' && tplan.files.some((f) => f.path === path)
       if (contractFile && tplan) {
         // the harness is Foundry's, not the model's: deterministic text, rewritten whenever it differs

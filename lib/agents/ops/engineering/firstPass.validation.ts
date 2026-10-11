@@ -11,7 +11,7 @@ import { deriveImplementationContract, renderContract, resolveContract, unresolv
 import { buildEvidence } from './failureEvidence'
 import { RECIPES, autofix, buildImplStep, checkManifest, matchRecipes, renderImplStep, renderRecipes, runRecipeChecks, stripManifest, unawaitedFsCalls } from './recipes'
 import { applyStructOps, parseStructOps, preservedShare, topLevelDecls } from './structEdit'
-import { parseEditReply } from './prompts'
+import { parseEditReply, fitPrompt } from './prompts'
 import { importProblems, runPreflight, staticPreflight, preflightTap, preflightHypotheses } from './preflight'
 import { classifyLeftShift, criterionOfCheck, newFirstPassState, buildFirstPassReport } from './firstPass'
 import { runFeatureWorkflow, type WorkflowDeps } from './workflow'
@@ -300,7 +300,7 @@ process.env.ENGINE_NODE_PARSE = '0'
   const rep2 = { findings: [OFF, { ...OFF, fact: 'POST /api/alerts/3/unread answered HTTP 404 {"error":"not found"}', route: 'POST /api/alerts/:id/unread' }], advisories: [], checked: ['x'], skipped: [], passed: false, runtimeMs: 1 }
   const hy = preflightHypotheses(rep2.findings, 'server.mjs', "import { markRead } from './src/eventFeed.mjs'\nimport { y } from './src/eventService.mjs'\n")
   const ev2 = buildEvidence({ output: preflightTap(rep2), acceptance: ALERT_FEATURE.acceptance, files: { 'server.mjs': "createServer((req, res) => { if (parts.length === 3) {} })\n", 'src/eventFeed.mjs': 'export const x = 1\n' }, baseline: {}, extra: hy })
-  check('F72_each_preflight_finding_gets_its_own_targeted_hypothesis_that_names_the_dispatcher_when_the_route_fell_through_to_the_generic_not_found', hy.length === 2 && /path test for this route does not match the real pathname/.test(hy[0].statement) && hy[0].files[0] === 'server.mjs' && ev2.queue.filter((h) => h.key.startsWith('preflight:ROUTE.reachable')).length === 2 && ev2.queue[0].key.startsWith('preflight:ROUTE.reachable') && /segment indexes/.test(ev2.queue[0].statement), ev2.queue.map((h) => h.key).join(','))
+  check('F72_each_preflight_finding_gets_its_own_targeted_hypothesis_that_names_the_dispatcher_when_the_route_fell_through_to_the_generic_not_found', hy.length === 2 && /does not match the real pathname/.test(hy[0].statement) && hy[0].files[0] === 'server.mjs' && ev2.queue.filter((h) => h.key.startsWith('preflight:ROUTE.reachable')).length === 2 && ev2.queue[0].key.startsWith('preflight:ROUTE.reachable') && /ANCHORED REGEX/.test(ev2.queue[0].statement), ev2.queue.map((h) => h.key).join(','))
 }
 
 // ---- found by dry run 5: the worker named the wrong symbol for an otherwise unambiguous edit; and the storage recipe must keep legacy exports out of the new collection
@@ -314,6 +314,26 @@ process.env.ENGINE_NODE_PARSE = '0'
 
 {
   check('F77_list_semantics_are_derived_from_the_contract_prose_flag_words_negations_and_un_prefixes_included', ca.filterRules.length === 4 && ca.filterRules.some((r) => r.value === 'unread' && r.requires.map((q) => `${q.flag}=${q.value}`).sort().join() === 'archived=false,read=false') && ca.filterRules.some((r) => r.value === 'read' && r.requires.map((q) => `${q.flag}=${q.value}`).sort().join() === 'archived=false,read=true') && ca.filterRules.some((r) => r.value === 'archived' && r.requires.length === 1 && r.requires[0].value) && ca.filterRules.some((r) => r.value === 'all' && r.everything) && ca.defaultViews[0]?.requires[0]?.flag === 'archived' && ca.defaultViews[0].requires[0].value === false && ct.filterRules.length === 0)
+}
+
+// ---- found by Alert x3: a route that falls through to the generic 404 is a ROUTE problem in the entry file, one grouped hypothesis; and the builder is given the contract's exact selections and anchored route regexes
+{
+  const FT = { stage: 'RUNTIME' as const, check: 'ROUTE.reachable', criterion: 2, recipe: 'ROUTE_ORDER', file: 'server.mjs', symbol: null, fact: 'POST /api/alerts/2/read answered HTTP 404 {"error":"not found"}', expected: 'HTTP 200', route: 'POST /api/alerts/:id/read', expect: 200, got: 404 }
+  const SETTER = { ...FT, check: 'STATUS.setter', fact: 'POST /api/alerts/6/archive answered HTTP 404 {"error":"not found"}', route: 'POST /api/alerts/:id/archive', expect: undefined }
+  const STATUS = { ...FT, check: 'STATUS.conflict', fact: 'POST /api/alerts/6/read answered HTTP 404 {"error":"Alert not found"}', route: 'POST /api/alerts/:id/read', expect: 409, got: 404 }
+  const rep3 = { findings: [FT, SETTER, STATUS], advisories: [], checked: ['x'], skipped: [], passed: false, runtimeMs: 1 }
+  const tap3 = preflightTap(rep3)
+  const hy3 = preflightHypotheses(rep3.findings, 'server.mjs', "import { a } from './src/eventService.mjs'\n")
+  const ev3 = buildEvidence({ output: tap3, acceptance: ALERT_FEATURE.acceptance, files: { 'server.mjs': 'createServer(() => {})\n', 'src/eventService.mjs': 'export const a = 1\n' }, baseline: {}, extra: hy3 })
+  check('F78_a_route_that_fell_through_to_the_generic_not_found_is_written_as_a_missing_route_and_its_hypothesis_is_one_grouped_statement_aimed_at_the_entry_file_not_the_service', /is not matched by the dispatcher/.test(tap3) && hy3[0].files[0] === 'server.mjs' && hy3[1].files[0] === 'server.mjs' && /ANCHORED REGEX/.test(hy3[0].statement) && /archive/.test(hy3[0].statement) && hy3[2].files[0] !== 'server.mjs' && ev3.queue[0].files[0] === 'server.mjs' && ev3.checks.slice(0, 2).every((c) => c.kind === 'ROUTE_MISSING'), `${tap3}\n${ev3.queue.map((h) => h.key + '@' + h.files[0]).join(' ')}`)
+  const apiText = renderRecipes(ca, matchRecipes(ca), 'api', 3000, { path: 'server.mjs', text: 'createServer' })
+  const domText = renderRecipes(ca, matchRecipes(ca), 'domain', 3000, { path: 'src/eventService.mjs', text: 'export function x() {}\n' })
+  check('F79_the_api_prompt_carries_an_anchored_regex_for_every_contract_route_and_the_domain_prompt_carries_the_exact_flag_selections', apiText.includes('/^\\/api\\/alerts\\/(\\d+)\\/read$/') && apiText.includes('/^\\/api\\/alerts\\/read-all$/') && /no parameter -> archived=false/.test(domText) && /\?state=unread -> archived=false and read=false/.test(domText) && /\?state=all -> every item/.test(domText) && domText.length <= 3000, apiText.length + ' ' + domText.length)
+  const two = only({ 'server.mjs': "import { createServer } from 'node:http'\ncreateServer(async (req, res) => {\n  return reply(res, 201, svc((await body(req)).title, (await body(req)).severity))\n})\n" }, 'ROUTE_ORDER.body-read-once')
+  check('F80_a_request_body_read_twice_in_one_statement_is_found_and_a_single_read_is_not', two.length === 1 && /second read|empty/.test(two[0].fact) && only({ 'server.mjs': "import { createServer } from 'node:http'\ncreateServer(async (req, res) => {\n  const input = await body(req)\n  return reply(res, 201, svc(input.title, input.severity))\n})\n" }, 'ROUTE_ORDER.body-read-once').length === 0)
+  const big = ['TASK', 'ACCEPTANCE', 'RELATED CODE (x)\n' + 'x'.repeat(30000), 'FILE', 'INSTRUCTIONS']
+  const fitted = fitPrompt(big, 2)
+  check('F81_an_oversized_prompt_is_shortened_in_the_related_code_only_and_a_small_prompt_is_left_alone', fitted.length <= 16_500 + 80 && fitted.includes('TASK') && fitted.includes('INSTRUCTIONS') && fitted.includes('related code shortened') && fitPrompt(['a', 'RELATED CODE b', 'c'], 1) === 'a\n\nRELATED CODE b\n\nc')
 }
 void deriveAssignments; void AgentOpsLog
 

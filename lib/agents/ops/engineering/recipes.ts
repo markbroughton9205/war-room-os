@@ -183,11 +183,24 @@ export const RECIPES: Recipe[] = [
     matches: (c) => c.routes.some((r) => !r.compat),
     layers: ['api'],
     prerequisites: ['a request dispatcher in the entry file'],
+    brief: (c) => {
+      const re = (p: string) => '/^' + p.split('/').filter(Boolean).map((seg) => (seg.startsWith(':') ? (c.idNumeric ? '(\\d+)' : '([^/]+)') : seg.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))).map((x) => '\\/' + x).join('') + '$/'
+      const rs = c.routes.filter((r) => !r.compat).map((r) => `${r.method} ${r.path} -> ${re(r.path)}`)
+      return `Match EVERY route with an anchored regex on url.pathname (never split('/') index arithmetic: it silently skips segments, which answers the generic 404): ${rs.join(' ; ').slice(0, 900)}. Literal routes before parameter routes; no route twice.`
+    },
     structure: (c) => [`In the dispatcher register routes in this order: exact literals first (${c.routes.filter((r) => !r.params.length && !r.compat).map((r) => `${r.method} ${r.path}`).slice(0, 8).join(', ')}), then parameter routes (${c.routes.filter((r) => r.params.length).map((r) => `${r.method} ${r.path}`).slice(0, 8).join(', ')}). A route such as /x/read-all or /x/unread-count must come BEFORE any /x/:id or startsWith('/x/') test.`],
     invariants: ['no literal route is shadowed by an earlier prefix or parameter route', 'no route is registered twice'],
-    failureModes: ['parameter route placed first swallows /x/read-all', 'prefix startsWith test swallows literal sub-routes'],
+    failureModes: ['parameter route placed first swallows /x/read-all', 'prefix startsWith test swallows literal sub-routes', 'split(\'/\') index arithmetic that is off by the leading segments (the route falls through to 404)', 'the request body read twice in one statement (the second read is empty)'],
     staticChecks: [
       { id: 'shadowing', describe: 'no registered route is unreachable', run: (files, c) => Object.entries(files).filter(([p, t]) => /\.m?js$/.test(p) && !/^(test|public|node_modules)\//.test(p) && routeTable(t).length >= 3).flatMap(([p, t]) => routeFindings(p, t).map((f) => find('ROUTE_ORDER', 'shadowing', { criterion: c.routes.find((r) => r.path === f.hidden || f.hidden.includes(r.path))?.criterion ?? null, file: p, symbol: null, fact: f.kind === 'DUPLICATE' ? `${f.hidden} is registered twice (lines ${f.hidingLine} and ${f.hiddenLine})` : `${f.hidden} (line ${f.hiddenLine}) is never reached: ${f.hiding} (line ${f.hidingLine}) matches it first`, expected: 'register the specific route before the broad one' }))) },
+      { id: 'body-read-once', describe: 'the request body stream is read at most once per request', run: (files, c) => {
+        const out: RecipeFinding[] = []
+        for (const [p, t] of Object.entries(files)) {
+          if (!/\.m?js$/.test(p) || /^(test|public|node_modules)\//.test(p) || !/createServer\s*\(/.test(t)) continue
+          t.split('\n').forEach((ln, i) => { const reads = [...ln.matchAll(/\bawait\s+(\w*[bB]ody\w*|\w*[jJ]son\w*)\(\s*req\s*\)/g)]; if (reads.length >= 2) out.push(find('ROUTE_ORDER', 'body-read-once', { criterion: c.routes.find((r) => r.createsRecord)?.criterion ?? null, file: p, symbol: reads[0][1], fact: `${p}:${i + 1} calls ${reads[0][1]}(req) ${reads.length} times in one statement; a request body can be read only once, so every read after the first returns an empty object (the missing values silently become defaults)`, expected: `read the body once into a variable (const input = await ${reads[0][1]}(req)) and use that variable` })) })
+        }
+        return out
+      } },
       { id: 'routes-served', describe: 'every route the contract names is registered with its method', run: (files, c) => {
         const server = Object.entries(files).find(([p, t]) => /\.m?js$/.test(p) && !/^(test|public|node_modules)\//.test(p) && (/createServer\s*\(/.test(t) || routeTable(t).length >= 3))
         if (!server) return []
@@ -195,7 +208,7 @@ export const RECIPES: Recipe[] = [
         return contractRouteProblems(server[0], server[1], c.behaviors.map((b) => b.text), clients).map((fact) => find('ROUTE_ORDER', 'routes-served', { criterion: null, file: server[0], symbol: null, fact, expected: 'register the route with the method written in the contract' }))
       } },
     ],
-    verificationChecks: ['each contract route answers (not 404 route-not-found) for a valid sample request'],
+    verificationChecks: ['each contract route answers (not 404 route-not-found) for a valid sample request', 'the request body is read once'],
   },
   {
     id: 'STATE_ACTIONS',
@@ -220,7 +233,8 @@ export const RECIPES: Recipe[] = [
     matches: (c) => c.filters.length > 0,
     layers: ['domain', 'api'],
     prerequisites: ['a list route'],
-    structure: (c) => [`The list route reads its query parameters (${c.filters.map((f) => `?${f.param}${f.values.length ? '=' + f.values.join('|') : ''}`).join(', ')}) and filters in ONE service function that takes them as arguments. A parameter that is absent applies the contract's default. Combine filters with AND. Compare against the stored flag/field values; never against another parameter's value.`],
+    brief: (c) => `The list route reads ${c.filters.map((f) => '?' + f.param).join(', ')} and filters in ONE service function that takes them as arguments; an absent parameter gives the default view; filters combine with AND; compare stored flag/field values only.${c.defaultViews.length || c.filterRules.length ? ` EXACT SELECTIONS: ${[...c.defaultViews.map((d) => `no parameter -> ${d.requires.map((q) => `${q.flag}=${q.value}`).join(' and ')}`), ...c.filterRules.map((r) => `?${r.param}=${r.value} -> ${r.everything ? 'every item' : r.requires.map((q) => `${q.flag}=${q.value}`).join(' and ')}`)].join('; ')}.` : ''}`,
+    structure: (c) => [`The list route reads its query parameters (${c.filters.map((f) => `?${f.param}${f.values.length ? '=' + f.values.join('|') : ''}`).join(', ')}) and filters in ONE service function that takes them as arguments. A parameter that is absent applies the contract's default. Combine filters with AND. Compare against the stored flag/field values; never against another parameter's value.${c.defaultViews.length || c.filterRules.length ? ` EXACT SELECTIONS from the contract: ${[...c.defaultViews.map((d) => `no parameter -> ${d.requires.map((q) => `${q.flag}=${q.value}`).join(' and ')}`), ...c.filterRules.map((r) => `?${r.param}=${r.value} -> ${r.everything ? 'every item' : r.requires.map((q) => `${q.flag}=${q.value}`).join(' and ')}`)].join('; ')}.` : ''}`],
     invariants: ['every value the contract lists is handled explicitly', 'filters combine', 'the default view is what the contract says it is'],
     failureModes: ['a value the contract lists is never handled', 'the default view includes items the contract excludes', 'a filter overrides another filter instead of narrowing it'],
     staticChecks: [
@@ -334,7 +348,7 @@ const STORAGE_RECIPES = new Set(['JSON_FILE_STORE', 'MONOTONIC_IDS'])
 export function recipesForFile(recipes: Recipe[], layer: string, file?: { path: string; text: string }): Recipe[] {
   return recipes.filter((r) => r.layers.includes(layer as Recipe['layers'][number]) && (!file || layer === 'storage' || !STORAGE_RECIPES.has(r.id) || OWNS_DATA.test(file.text) || /(?:store|storage|feed|repo|db|data)/i.test(file.path)))
 }
-export function renderRecipes(c: ImplementationContract, recipes: Recipe[], layer: string, cap = 2400, file?: { path: string; text: string }): string {
+export function renderRecipes(c: ImplementationContract, recipes: Recipe[], layer: string, cap = 3000, file?: { path: string; text: string }): string {
   const rs = recipesForFile(recipes, layer, file)
   if (!rs.length) return ''
   const l: string[] = [`PROVEN RECIPES for the ${layer} layer (follow the structure; do not reinvent it):`]

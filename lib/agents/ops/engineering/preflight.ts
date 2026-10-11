@@ -358,11 +358,13 @@ export async function runPreflight(root: string, c: ImplementationContract, opts
 }
 
 /** TAP-style failure text in the shape the repair loop already understands: a check name and the structured fact, never a log dump. */
+/** The request fell through to the dispatcher's generic "not found": the route's path test does not match the real pathname (not a wrong status chosen by a handler). */
+export const isFallThrough = (f: PreflightFinding): boolean => f.stage === 'RUNTIME' && f.got === 404 && f.expect !== 404 && /"error"\s*:\s*"not found"/.test(f.fact)
 export function preflightTap(report: PreflightReport): string {
   if (!report.findings.length) return `ok 1 - implementation preflight\n# tests ${report.checked.length}\n# pass ${report.checked.length}\n# fail 0\n`
   // a status finding is written the way the repair loop's evidence builder reads a failing check: the required status in the name, the observed one as status=NNN
   const lines = report.findings.map((f, i) => {
-    const name = f.route && f.expect ? `${f.route} must answer ${f.expect} (${f.expect}) [${f.check}]` : `${f.fact.split(/[:(]/)[0].slice(0, 90)} [${f.check}]`
+    const name = isFallThrough(f) && f.route ? `${f.route} is not matched by the dispatcher [${f.check}]` : f.route && f.expect ? `${f.route} must answer ${f.expect} (${f.expect}) [${f.check}]` : `${f.fact.split(/[:(]/)[0].slice(0, 90)} [${f.check}]`
     const msg = f.route && f.got !== undefined ? `status=${f.got} ${f.fact}` : f.fact
     return `not ok ${i + 1} - ${name}\n  message: ${msg}\n  contract: ${f.criterion ? `C${f.criterion}` : 'n/a'}${f.file ? ` file: ${f.file}` : ''}${f.symbol ? ` symbol: ${f.symbol}` : ''}\n  expected: ${f.expected}\n`
   })
@@ -381,11 +383,14 @@ export const localImports = (entryText: string, entryPath: string): string[] => 
 export function preflightHypotheses(findings: PreflightFinding[], entry: string, entryText: string): { check: string; statement: string; files: string[] }[] {
   const imports = localImports(entryText, entry).filter((f) => !/^public\//.test(f))
   const domain = imports.slice(0, 2)
+  const fall = findings.filter(isFallThrough)
+  const fallList = [...new Set(fall.map((f) => f.route ?? f.fact.slice(0, 60)))]
   return findings.map((f) => {
     const id = f.check
     const obs = f.fact.slice(0, 220)
     let statement: string, files: string[]
-    if (id === 'ROUTE.reachable' && f.got === 404) { statement = `${obs}. The dispatcher in ${entry} falls through to its generic "not found" for this request: the path test for this route does not match the real pathname (check the segment indexes after split('/'): every leading segment of the path counts, so an id or action sits at a later index than it looks; or use a regex on url.pathname). Fix ONLY that route's path test; do not touch the other routes.`; files = [entry] }
+    if (isFallThrough(f)) { statement = `${obs}. The dispatcher in ${entry} falls through to its generic "not found" for ${fallList.length} route(s): ${fallList.join('; ')}. The path test of each of them does not match the real pathname. Match every route with an ANCHORED REGEX on url.pathname (for example /^\\/api\\/x\\/(\\d+)\\/(start|stop)$/) instead of split('/') index arithmetic, which silently skips segments; fix those path tests only and leave every other route untouched.`; files = [entry] }
+    else if (id === 'ROUTE.reachable' && f.got === 404) { statement = `${obs}. The dispatcher in ${entry} falls through to its generic "not found" for this request: the path test for this route does not match the real pathname (check the segment indexes after split('/'): every leading segment of the path counts, so an id or action sits at a later index than it looks; or use a regex on url.pathname). Fix ONLY that route's path test; do not touch the other routes.`; files = [entry] }
     else if (id === 'ROUTE.reachable' || id === 'ROUTE.list' || id === 'ROUTE.create-status') { statement = `${obs}. The handler for this route in ${entry} (or the function it calls) throws or answers the wrong status for a valid request.`; files = [entry, ...domain] }
     else if (id.startsWith('UI.')) { statement = `${obs}. The code that serves the page or its script in ${entry} is wrong (check the file path, the encoding argument of readFileSync, and the content type).`; files = [entry] }
     else if (id.startsWith('STATUS.') || id === 'STATE.idempotent') { statement = `${obs}. The status for this case is decided by the domain function (it must throw an error carrying the contract status) and by the handler's catch block (it must answer err.status). Required: ${f.expected}.`; files = [...domain, entry] }

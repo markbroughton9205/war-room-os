@@ -87,9 +87,19 @@ export function statusContract(acceptance: string[], layer: string): string {
   return ['CONTRACT CHECKLIST (the independent verifier checks exactly these):', ...routes.map((r) => `- route: ${r}`), ...codes.filter((c) => !routes.includes(c)).map((c) => `- status: ${c}`), '- every route and every status above must be reachable: register specific routes before prefix/parameter routes, and let errors carry their own status (a catch-all that always answers 400 can never produce 404 or 409).'].join('\n')
 }
 
+/** The local model has an 8192-token window shared with its answer: when a prompt grows past the cap, the RELATED CODE block is what is shortened (the contract, the plan, the file and the instructions are never cut). */
+export const PROMPT_CAP_CHARS = 16_500
+export function fitPrompt(parts: string[], relatedIndex: number, cap = PROMPT_CAP_CHARS): string {
+  const total = (ps: string[]) => ps.filter(Boolean).join('\n\n').length
+  if (total(parts) <= cap || relatedIndex < 0 || !parts[relatedIndex]) return parts.filter(Boolean).join('\n\n')
+  const over = total(parts) - cap
+  const keep = Math.max(600, parts[relatedIndex].length - over - 40)
+  const out = parts.slice(); out[relatedIndex] = parts[relatedIndex].slice(0, keep) + '\n... (related code shortened to fit the model window)'
+  return out.filter(Boolean).join('\n\n')
+}
 export function featurePrompt(input: { request: string; acceptance: string[]; plan: EngineeringCodePlan; job: FileJob; related: { path: string; text: string }[]; lessons: string[]; priorNotes: string[]; keepExports?: string[]; mode?: EditMode; testPlanText?: string; firstPass?: { contractText: string; recipeText: string; stepText: string; manifest: boolean } }): string {
   const rel = input.related.map((r) => `--- ${r.path} ---\n${r.text}`).join('\n\n')
-  return [
+  const parts = [
     `TASK: ${input.request}`,
     `ACCEPTANCE CRITERIA:\n${input.acceptance.map((a) => `- ${a}`).join('\n')}`,
     `PLAN (from code evidence):\n${planContextForModel(input.plan, 1500)}`,
@@ -107,7 +117,8 @@ export function featurePrompt(input: { request: string; acceptance: string[]; pl
     input.job.role === 'test' && !input.testPlanText ? `Write node:test tests (import test from 'node:test'; import assert from 'node:assert') that prove the feature through the real functions above, calling them with exactly the signatures shown in RELATED CODE. Use a temporary data file via the environment variable the code reads. Name every test starting with [C<n>] where <n> is the number of the single obligation it proves. Write at most one or two focused tests per obligation and keep the whole file under about 120 lines. Every test must be independent: start it from its own fresh state (a new temporary data file set through the storage environment variable inside that test, or a unique id) and never depend on another test having run first or on leftover files.\n${testObligations(input.acceptance)}` : '',
     !input.job.exists || input.mode === 'rewrite' ? `Reply with the complete ${input.job.exists ? 'new content' : 'content'} of ${input.job.path} in one fenced block${input.job.exists ? ', or NO_CHANGE' : ''}.` : `Reply with edits for ${input.job.path} (append and/or search/replace), or NO_CHANGE.`,
       input.firstPass?.manifest && input.job.role === 'feature' ? MANIFEST_TEXT : '',
-  ].filter(Boolean).join('\n\n')
+  ]
+  return input.firstPass ? fitPrompt(parts, parts.findIndex((p) => p.startsWith('RELATED CODE'))) : parts.filter(Boolean).join('\n\n')
 }
 
 export function analystPrompt(input: { failureOutput: string; candidates: { path: string; text: string }[]; prior: string[] }): string {
@@ -120,7 +131,7 @@ export function analystPrompt(input: { failureOutput: string; candidates: { path
 }
 
 export function repairPrompt(input: { failureOutput: string; hypothesis: string; file: string; current: string; related: { path: string; text: string }[]; request: string; lessons: string[]; mode?: EditMode; evidence?: string; relatedCap?: number; firstPass?: { contractText: string; recipeText: string } }): string {
-  return [
+  const parts = [
     `FEATURE: ${input.request}`,
     input.firstPass?.contractText ?? '',
     input.firstPass?.recipeText ?? '',
@@ -131,7 +142,8 @@ export function repairPrompt(input: { failureOutput: string; hypothesis: string;
     input.related.length ? `RELATED CODE:\n${input.related.map((r) => `--- ${r.path} ---\n${r.text.slice(0, input.relatedCap ?? 3000)}`).join('\n\n')}` : '',
     `FILE TO FIX: ${input.file}\nCURRENT CONTENT:\n\`\`\`\n${input.current}\n\`\`\``,
     input.mode === 'rewrite' ? `Fix the cause. Reply with the complete corrected content of ${input.file} in one fenced block.` : `Fix the cause with the smallest change. Reply with edits for ${input.file} (append and/or search/replace blocks), not a rewrite.`,
-  ].filter(Boolean).join('\n\n')
+  ]
+  return input.firstPass ? fitPrompt(parts, parts.findIndex((p) => p.startsWith('RELATED CODE'))) : parts.filter(Boolean).join('\n\n')
 }
 
 /** Extract the first fenced block; NO_CHANGE is explicit. Anything else is a refusal to guess. */
