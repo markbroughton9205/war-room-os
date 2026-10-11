@@ -17,7 +17,7 @@ import { testAssistJustified, buildIdentityFor, buildFrontierRequest, renderFron
 import type { FrontierProvider } from './frontierBridge'
 import { groundTests, ungroundedChallenge, type TestGrounding } from './testGrounding'
 import { attachContractStatuses, mapCatchStatus } from './errorStatus'
-import { REVIEWER_SYSTEM, buildTestPlan, criteriaForFailures, repairDefaultStoragePath, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
+import { REVIEWER_SYSTEM, buildTestPlan, criteriaForFailures, HARNESS_PATH, repairDefaultStoragePath, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { repairRouteOrder, statusDiagnosis } from './routeEdit'
@@ -464,7 +464,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       let evidenceText = ''
       if (nextH) {
         hypText = nextH.statement; key = nextH.key
-        targets = nextH.files.filter((f) => ws.exists(f))
+        targets = nextH.files.filter((f) => ws.exists(f) && f !== HARNESS_PATH)
         if (!targets.length) targets = implicatedFiles(nextH).slice(0, 1)
         cand = implicatedFiles(nextH)
         evidenceText = renderEvidence(ev!, nextH, refutedList)
