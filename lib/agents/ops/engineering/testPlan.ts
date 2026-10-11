@@ -365,6 +365,31 @@ export function repairDefaultStoragePath(src: string, envVar: string, defaultPat
 }
 
 /**
+ * IMPLEMENTATION_DEFECT repair #2 (deterministic, fail closed): the default storage path is already cwd-based and equals the contract's path, but nothing ever creates its parent folder,
+ * so the first write fails. Adds ONE guarded `mkdirSync(<parent of the default path>, { recursive: true })` that runs only when the env override is NOT set.
+ * The chosen path is never touched. Null when: the declaration is not recognised, the default is not cwd-anchored, its literals do not resolve to the contract's path,
+ * the parent cannot be derived (no folder, `..`, absolute), or the file already creates folders anywhere (ambiguous: nothing is guessed).
+ */
+export function repairMissingStorageDir(src: string, envVar: string, defaultPath: string): { content: string; note: string } | null {
+  const esc = envVar.replace(/[^A-Z0-9_]/g, '')
+  const want = defaultPath.replace(/^\.?\//, '')
+  if (!esc || !want || /^\/|\.\.|[\\]/.test(want) || !want.includes('/')) return null
+  if (/\bmkdir(?:Sync|p)?\b/.test(src) || !/^\s*import\s/m.test(src)) return null
+  const re = new RegExp(`\\b(?:const|let|var)\\s+\\w+\\s*=\\s*process\\.env\\.${esc}\\s*(?:\\|\\||\\?\\?)\\s*([^\\n;]+)`)
+  const m = re.exec(src)
+  if (!m) return null
+  const expr = m[1]
+  if (!/process\.cwd\(\)/.test(expr) || /__dirname|__filename|import\.meta|\.\./.test(expr)) return null
+  const lits = [...expr.matchAll(/(['"`])([^'"`$]*)\1/g)].map((x) => x[2].replace(/^\/+|\/+$/g, '')).filter(Boolean)
+  if (lits.join('/') !== want || /[`$]/.test(expr)) return null
+  const parent = want.slice(0, want.lastIndexOf('/'))
+  const lineEnd = src.indexOf('\n', m.index + m[0].length)
+  const at = lineEnd < 0 ? src.length : lineEnd
+  const ensure = `\nif (!process.env.${esc}) { try { (await import('node:fs')).mkdirSync(process.cwd() + ${JSON.stringify('/' + parent)}, { recursive: true }) } catch { /* the first write reports it */ } }`
+  return { content: src.slice(0, at) + ensure + src.slice(at), note: `default ${esc} path ${want} is cwd-based but its folder ${parent}/ was never created -> mkdirSync(${parent}, recursive)` }
+}
+
+/**
  * The acceptance criteria that the FAILING checks are about (repair prompt context). A verifier prints the check name and observed values, not the expected ones; without the
  * contract sentence a repair model guesses the expectation and can flip-flop between two wrong defaults. Words are matched by overlap; at most two criteria are returned.
  */

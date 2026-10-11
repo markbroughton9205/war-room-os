@@ -11,7 +11,7 @@ import { correctContractAssertions } from './testContract'
 import { attachContractStatuses, mapCatchStatus } from './errorStatus'
 import { statusReachability } from './staticGates'
 import { criteriaForFailures, normalizeTestNames, TEST_NAME_LIMIT } from './testPlan'
-import { HARNESS_PATH, buildTestPlan, clausesOf, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, repairDefaultStoragePath, startEntry, uncoveredCriteria, variantsOf } from './testPlan'
+import { HARNESS_PATH, buildTestPlan, clausesOf, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, repairDefaultStoragePath, repairMissingStorageDir, startEntry, uncoveredCriteria, variantsOf } from './testPlan'
 import type { EngineeringTool } from '../types'
 
 const { check, finish } = harness('AGENT_ENG_TESTPLAN_VALIDATION')
@@ -159,5 +159,28 @@ const twice = normalizeTestNames(F1, GOOD.replace("test('[C2] behavior 2'", `tes
 check('P81s_two_long_names_that_shorten_to_the_same_label_stay_distinct', new Set(namesOf(twice.content)).size === namesOf(twice.content).length, namesOf(twice.content).join('|'))
 const longDefault = normalizeTestNames('test/c.test.mjs', `test('[C7] DEFAULT_PATH: ${LONGN}', () => withApp(async (app) => {\n  assert.ok(app)\n}, { defaultStorage: true }))\n`)
 check('P82s_the_short_name_keeps_the_tag_and_variant_key_so_variant_coverage_is_still_recognised', /^test\('\[C7\] DEFAULT_PATH: /.test(longDefault.content) && /\{ defaultStorage: true \}/.test(longDefault.content))
+
+// ---- default-directory repair (cwd-based default whose parent folder is never created)
+const ALERT_SRC = "import { readFile, writeFile } from 'node:fs/promises'\nimport { join } from 'node:path'\nconst ALERTS_FILE = process.env.ALERTS_FILE || join(process.cwd(), 'data', 'alerts.json')\nexport async function save(x) { await writeFile(ALERTS_FILE, JSON.stringify(x)) }\n"
+const dfx = repairMissingStorageDir(ALERT_SRC, 'ALERTS_FILE', 'data/alerts.json')
+check('P83s_a_cwd_based_default_with_a_missing_parent_folder_gets_one_recursive_mkdir', !!dfx && /mkdirSync\(process\.cwd\(\) \+ "\/data", \{ recursive: true \}\)/.test(dfx.content), dfx?.content ?? 'null')
+check('P84s_the_storage_path_declaration_is_byte_identical_before_and_after', !!dfx && dfx.content.split('\n').filter((l) => /^const ALERTS_FILE/.test(l)).join() === ALERT_SRC.split('\n').filter((l) => /^const ALERTS_FILE/.test(l)).join() && dfx.content.replace(/\nif \(!process\.env\.ALERTS_FILE\)[^\n]*/, '') === ALERT_SRC)
+check('P85s_the_mkdir_only_runs_when_the_env_override_is_not_set_and_only_for_the_parent_of_the_contract_path', !!dfx && /if \(!process\.env\.ALERTS_FILE\)/.test(dfx.content) && (dfx.content.match(/mkdirSync/g) ?? []).length === 1)
+check('P86s_a_file_that_already_creates_folders_is_left_alone', repairMissingStorageDir(ALERT_SRC.replace('export async', "import { mkdirSync } from 'node:fs'\nexport async"), 'ALERTS_FILE', 'data/alerts.json') === null && repairMissingStorageDir(readFileSync(path.join(srv, 'server.mjs'), 'utf8'), 'TASKS_FILE', 'data/tasks.json') === null)
+check('P87s_an_absolute_custom_path_or_a_default_that_does_not_equal_the_contract_path_is_not_rewritten', repairMissingStorageDir(ALERT_SRC.replace("join(process.cwd(), 'data', 'alerts.json')", "'/var/lib/alerts.json'"), 'ALERTS_FILE', 'data/alerts.json') === null && repairMissingStorageDir(ALERT_SRC.replace("'data', 'alerts.json'", "'other', 'alerts.json'"), 'ALERTS_FILE', 'data/alerts.json') === null && repairMissingStorageDir(ALERT_SRC, 'ALERTS_FILE', '/abs/alerts.json') === null)
+check('P88s_an_ambiguous_parent_fails_closed', repairMissingStorageDir(ALERT_SRC, 'ALERTS_FILE', 'alerts.json') === null && repairMissingStorageDir(ALERT_SRC, 'ALERTS_FILE', '../data/alerts.json') === null && repairMissingStorageDir(ALERT_SRC.replace("join(process.cwd(), 'data', 'alerts.json')", "join(process.cwd(), dir, 'alerts.json')"), 'ALERTS_FILE', 'data/alerts.json') === null && repairMissingStorageDir(ALERT_SRC.replace("join(process.cwd(), 'data', 'alerts.json')", "join(__dirname, 'data', 'alerts.json')"), 'ALERTS_FILE', 'data/alerts.json') === null && repairMissingStorageDir('const x = 1\n', 'ALERTS_FILE', 'data/alerts.json') === null)
+check('P89s_an_unrelated_variable_is_not_touched', repairMissingStorageDir(ALERT_SRC, 'OTHER_FILE', 'data/alerts.json') === null)
+// end to end through the real harness: the DEFAULT_PATH test fails before the repair and passes after it, with the same storage path
+const dsrv = path.join(tmp(), 'dirfix'); mkdirSync(path.join(dsrv, 'test', 'support'), { recursive: true })
+const DSERVER = `import { createServer } from 'node:http'\nimport { writeFile } from 'node:fs/promises'\nimport { join } from 'node:path'\nconst ALERTS_FILE = process.env.ALERTS_FILE || join(process.cwd(), 'data', 'alerts.json')\ncreateServer(async (req, res) => {\n  for await (const c of req) void c\n  try { await writeFile(ALERTS_FILE, '[]'); res.writeHead(201); res.end('{}') } catch { res.writeHead(500); res.end('{}') }\n}).listen(Number(process.env.PORT))\n`
+writeFileSync(path.join(dsrv, 'package.json'), JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
+writeFileSync(path.join(dsrv, 'server.mjs'), DSERVER)
+writeFileSync(path.join(dsrv, HARNESS_PATH), harnessSource('server.mjs', ['ALERTS_FILE']))
+writeFileSync(path.join(dsrv, 'test/d.test.mjs'), `import test from 'node:test'\nimport assert from 'node:assert'\nimport { existsSync } from 'node:fs'\nimport { withApp } from './support/harness.mjs'\ntest('[C1] DEFAULT_PATH: storage file exists', () => withApp(async (app) => {\n  await app.post('/api/a', {})\n  assert.ok(existsSync(app.cwd + '/data/alerts.json'))\n}, { defaultStorage: true }))\n`)
+const dBefore = await runHermetic(dsrv, ['node', '--test', 'test/d.test.mjs'], TOOLS, { timeoutMs: 90_000 })
+const dRep = repairMissingStorageDir(DSERVER, 'ALERTS_FILE', 'data/alerts.json')
+if (dRep) writeFileSync(path.join(dsrv, 'server.mjs'), dRep.content)
+const dAfter = await runHermetic(dsrv, ['node', '--test', 'test/d.test.mjs'], TOOLS, { timeoutMs: 90_000 })
+check('P90s_the_DEFAULT_PATH_test_fails_before_the_repair_and_passes_after_it_unchanged', dBefore.exitCode !== 0 && dAfter.exitCode === 0 && !!dRep, `${dBefore.exitCode}/${dAfter.exitCode} ${dAfter.stdout.slice(-300)}`)
 
 finish()

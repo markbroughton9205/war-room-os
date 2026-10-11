@@ -17,7 +17,7 @@ import { testAssistJustified, buildIdentityFor, buildFrontierRequest, renderFron
 import type { FrontierProvider } from './frontierBridge'
 import { groundTests, ungroundedChallenge, type TestGrounding } from './testGrounding'
 import { attachContractStatuses, mapCatchStatus } from './errorStatus'
-import { REVIEWER_SYSTEM, buildTestPlan, normalizeTestNames, type NameRewrite, criteriaForFailures, HARNESS_PATH, repairDefaultStoragePath, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
+import { REVIEWER_SYSTEM, buildTestPlan, normalizeTestNames, type NameRewrite, criteriaForFailures, HARNESS_PATH, repairDefaultStoragePath, repairMissingStorageDir, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { repairRouteOrder, statusDiagnosis } from './routeEdit'
@@ -860,7 +860,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
               const def = /default:?\s*([\w./-]+\.\w+)/i.exec(req.acceptance.find((a) => a.includes(v)) ?? '')?.[1]
               if (!def) continue
               for (const f of Object.keys(ws.snapshot()).filter((x) => /\.m?js$/.test(x) && !/^(?:test|public|node_modules)\//.test(x) && ws.read(x).includes(`process.env.${v}`))) {
-                const fx = repairDefaultStoragePath(ws.read(f), v, def)
+                const fx = repairDefaultStoragePath(ws.read(f), v, def) ?? repairMissingStorageDir(ws.read(f), v, def)
                 if (!fx) continue
                 snap[f] = ws.read(f)
                 await writeFile(step.id, f, fx.content)
