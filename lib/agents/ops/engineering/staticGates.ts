@@ -140,7 +140,7 @@ export function contractRouteProblems(rel: string, text: string, acceptance: str
 export function statusReachability(files: Record<string, string>, acceptance: string[]): string[] {
   const codes = [...new Set(acceptance.flatMap((a) => [...a.matchAll(/\b([45]\d\d)\b/g)].map((m) => m[1])))]
   const code = Object.entries(files).filter(([p]) => /\.m?js$/.test(p) && !/^(test|node_modules|public)\//.test(p)).map(([, t]) => t).join('\n')
-  const mapped = /\b(?:reply|send|respond|writeHead|status)\s*\([^)\n]*\b(?:err|e|error)\.(?:status|statusCode|code)\b/.test(code)
+  const mapped = /\b(?:reply|send|respond|writeHead|status)\s*\([^)\n]*\b(?:err|e|error)\.(?:status|statusCode|code)\b/.test(code) || /\b(?:const|let|var)\s+\w+\s*=\s*[^;\n]*\b(?:err|e|error)\.(?:status|statusCode)\b/.test(code)
   return codes.filter((c) => !new RegExp(`\\b${c}\\b`).test(code) && !mapped)
 }
 /** Plain JS/ESM syntax errors, found before the file is written (a missing paren must never reach the verifier). */

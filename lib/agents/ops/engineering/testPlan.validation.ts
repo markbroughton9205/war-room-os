@@ -1,5 +1,5 @@
 /** Phase 10: contract-first test plan, Foundry-owned isolation harness, pre-execution review, defect classification. Run: pnpm run validate:agent-eng-testplan */
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { harness, tmp } from './engtestkit'
 import { CHAT_FEATURE, makeChatApp } from './chatFixture'
@@ -8,7 +8,10 @@ import { ALERT_FEATURE } from './alertFixture'
 import { completionClass } from './completionClass'
 import { runHermetic } from './runtime/commandRunner'
 import { correctContractAssertions } from './testContract'
-import { HARNESS_PATH, buildTestPlan, clausesOf, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, startEntry, uncoveredCriteria } from './testPlan'
+import { attachContractStatuses, mapCatchStatus } from './errorStatus'
+import { statusReachability } from './staticGates'
+import { criteriaForFailures } from './testPlan'
+import { HARNESS_PATH, buildTestPlan, clausesOf, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, repairDefaultStoragePath, startEntry, uncoveredCriteria, variantsOf } from './testPlan'
 import type { EngineeringTool } from '../types'
 
 const { check, finish } = harness('AGENT_ENG_TESTPLAN_VALIDATION')
@@ -45,7 +48,7 @@ check('P09_the_harness_text_is_deterministic_so_it_can_be_hashed_and_it_names_th
 
 // ---- the pre-execution reviewer
 const F1 = plan.files[0].path
-const GOOD = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\n` + [1, 2, 3, 4].map((n) => `test('[C${n}] behavior ${n}', () => withApp(async (app) => {\n  const r = await app.get('/api/sessions')\n  assert.strictEqual(r.status, 200)\n}))\n`).join('')
+const GOOD = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\n` + [1, 2, 3, 4].map((n) => `test('[C${n}] ${n === 4 ? 'PERSISTENCE: ' : ''}behavior ${n}', () => withApp(async (app) => {\n${n === 4 ? '  await app.restart()\n' : ''}  const r = await app.get('/api/sessions')\n  assert.strictEqual(r.status, 200)\n}))\n`).join('')
 check('P10_a_file_that_follows_the_plan_passes_review', reviewTestFile(F1, GOOD, plan).length === 0 && reviewProblem([]) === null)
 const codes = (t: string) => reviewTestFile(F1, t, plan).map((f) => f.code)
 check('P11_importing_the_implementation_directly_is_rejected_before_execution', codes(GOOD.replace("import { withApp }", "import { createSession } from '../src/messageStore.mjs'\nimport { withApp }")).includes('IMPORTS_IMPLEMENTATION'))
@@ -60,7 +63,8 @@ const UG = GOOD + `test('helper label wording', () => withApp(async (app) => { a
 const dropped = dropUngrounded(F1, UG, ACC)
 check('P19_ungrounded_tests_are_removed_BEFORE_execution_with_a_record_and_grounded_tests_stay', !!dropped && dropped.names.length === 1 && dropped.names[0] === 'helper label wording' && dropped.content.includes('REJECTED BEFORE EXECUTION') && dropped.content.includes('[C1] behavior 1') && dropUngrounded(F1, GOOD, ACC) === null)
 check('P20_nothing_is_dropped_when_no_grounded_test_would_remain', dropUngrounded(F1, `import test from 'node:test'\ntest('only ungrounded', () => {})\n`, ACC) === null)
-const GOOD2 = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\n` + [5, 6].map((n) => `test('[C${n}] behavior ${n}', () => withApp(async (app) => {\n  assert.strictEqual((await app.get('/api/messages')).status, 200)\n}))\n`).join('')
+const C5_OK = `test('[C5] CUSTOM_PATH: the configured path is used', () => withApp(async (app) => {\n  await app.post('/api/sessions', { name: 'a' })\n  assert.ok(existsSync(app.storageFile('CHAT_DATA_FILE')))\n}))\ntest('[C5] DEFAULT_PATH: the default path is used', () => withApp(async (app) => {\n  await app.post('/api/sessions', { name: 'a' })\n  assert.ok(existsSync(app.cwd + '/data/sessions.json'))\n}, { defaultStorage: true }))\n`
+const GOOD2 = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\n` + C5_OK + `test('[C6] behavior 6', () => withApp(async (app) => {\n  assert.strictEqual((await app.get('/api/messages')).status, 200)\n}))\n`
 check('P21_required_coverage_is_computed_from_the_final_files_a_missing_file_leaves_its_criteria_uncovered', uncoveredCriteria(plan, { [F1]: GOOD }, ACC).join() === '5,6' && uncoveredCriteria(plan, { [F1]: GOOD, [plan.files[1].path]: GOOD2 }, ACC).length === 0)
 
 // ---- defect classification
@@ -92,4 +96,55 @@ check('P54_a_per_clause_test_with_a_wrong_status_is_corrected_against_its_own_cl
 const combined = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\ntest('[C1] creates a session and rejects an empty name', () => withApp(async (app) => {\n  const a = await app.post('/api/sessions', { name: 'x' })\n  assert.strictEqual(a.status, 201)\n  const r = await app.post('/api/sessions', { name: '' })\n  assert.strictEqual(r.status, 200)\n}))\n`
 const comb = correctContractAssertions('test/c.test.mjs', combined, [{ line: 8, actual: '400', expected: '200' }], ca.list)
 check('P55_a_test_that_spans_clauses_is_still_refused_the_fail_closed_rule_is_unchanged', !comb || comb.corrections.length === 0, JSON.stringify(comb?.corrections))
+
+// ---- C5 patterns: separate custom/default path tests, an explicit persistence + ids recipe, no mixed modes
+const c5 = plan.tests.find((t) => t.criterion_id === 5)!, c4 = plan.tests.find((t) => t.criterion_id === 4)!
+check('P60_an_env_storage_criterion_with_a_default_is_split_into_two_independent_variants_custom_and_default', c5.variants?.map((v) => v.key).join() === 'CUSTOM_PATH,DEFAULT_PATH')
+check('P61_the_custom_path_recipe_sets_the_variable_through_the_harness_and_never_uses_the_default_the_default_recipe_leaves_it_unset_and_never_uses_the_custom_path', /storageFile\('CHAT_DATA_FILE'\)/.test(c5.variants![0].recipe) && /NEVER use defaultStorage/.test(c5.variants![0].recipe) && /defaultStorage: true/.test(c5.variants![1].recipe) && /UNSET/.test(c5.variants![1].recipe) && /Never call app\.storageFile/.test(c5.variants![1].recipe))
+const taskPersist = variantsOf(TASK_FEATURE.acceptance[4] ?? '', 'TASKS_FILE', 'data/tasks.json', true)
+const taskC5 = tp.tests.find((t) => /TASKS_FILE/.test(t.behavior))!
+check('P62_a_persistence_and_ids_criterion_gets_an_explicit_create_capture_restart_reload_compare_recipe_and_a_next_id_recipe', taskC5.variants!.map((v) => v.key).join() === 'CUSTOM_PATH,DEFAULT_PATH,PERSISTENCE,IDS' && /app\.restart\(\)/.test(taskC5.variants![2].recipe) && /same ids/.test(taskC5.variants![2].recipe) && /strictly increasing/.test(taskC5.variants![3].recipe) && /never from in-memory/.test(taskC5.variants![3].recipe) && taskPersist.length === 4)
+check('P63_the_persistence_recipe_for_a_status_criterion_walks_allowed_moves_and_checks_the_status_after_restart', /ONLY allowed moves/.test(taskC5.variants![2].recipe) && /status/.test(taskC5.variants![2].recipe))
+const vcodes = (t: string) => reviewTestFile(plan.files[1].path, t, plan).map((f) => f.code)
+const hdr = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { existsSync } from 'node:fs'\nimport { withApp } from './support/harness.mjs'\n`
+const six = `test('[C6] behavior 6', () => withApp(async (app) => {\n  assert.strictEqual((await app.get('/api/messages')).status, 200)\n}))\n`
+check('P64_one_test_that_mixes_custom_and_default_path_is_rejected_before_execution_as_a_missing_variant', vcodes(hdr + `test('[C5] the path comes from the variable and defaults', () => withApp(async (app) => {\n  await app.post('/api/sessions', { name: 'a' })\n  assert.ok(existsSync(app.storageFile('CHAT_DATA_FILE')))\n  assert.ok(existsSync(app.cwd + '/data/sessions.json'))\n}, { defaultStorage: true }))\n` + six).includes('MISSING_VARIANT'))
+check('P65_the_custom_path_test_must_not_use_the_default_mode_and_the_default_path_test_must_not_assert_the_custom_path', vcodes(hdr + C5_OK.replace("assert.ok(existsSync(app.storageFile('CHAT_DATA_FILE')))\n}))", "assert.ok(existsSync(app.storageFile('CHAT_DATA_FILE')))\n}, { defaultStorage: true }))") + six).includes('VARIANT_MIXES_MODES') && vcodes(hdr + C5_OK.replace("assert.ok(existsSync(app.cwd + '/data/sessions.json'))", "assert.ok(existsSync(app.cwd + '/data/sessions.json'));assert.ok(existsSync(app.storageFile('CHAT_DATA_FILE')))") + six).includes('VARIANT_MIXES_MODES'))
+check('P66_a_correct_custom_and_default_pair_passes_review_and_counts_as_covered', vcodes(hdr + C5_OK + six).length === 0)
+check('P67_a_criterion_with_variants_is_uncovered_until_every_variant_has_its_own_grounded_test', uncoveredCriteria(plan, { [plan.files[1].path]: hdr + C5_OK.split("test('[C5] DEFAULT_PATH")[0] + six }, ACC).includes(5) && !uncoveredCriteria(plan, { [plan.files[1].path]: hdr + C5_OK + six }, ACC).includes(5))
+const tpl = tp.files.find((f) => f.criteria.includes(taskC5.criterion_id))!.path
+const tcodes = (t: string) => reviewTestFile(tpl, t, tp).map((f) => f.code)
+const persistOnly = (restart: boolean, ids: boolean) => `test('[C${taskC5.criterion_id}] PERSISTENCE: records survive', () => withApp(async (app) => {\n  const a = await app.post('/api/tasks', { title: 'a' })\n  ${restart ? 'await app.restart()' : ''}\n  const l = await app.get('/api/tasks')\n  assert.strictEqual(l.body[0].id, a.body.id)\n}))\n` + `test('[C${taskC5.criterion_id}] IDS: next id continues', () => withApp(async (app) => {\n  const a = await app.post('/api/tasks', { title: 'a' })\n  ${restart ? 'await app.restart()' : ''}\n  const b = await app.post('/api/tasks', { title: 'b' })\n  assert.ok(b.body${ids ? '.id > a.body.id' : ''})\n}))\n`
+check('P68_a_persistence_or_ids_test_without_a_restart_is_rejected_and_one_that_compares_ids_across_a_restart_is_accepted', tcodes(hdr + persistOnly(false, true)).includes('VARIANT_MISSING_ASSERT') && !tcodes(hdr + persistOnly(true, true)).includes('VARIANT_MISSING_ASSERT'))
+// the real harness: persistence, ids and the next id survive a restart in a tiny file-backed server; A-then-B equals B-then-A; no temp state leaks between tests
+const srv = path.join(tmp(), 'persist'); mkdirSync(path.join(srv, 'test', 'support'), { recursive: true })
+writeFileSync(path.join(srv, 'package.json'), JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
+writeFileSync(path.join(srv, 'server.mjs'), `import { createServer } from 'node:http'\nimport { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs'\nimport path from 'node:path'\nconst file = process.env.TASKS_FILE || process.cwd() + '/data/tasks.json'\nmkdirSync(path.dirname(file), { recursive: true })\nlet db = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : { items: [], next: 1 }\ncreateServer(async (req, res) => {\n  let raw = ''; for await (const c of req) raw += c\n  if (req.method === 'POST') { const it = { id: db.next++, ...JSON.parse(raw || '{}') }; db.items.push(it); writeFileSync(file, JSON.stringify(db)); res.writeHead(201); return res.end(JSON.stringify(it)) }\n  res.writeHead(200); res.end(JSON.stringify(db.items))\n}).listen(Number(process.env.PORT))\n`)
+writeFileSync(path.join(srv, HARNESS_PATH), harnessSource('server.mjs', ['TASKS_FILE']))
+const hh = `import test from 'node:test'\nimport assert from 'node:assert'\nimport { existsSync } from 'node:fs'\nimport { withApp } from './support/harness.mjs'\n`
+writeFileSync(path.join(srv, 'test/p.test.mjs'), hh + `test('[C1] PERSISTENCE: records and ids survive a restart', () => withApp(async (app) => {\n  const a = await app.post('/api/t', { n: 1 }), b = await app.post('/api/t', { n: 2 })\n  await app.restart()\n  const l = await app.get('/api/t')\n  assert.deepStrictEqual(l.body.map((x) => x.id), [a.body.id, b.body.id])\n  assert.ok(existsSync(app.storageFile('TASKS_FILE')))\n}))\n`)
+writeFileSync(path.join(srv, 'test/i.test.mjs'), hh + `test('[C1] IDS: the next id continues after a restart', () => withApp(async (app) => {\n  const a = await app.post('/api/t', {})\n  await app.restart()\n  const b = await app.post('/api/t', {})\n  assert.ok(b.body.id > a.body.id)\n}))\ntest('[C1] DEFAULT_PATH: default path is used', () => withApp(async (app) => {\n  await app.post('/api/t', {})\n  assert.ok(existsSync(app.cwd + '/data/tasks.json'))\n}, { defaultStorage: true }))\ntest('[C1] CUSTOM_PATH: leaks nothing between tests', () => withApp(async (app) => {\n  assert.strictEqual((await app.get('/api/t')).body.length, 0)\n  await app.post('/api/t', {})\n  assert.ok(existsSync(app.storageFile('TASKS_FILE')))\n}))\n`)
+const pa = await runHermetic(srv, ['node', '--test', 'test/p.test.mjs', 'test/i.test.mjs'], TOOLS, { timeoutMs: 90_000 })
+const pb = await runHermetic(srv, ['node', '--test', 'test/i.test.mjs', 'test/p.test.mjs'], TOOLS, { timeoutMs: 90_000 })
+check('P69_through_the_real_harness_records_ids_and_the_next_id_survive_a_restart_the_default_and_custom_paths_are_independent_and_the_order_does_not_matter', pa.exitCode === 0 && pb.exitCode === 0 && /pass 4/.test(pa.stdout) && /pass 4/.test(pb.stdout), `${pa.exitCode}/${pb.exitCode} ${pa.stdout.slice(-400)} ${pa.stderr.slice(-300)}`)
+// implementation-default repair
+const BAD = readFileSync(path.join(srv, 'server.mjs'), 'utf8').replace("process.cwd() + '/data/tasks.json'", "path.join(path.dirname(new URL(import.meta.url).pathname), '../../data/tasks.json')")
+const rfx = repairDefaultStoragePath(BAD, 'TASKS_FILE', 'data/tasks.json')
+check('P70_a_default_path_anchored_to_the_module_directory_is_rewritten_to_the_working_directory_and_the_folder_is_ensured', !!rfx && /process\.cwd\(\) \+ "\/data\/tasks\.json"/.test(rfx.content) && /mkdirSync/.test(rfx.content) && !/\.\.\/\.\.\/data/.test(rfx.content))
+check('P71_an_implementation_that_already_honours_the_contract_or_has_an_unrecognised_shape_is_left_alone', repairDefaultStoragePath(readFileSync(path.join(srv, 'server.mjs'), 'utf8'), 'TASKS_FILE', 'data/tasks.json') === null && repairDefaultStoragePath('const x = 1\n', 'TASKS_FILE', 'data/tasks.json') === null && repairDefaultStoragePath("import p from 'node:path'\nconst f = process.env.OTHER || p.join(__dirname, '../x.json')\n", 'TASKS_FILE', 'data/tasks.json') === null)
+
+// ---- alert forensics: contract statuses must be carried by domain errors and answered by the handler
+const ALERT_ACC = ALERT_FEATURE.acceptance
+const DOMAIN = `export function archiveAlert(id) {\n  const a = find(id)\n  if (!a) {\n    throw new Error('Alert not found')\n  }\n  if (a.archived) throw new Error("Cannot modify archived alert")\n  if (!a.title) throw new Error('Title is required')\n  if (a.sev) throw new Error('Unknown severity')\n}\n`
+const att = attachContractStatuses('src/eventFeed.mjs', DOMAIN, ALERT_ACC)
+check('P72_domain_errors_the_contract_maps_to_404_and_409_get_their_status_while_validation_errors_stay_plain', !!att && /new Error\('Alert not found'\), \{ status: 404 \}/.test(att.text) && /new Error\("Cannot modify archived alert"\), \{ status: 409 \}/.test(att.text) && /throw new Error\('Title is required'\)/.test(att.text) && /throw new Error\('Unknown severity'\)/.test(att.text))
+check('P73_the_status_edit_is_idempotent_and_leaves_the_http_layer_and_tests_alone', attachContractStatuses('src/eventFeed.mjs', att!.text, ALERT_ACC) === null && attachContractStatuses('server.mjs', `import { createServer } from 'node:http'\ncreateServer(() => { throw new Error('Alert not found') })\n`, ALERT_ACC) === null && attachContractStatuses('test/x.test.mjs', DOMAIN, ALERT_ACC) === null && attachContractStatuses('src/a.mjs', DOMAIN, ['GET /x returns 200']) === null)
+const HANDLER = `import { createServer } from 'node:http'\nconst server = createServer(async (req, res) => {\n  try {\n    return reply(res, 200, 1)\n  } catch (err) {\n    return reply(res, 400, { error: String(err.message || err) })\n  }\n})\n`
+const mapped = mapCatchStatus('server.mjs', HANDLER)
+check('P74_the_catch_block_answers_with_the_status_an_error_carries_and_keeps_400_otherwise', !!mapped && /reply\(res, Number\.isInteger\(err\.status\) \? err\.status : 400, \{ error/.test(mapped) && mapCatchStatus('server.mjs', mapped) === null)
+check('P75_a_handler_that_answers_with_err_status_through_a_variable_counts_as_able_to_respond_with_the_contract_status', statusReachability({ 'server.mjs': `catch (err) {\n  const status = err.status || 400\n  return reply(res, status, {})\n}`, 'src/a.mjs': 'x' }, ['archived is rejected with 409']).length === 0 && statusReachability({ 'server.mjs': 'catch (err) { return reply(res, 400, {}) }' }, ['archived is rejected with 409']).join() === '409')
+check('P76_after_both_edits_the_domain_throws_carry_409_and_the_handler_can_answer_it', statusReachability({ 'src/eventFeed.mjs': att!.text, 'server.mjs': mapped! }, ['archived is rejected with 409']).length === 0)
+
+const cf = criteriaForFailures('ok 1 - POST /api/alerts creates unread\nnot ok 6 - the list excludes archived by default and ?state=unread|read|archived|all select the right alerts\n  message: def=[1,4]\n', ALERT_ACC)
+check('P77_a_failing_check_is_paired_with_the_contract_sentence_it_proves_so_the_repair_model_sees_the_expected_value_not_only_the_observed_one', cf.length >= 1 && /lists alerts that are not archived/.test(cf[0]) && criteriaForFailures('ok 1 - x\n', ALERT_ACC).length === 0)
 finish()

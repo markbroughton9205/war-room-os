@@ -16,7 +16,8 @@ import { classifyModelFailure, MODEL_MAX_ATTEMPTS } from './modelFailure'
 import { testAssistJustified, buildIdentityFor, buildFrontierRequest, renderFrontierRequest, assistJustified, ASSIST_MIN_REFUTED, helperBudgetLeft, type EscalationTrigger, type HelperPolicy, checkProvenanceAndScope, classifySteps, FrontierLedger, sha, type BuildIdentity, type FrontierUsage, type IngestionRecord, type SubtaskRecord } from './sovereign'
 import type { FrontierProvider } from './frontierBridge'
 import { groundTests, ungroundedChallenge, type TestGrounding } from './testGrounding'
-import { REVIEWER_SYSTEM, buildTestPlan, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
+import { attachContractStatuses, mapCatchStatus } from './errorStatus'
+import { REVIEWER_SYSTEM, buildTestPlan, criteriaForFailures, repairDefaultStoragePath, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, uncoveredCriteria, type DefectVerdict, type TestPlan } from './testPlan'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { join as pathJoin } from 'node:path'
 import { repairRouteOrder, statusDiagnosis } from './routeEdit'
@@ -505,12 +506,13 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       emit('HYPOTHESIS', `${label}: attempt ${attempt} acts on ${key} -> ${targets.join(', ')}`)
       const written: string[] = []
       let assistWrite: { rec: IngestionRecord; file: string; pre: string } | null = null
+      const contractClauses = (() => { const c = criteriaForFailures(out, req.acceptance); return c.length ? `\nTHE ACCEPTANCE CONTRACT SAYS (this is the authoritative expectation for the failing check; the check output shows only what was observed): ${c.map((x) => `"${x}"`).join(' | ')}` : '' })()
       for (const file of targets.slice(0, 2)) {
         const keepR = keepExportsFor(file)
         const modeR = chooseMode(true, ws.read(file).split('\n').length, keepR)
         const relatedN = depth === 1 ? 5 : 3, relatedCap = depth === 1 ? 9000 : 3000
         const related = [...cand.filter((c) => c !== file).map((c) => ({ path: c, text: ws.read(c) })), ...relatedFor(file, [...changed])].filter((r, i, a) => a.findIndex((x) => x.path === r.path) === i).slice(0, relatedN)
-        const mk = (extra: string, mode: 'edits' | 'rewrite') => repairPrompt({ failureOutput: out, hypothesis: `${hypText}${targets.length > 1 ? `\n(This fix spans ${targets.join(' and ')}; you are editing ${file} now${written.length ? `; already changed: ${written.join(', ')}` : ''}.)` : ''}${extra}`, file, current: ws.read(file), related, request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode, evidence: evidenceText, relatedCap })
+        const mk = (extra: string, mode: 'edits' | 'rewrite') => repairPrompt({ failureOutput: out, hypothesis: `${hypText}${contractClauses}${targets.length > 1 ? `\n(This fix spans ${targets.join(' and ')}; you are editing ${file} now${written.length ? `; already changed: ${written.join(', ')}` : ''}.)` : ''}${extra}`, file, current: ws.read(file), related, request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode, evidence: evidenceText, relatedCap })
         // SOVEREIGN BUILD LAW: local-first. A bounded outside assist is allowed only when local resources are exhausted on this one file; its reply is stored in the
         // isolated review area first and enters the workspace only through Foundry's own gates below (static validation, export compatibility, rerun, accept/reject).
         let assist: IngestionRecord | null = null
@@ -550,8 +552,10 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
           if (rr2.ok) pr = parseEditReply(rr2.text, ws.read(file), file)
         }
         if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); if (assist && assist.decision === 'PENDING') { assist.steps.push({ stage: 'SCOPE', ok: false, note: `reply is not a usable single-file change: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`.slice(0, 200) }); assist.decision = 'REJECTED'; assist.reason = 'unusable reply'; assist.measuredBenefit = 'none (never written)'; emit('FRONTIER_ASSIST_RESULT', `${assist.subtaskId}: REJECTED (unusable reply)`) } continue }
+        if (pr.kind === 'code') pr = { ...pr, content: shapeStatus(file, pr.content) }
         let compat = gateProblem(file, pr.content)
         if (compat && pr.kind === 'code') { const sfix = structuralRoute(stepId, 'DEBUG_REPAIR', file, pr.content, compat, `${label}: ${nextH ? nextH.check : 'n/a'}`); if (sfix !== null) { pr = { ...pr, content: sfix }; compat = gateProblem(file, sfix) } }
+        if (compat && pr.kind === 'code') { const stfx = structuralStatus(file, pr.content, compat); if (stfx !== null) { pr = { ...pr, content: stfx }; compat = gateProblem(file, stfx) } }
         if (compat && budgetLeft()) {
           const rr3 = await call(ENGINEER_REWRITE_SYSTEM, mk(`\nYOUR PREVIOUS REPLY WAS REJECTED BEFORE IT WAS WRITTEN: ${compat}`, 'rewrite'))
           noteTokens(rr3)
@@ -629,6 +633,17 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     routeEdits.push({ step: stepId, stage, file: path, mode: fixed.mode, ops: fixed.ops, notes: fixed.notes, finding: problem.slice(0, 400), spanBefore: routeRegion(content, 1500), spanAfter: routeRegion(fixed.text, 1500), originalCheck, resultAfter: remaining ? `route order fixed; remaining gate problem: ${remaining.slice(0, 200)}` : 'route order fixed; all static gates pass' })
     emit('ROUTE_EDIT', `${path}: ${fixed.mode}: ${fixed.notes.join('; ')}`)
     return fixed.text
+  }
+  /** Contract statuses: domain throws get their status attached, and the handler's catch answers with it (deterministic, single-statement edits; the gates and the verifier still decide). */
+  const shapeStatus = (path: string, content: string): string => { const a = attachContractStatuses(path, content, req.acceptance); if (a) emit('STATUS_EDIT', `${path}: errors carry their contract status (${a.notes.slice(0, 4).join('; ')})`); return a ? a.text : content }
+  const structuralStatus = (path: string, content: string, problem: string): string | null => {
+    if (!/^the acceptance contract requires HTTP/.test(problem)) return null
+    const fixed = mapCatchStatus(path, content)
+    if (!fixed) return null
+    const remaining = gateProblem(path, fixed)
+    if (remaining && /^the acceptance contract requires HTTP|^your version has a syntax error/.test(remaining)) return null
+    emit('STATUS_EDIT', `${path}: the catch block answers with the status an error carries`)
+    return fixed
   }
   // ---- execute steps
   try {
@@ -714,11 +729,14 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const askFile = async (extra: string[], retry = 0, viaOverride?: ModelClient) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: contractFile ? implRelated() : relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode, ...(contractFile && tplan ? { testPlanText: planPromptFor(tplan, path) } : {}) }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}, viaOverride ?? (job.role === 'test' ? deps.testWriter?.model : undefined)); noteTokens(r); return r }
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseEditReply(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
+      if (parsedReply.kind === 'code') parsedReply = { ...parsedReply, content: shapeStatus(path, parsedReply.content) }
       for (let rej = 0; rej < 3 && reply.ok; rej++) {
         let problem = parsedReply.kind === 'invalid' ? parsedReply.reason : parsedReply.kind === 'code' ? gateProblem(path, parsedReply.content) : parsedReply.kind === 'no_change' && /\.html?$/.test(path) ? pageMissing(path) : null
         if (problem && parsedReply.kind === 'code') {
           const sfix = structuralRoute(step.id, 'EDIT_REJECTION', path, parsedReply.content, problem, 'edit-stage static gate')
           if (sfix !== null) { parsedReply = { ...parsedReply, content: sfix }; problem = gateProblem(path, sfix); if (problem) routeKept = routeRegion(sfix) }
+          const stfx = problem ? structuralStatus(path, parsedReply.content, problem) : null
+          if (stfx !== null) { parsedReply = { ...parsedReply, content: stfx }; problem = gateProblem(path, stfx) }
         }
         // TEST REVIEWER (deterministic contract-grounding challenge): a test that maps to no numbered criterion is sent back before it is ever executed
         if (!problem && contractFile && tplan && rej < 2 && parsedReply.kind === 'code') { const rv = reviewTestFile(path, parsedReply.content, tplan); const rp = reviewProblem(rv); if (rp) { problem = `TEST REVIEWER: ${rp}`; testReviews.push({ file: path, reviewer: 'foundry:deterministic-review', verdict: 'REVISE', findings: rv.map((f) => `${f.code}: ${f.detail}`.slice(0, 200)) }) } }
@@ -802,6 +820,36 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             }
             return out
           }
+          // IMPLEMENTATION_DEFECT (deterministic, bounded): a DEFAULT_PATH test fails because the module anchors the contract's default data path somewhere other than the working directory.
+          // The test is right and the implementation is wrong, so the one declaration is corrected, the tests re-run, and the independent verifier must still pass; otherwise the edit is reverted.
+          const repairImplementationDefault = async (): Promise<boolean> => {
+            if (!tplan || !contractFile || run.exitCode === 0 || !state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED')) return false
+            const failed = parseTestFailures(`${run.stdout}\n${run.stderr}`).filter((f) => f.file === path && /\bDEFAULT_PATH\b/.test(f.name))
+            if (!failed.length) return false
+            const snap: Record<string, string> = {}
+            for (const v of tplan.storageVars) {
+              const def = /default:?\s*([\w./-]+\.\w+)/i.exec(req.acceptance.find((a) => a.includes(v)) ?? '')?.[1]
+              if (!def) continue
+              for (const f of [...changed].filter((x) => !/^test\//.test(x) && ws.exists(x) && ws.read(x).includes(`process.env.${v}`))) {
+                const fx = repairDefaultStoragePath(ws.read(f), v, def)
+                if (!fx) continue
+                snap[f] = ws.read(f)
+                await writeFile(step.id, f, fx.content)
+                emit('IMPLEMENTATION_REPAIR', `${f}: ${fx.note}`)
+              }
+            }
+            if (!Object.keys(snap).length) return false
+            const again = await runCheck(tests)
+            const chk = deps.finalVerification ? await deps.finalVerification.run() : null
+            if (again.exitCode !== 0 && failCount(again) >= failCount(run) || (chk && chk.exitCode !== 0)) {
+              for (const [f, t] of Object.entries(snap)) await writeFile(step.id, f, t, `:revert${++restoreSeq}`)
+              emit('IMPLEMENTATION_REPAIR_REVERTED', `${path}: the default-path repair did not help or broke the independent acceptance`)
+              return false
+            }
+            for (const f of failed) testDefects.push({ file: path, test: f.name, kind: 'IMPLEMENTATION_DEFECT', basis: `the contract names a default data path under the working directory; the module placed it elsewhere (${Object.keys(snap).join(', ')} corrected)`, resolved: true })
+            run = again
+            return true
+          }
           const runCandidates = async () => {
             if (run.exitCode !== 0 && deps.testCandidates?.length && state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED') && helperOk(`${path}: competing test candidates`)) {
             const base = ws.read(path)
@@ -839,6 +887,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             }
           }
           if (!(tplan && contractFile)) await runCandidates()
+          if (tplan && contractFile && run.exitCode !== 0) await repairImplementationDefault()
           if (run.exitCode !== 0) {
             // Once the independent acceptance has PASSED, the implementation is verified ground truth: a failure that only implicates the NEW test is a test defect,
             // so the repair is confined to that test file instead of risking the verified behaviour.
