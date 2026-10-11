@@ -4,7 +4,7 @@ import { acknowledgeCancel, completeAssignment, deriveAssignments, executionGate
 import { type EngineeringCodePlan, planFromCode } from './codePlanner'
 import { latestCheckpoint, planResume, runEffectOnce, saveCheckpoint, sha256 } from './continuity'
 import { MAX_REPAIR_ATTEMPTS, addEvidence, deriveLedger, markUndetermined, proposeHypothesis, recordFailure, recordRepair, recordValidation, authorizeRepair, parseToolOutput } from './debugLedger'
-import { ANALYST_SYSTEM, ENGINEER_REWRITE_SYSTEM, ENGINEER_SYSTEM, analystPrompt, chooseMode, featurePrompt, parseEditReply, repairPrompt, type FileJob } from './prompts'
+import { ANALYST_SYSTEM, ENGINEER_REWRITE_SYSTEM, ENGINEER_SYSTEM, ENGINEER_STRUCT_SYSTEM, analystPrompt, chooseMode, featurePrompt, parseEditReply, repairPrompt, type FileJob } from './prompts'
 import type { CommandRecord, ModelClient, ModelResult } from './runtime/ports'
 import { runCommand, runHermetic } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
@@ -26,6 +26,10 @@ import { undefinedNames, routeFindings, routeTable, routeRegion, contractRoutePr
 import { persistenceProblems, persistenceProbe, wantsPersistence, type PersistenceProbe } from './persistenceContract'
 import { buildEvidence, renderEvidence, parseTestFailures } from './failureEvidence'
 import { startupProbe } from './startupProbe'
+import { deriveImplementationContract, resolveContract, unresolvedAmbiguities, renderContract, type ImplementationContract } from './implContract'
+import { matchRecipes, renderRecipes, buildImplStep, renderImplStep, runRecipeChecks, stripManifest, checkManifest, autofix, type Recipe, type Manifest, type ImplStep, type RecipeFinding } from './recipes'
+import { runPreflight, preflightTap, preflightHypotheses, type PreflightReport } from './preflight'
+import { newFirstPassState, buildFirstPassReport, type FirstPassOptions, type FirstPassReport } from './firstPass'
 import { storageEnvVars } from './persistenceContract'
 import { seedFromHandoff } from './successor'
 
@@ -69,6 +73,8 @@ export type WorkflowDeps = {
   testReviewer?: { label: string; model: ModelClient }
   /** Replay: the implementation already in the workspace is independently verified and reused; only the test-authoring steps run. */
   reuseImplementation?: boolean
+  /** First-pass correctness: implementation contract, proven recipes, per-step plan, structural edits, manifest self-check, implementation preflight before any test. Off by default. */
+  firstPass?: FirstPassOptions
 }
 /** The test-rescue allowance kept apart for the final competing-candidate step: earlier repair activity cannot spend it. */
 export const RESCUE_MAX_SHARE = 0.2
@@ -106,6 +112,7 @@ export type WorkflowResult = {
   testReviews?: { file: string; reviewer: string; verdict: string; findings: string[] }[]
   testDefects?: { file: string; test: string; kind: string; basis: string; resolved: boolean }[]
   cleanBlockers?: string[]
+  firstPass?: FirstPassReport
   repairTrace?: RepairTraceEntry[]
   escalations?: EscalationRecord[]
   routeEdits?: RouteEditRecord[]
@@ -116,7 +123,7 @@ export type WorkflowResult = {
   latencyMs: number
   executor: { provider: string; model: string } | 'UNKNOWN'
 }
-const FACT_BEARING = /route conflict|does not serve what the acceptance contract|nothing in the code can ever respond|existing exports changed|persistence contract|syntax error|never declared or imported/
+const FACT_BEARING = /route conflict|does not serve what the acceptance contract|nothing in the code can ever respond|existing exports changed|persistence contract|syntax error|never declared or imported|recipe check failed/
 const LAYER_ORDER = ['storage', 'domain', 'api', 'ui', 'tests']
 
 export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest): Promise<WorkflowResult> {
@@ -185,15 +192,36 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     return b
   }
   const writerLabel = deps.testWriter?.label ?? 'builder'
-  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => { const blockers = status === 'COMPLETED' ? cleanBlockersNow() : []; const clean = status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true && blockers.length === 0; const isClean = clean; for (const r of ledger.records) r.cleanOutcomeImpact = r.decision === 'ACCEPTED' ? (isClean ? 'CLEAN_AFTER_ACCEPTED_ASSIST' : 'NOT_CLEAN') : r.decision === 'REJECTED' ? 'ASSIST_REJECTED' : 'PENDING'; return {  build, subtasks: classifySteps(((state as CheckpointState | undefined)?.steps ?? []) as never, build, ledger.records.map((r) => ({ subtaskId: r.subtaskId, file: r.contextScope.files[0] ?? '', accepted: r.decision === 'PENDING' ? null : r.decision === 'ACCEPTED', family: r.provider }))), frontier: { usage: ledger.usage(status === 'COMPLETED' ? clean : null), records: ledger.records }, cleanKind: clean ? (ledger.records.some((r) => r.decision === 'ACCEPTED') ? 'CLEAN_WITH_FRONTIER_ASSIST' : 'CLEAN_LOCAL_ONLY') : null, testGrounding: groundingByFile, testAuthoring: { writer: writerLabel, candidates: candidateLog, ...(tplan ? { rescue: { ...rescue }, nameRewrites } : {}) }, testPlan: tplan ? { entry: tplan.entry, files: tplan.files, tests: tplan.tests } : null, testTraceability: traceability(), testReviews, testDefects, cleanBlockers: blockers, status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, modelTransients: transients, completionClass: completionClass({ status, quarantinedTests: quarantined, cleanBlockers: blockers }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor } }
+  // ---- first-pass correctness state (everything below is inert unless deps.firstPass is set)
+  const fpOn = !!deps.firstPass
+  const fpm = newFirstPassState()
+  let fpContract: ImplementationContract | null = null
+  let fpUnresolved: string[] = []
+  let fpRecipes: Recipe[] = []
+  const fpSteps: ImplStep[] = []
+  let fpExtra: { check: string; statement: string; files: string[] }[] = []
+  const fpLast: { v: { path: string; manifest: Manifest | null } | null } = { v: null }
+  if (fpOn) { const raw = deriveImplementationContract(req.acceptance, req.request); fpUnresolved = unresolvedAmbiguities(raw).map((a) => `C${a.criterion}: ${a.question}`); fpContract = resolveContract(raw); fpRecipes = matchRecipes(fpContract) }
+  const fpReport = (): FirstPassReport | undefined => {
+    if (!fpOn || !fpContract) return undefined
+    const sv = (typeof state !== 'undefined' ? state : undefined) as CheckpointState | undefined
+    const testsPassed = tplan ? (quarantined === 0 && !!sv?.validations.some((v) => v.stepId === 'verify' && v.status === 'PASSED' && /--test/.test(v.command))) : null
+    return buildFirstPassReport({ contract: fpContract, recipes: fpRecipes, steps: fpSteps.map((x) => ({ target_file: x.TARGET_FILE, recipes: x.recipes, behaviors: x.REQUIRED_BEHAVIOR.map((b) => b.id) })), st: fpm, repairs, quarantined, testDefects: testDefects.map((d) => ({ kind: d.kind, test: d.test })), acceptance: req.acceptance, testsPassed, verifierPassed: verifiedAtEnd })
+  }
+  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => { const blockers = status === 'COMPLETED' ? cleanBlockersNow() : []; const clean = status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true && blockers.length === 0; const isClean = clean; for (const r of ledger.records) r.cleanOutcomeImpact = r.decision === 'ACCEPTED' ? (isClean ? 'CLEAN_AFTER_ACCEPTED_ASSIST' : 'NOT_CLEAN') : r.decision === 'REJECTED' ? 'ASSIST_REJECTED' : 'PENDING'; return {  build, subtasks: classifySteps(((state as CheckpointState | undefined)?.steps ?? []) as never, build, ledger.records.map((r) => ({ subtaskId: r.subtaskId, file: r.contextScope.files[0] ?? '', accepted: r.decision === 'PENDING' ? null : r.decision === 'ACCEPTED', family: r.provider }))), frontier: { usage: ledger.usage(status === 'COMPLETED' ? clean : null), records: ledger.records }, cleanKind: clean ? (ledger.records.some((r) => r.decision === 'ACCEPTED') ? 'CLEAN_WITH_FRONTIER_ASSIST' : 'CLEAN_LOCAL_ONLY') : null, testGrounding: groundingByFile, testAuthoring: { writer: writerLabel, candidates: candidateLog, ...(tplan ? { rescue: { ...rescue }, nameRewrites } : {}) }, testPlan: tplan ? { entry: tplan.entry, files: tplan.files, tests: tplan.tests } : null, testTraceability: traceability(), testReviews, testDefects, cleanBlockers: blockers, ...(fpOn ? { firstPass: fpReport() } : {}), status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, modelTransients: transients, completionClass: completionClass({ status, quarantinedTests: quarantined, cleanBlockers: blockers }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor } }
 
+  let state: CheckpointState
+  let plan: EngineeringCodePlan
+  // ---- first-pass: an ambiguous contract is resolved before any code is written; what cannot be resolved stops the build
+  if (fpOn && fpContract) {
+    emit('IMPLEMENTATION_CONTRACT', `${fpContract.routes.length} route(s), ${fpContract.fields.length} field rule(s), ${fpContract.flags.length} flag action(s), ${fpContract.filters.length} filter(s); recipes: ${fpRecipes.map((r) => r.id).join(', ') || 'none'}${fpContract.ambiguities.some((a) => a.assumption) ? `; ${fpContract.ambiguities.filter((a) => a.assumption).map((a) => a.assumption).join(' ')}` : ''}`)
+    if (fpUnresolved.length) { emit('CONTRACT_AMBIGUOUS', fpUnresolved.join('; ')); failAssignment(log, assignmentId, actor, `the implementation contract is ambiguous and cannot be resolved by a recorded rule, so no code was written: ${fpUnresolved.join('; ')}`, undefined, clock()); return result('BLOCKED', `ambiguous implementation contract: ${fpUnresolved.join('; ')}`) }
+  }
   // ---- state: resume from the latest checkpoint when one exists
   const baselineSnap = ws.snapshot()
   const baselineText: Record<string, string> = {}
   for (const p of Object.keys(baselineSnap).filter((x) => /\.(m?js|html?)$/.test(x) && !/node_modules/.test(x)).slice(0, 80)) baselineText[p] = ws.read(p)
   const prior = latestCheckpoint(log, assignmentId)
-  let state: CheckpointState
-  let plan: EngineeringCodePlan
   const index0 = buildWorkspaceIndex(ws.root)
   if (prior) {
     const rp = planResume(log, assignmentId, { fileHash: (p) => ws.hash(p), allFileHashes: ws.snapshot() })
@@ -228,6 +256,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     if (deps.reuseImplementation) for (const st of fileSteps) if (st.layer !== 'tests') { st.status = 'DONE'; st.note = 'implementation reused (replay); verified by the independent verifier below' }
     if (!fileSteps.length) { failAssignment(log, assignmentId, actor, 'the code-aware plan found no files to change: ' + (plan.uncertainties[0] ?? 'UNDETERMINED'), undefined, clock()); return result('FAILED', 'no plan: ' + (plan.uncertainties[0] ?? 'UNDETERMINED')) }
     // Acceptance runs BEFORE model-written tests: the independent verifier is ground truth for the implementation, so implementation defects are repaired against it first.
+    if (fpOn) { const at0 = fileSteps.findIndex((x) => x.layer === 'tests'); fileSteps.splice(at0 < 0 ? fileSteps.length : at0, 0, { id: 'preflight', title: 'implementation preflight (static + runtime, before any test)', status: 'PENDING', files: [] }) }
     if (deps.finalVerification) { const at = fileSteps.findIndex((x) => x.layer === 'tests'); fileSteps.splice(at < 0 ? fileSteps.length : at, 0, { id: 'accept', title: 'acceptance: independent verification', status: 'PENDING', files: [] }) }
     fileSteps.push({ id: 'verify', title: 'end-to-end validation', status: 'PENDING', files: [] })
     const treeBefore = treeHash(baselineSnap)
@@ -239,6 +268,28 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     emit('PLAN', `${fileSteps.filter((s) => s.files.length).length} file step(s): ${fileSteps.filter((s) => s.files.length).map((s) => s.files[0]).join(', ')}`)
   }
   const checkpoint = () => { state.fileChanges = state.fileChanges.slice(-200); saveCheckpoint(log, assignmentId, state, actor, clock()) }
+  const fpAdvisory = new Set(['JSON_FILE_STORE.unawaited-fs'])
+  const fpFilesWith = (path: string, content: string): Record<string, string> => ({ ...Object.fromEntries(Object.keys(ws.snapshot()).filter((f) => /\.(m?js|html?)$/.test(f) && !/node_modules/.test(f)).map((f) => [f, ws.read(f)])), [path]: content })
+  /** Recipe static checks on a proposed implementation file: only NEW findings located in that file are reported (a defect that was already there is not blamed on this edit). */
+  const fpRecipeFresh = (path: string, content: string): RecipeFinding[] => {
+    if (!fpOn || !fpContract || /^test\//.test(path) || !/\.(m?js|html?)$/.test(path)) return []
+    const key = (f: { recipe: string; check: string; fact: string }) => `${f.recipe}.${f.check}|${f.fact}`
+    const before = new Set(runRecipeChecks(fpFilesWith(path, ws.exists(path) ? ws.read(path) : ''), fpContract, fpRecipes).map(key))
+    return runRecipeChecks(fpFilesWith(path, content), fpContract, fpRecipes).filter((f) => f.file === path && !fpAdvisory.has(`${f.recipe}.${f.check}`) && !before.has(key(f)))
+  }
+  const fpFindingsText = (fresh: RecipeFinding[]): string | null => {
+    if (!fresh.length) return null
+    fpm.recipe_gate_rejections += 1
+    return `recipe check failed: ${fresh.slice(0, 3).map((f) => `[${f.recipe}.${f.check}] ${f.fact} (expected: ${f.expected})`).join('; ')}`
+  }
+  const fpRecipeGate = (path: string, content: string): string | null => fpFindingsText(fpRecipeFresh(path, content))
+  const noteEdit = (p: { mode?: string; structural?: string[] }, existed: boolean) => {
+    if (!fpOn) return
+    if (p.structural?.length) fpm.structural_edits += p.structural.length
+    else if (p.mode === 'edits') fpm.range_edits += 1
+    else if (p.mode === 'rewrite' || (p.mode === 'new' && existed)) fpm.whole_file_rewrites += 1
+    else if (p.mode === 'new') fpm.new_files += 1
+  }
 
   // ---- helpers
   const budgetLeft = () => { const h = rescueHeld(); return modelCalls < limits.maxModelCalls - h.calls && Date.now() - t0 < limits.maxRuntimeMs - h.ms }
@@ -467,7 +518,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const evCmd = addEvidence(log, assignmentId, rec.failureId, { kind: /\.m?js$/.test(cmd.argv.at(-1) ?? '') && cmd.argv[1] === '--check' ? 'type_diagnostic' : 'test_result', ref: `${cmd.argv.join(' ')}#attempt${attempt}`, content: out, summary: `${label} failed (exit ${cmd.exitCode}): ${out.split('\n').filter((l) => /Error|not ok|✖|fail/i.test(l)).slice(0, 2).join(' | ').slice(0, 220) || 'see output'}` }, actor, clock())
       const probe = !confine && wantsPersistence(req.acceptance) && /persist|surviv|restart/i.test(out) ? await runProbe().catch(() => null) : null
       const startup = !confine && /could not complete|server exited|did not start/i.test(out) ? await startupProbe(ws.root, Object.fromEntries(storageEnvVars(req.acceptance).map((v) => [v, `${v}.json`]))).catch(() => null) : null
-      const ev0 = !/^not ok \d+ - |^\s*✖ /m.test(out) ? null : buildEvidence({ output: out, acceptance: req.acceptance, files: sourceFiles(), baseline: baselineText, probe, startupOutput: startup && !startup.started ? startup.output : undefined, testScope: !!confine })
+      const ev0 = !/^not ok \d+ - |^\s*✖ /m.test(out) ? null : buildEvidence({ output: out, acceptance: req.acceptance, files: sourceFiles(), baseline: baselineText, probe, startupOutput: startup && !startup.started ? startup.output : undefined, testScope: !!confine, ...(label === 'implementation preflight' ? { extra: fpExtra } : {}) })
       // a confined repair (the verified implementation must not change) may only act on hypotheses that target the confined files
       const ev = ev0 && confine ? { ...ev0, queue: ev0.queue.filter((h) => h.files.length > 0 && h.files.every((f) => confine.includes(f))) } : ev0
       const nextH = ev?.queue.find((h) => canTry(h.key)) ?? null
@@ -535,7 +586,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         const modeR = chooseMode(true, ws.read(file).split('\n').length, keepR)
         const relatedN = depth === 1 ? 5 : 3, relatedCap = depth === 1 ? 9000 : 3000
         const related = [...cand.filter((c) => c !== file).map((c) => ({ path: c, text: ws.read(c) })), ...relatedFor(file, [...changed])].filter((r, i, a) => a.findIndex((x) => x.path === r.path) === i).slice(0, relatedN)
-        const mk = (extra: string, mode: 'edits' | 'rewrite') => repairPrompt({ failureOutput: out, hypothesis: `${hypText}${contractClauses}${targets.length > 1 ? `\n(This fix spans ${targets.join(' and ')}; you are editing ${file} now${written.length ? `; already changed: ${written.join(', ')}` : ''}.)` : ''}${extra}`, file, current: ws.read(file), related, request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode, evidence: evidenceText, relatedCap })
+        const mk = (extra: string, mode: 'edits' | 'rewrite') => repairPrompt({ failureOutput: out, hypothesis: `${hypText}${contractClauses}${targets.length > 1 ? `\n(This fix spans ${targets.join(' and ')}; you are editing ${file} now${written.length ? `; already changed: ${written.join(', ')}` : ''}.)` : ''}${extra}`, file, current: ws.read(file), related, request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode, evidence: evidenceText, relatedCap, ...(fpOn && fpContract && !confine ? { firstPass: { contractText: renderContract(fpContract, 1300), recipeText: renderRecipes(fpContract, fpRecipes, state.steps.find((x) => x.files[0] === file)?.layer ?? 'domain', 1400, { path: file, text: ws.exists(file) ? ws.read(file) : '' }) } } : {}) })
         // SOVEREIGN BUILD LAW: local-first. A bounded outside assist is allowed only when local resources are exhausted on this one file; its reply is stored in the
         // isolated review area first and enters the workspace only through Foundry's own gates below (static validation, export compatibility, rerun, accept/reject).
         let assist: IngestionRecord | null = null
@@ -577,6 +628,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         if (pr.kind !== 'code') { attemptsNotes.push(`repair reply unusable: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`); if (assist && assist.decision === 'PENDING') { assist.steps.push({ stage: 'SCOPE', ok: false, note: `reply is not a usable single-file change: ${pr.kind === 'invalid' ? pr.reason : 'NO_CHANGE'}`.slice(0, 200) }); assist.decision = 'REJECTED'; assist.reason = 'unusable reply'; assist.measuredBenefit = 'none (never written)'; emit('FRONTIER_ASSIST_RESULT', `${assist.subtaskId}: REJECTED (unusable reply)`) } continue }
         if (pr.kind === 'code') pr = { ...pr, content: shapeStatus(file, pr.content) }
         let compat = gateProblem(file, pr.content)
+        if (!compat && fpOn && !confine) compat = fpRecipeGate(file, pr.content)
         if (compat && pr.kind === 'code') { const sfix = structuralRoute(stepId, 'DEBUG_REPAIR', file, pr.content, compat, `${label}: ${nextH ? nextH.check : 'n/a'}`); if (sfix !== null) { pr = { ...pr, content: sfix }; compat = gateProblem(file, sfix) } }
         if (compat && pr.kind === 'code') { const stfx = structuralStatus(file, pr.content, compat); if (stfx !== null) { pr = { ...pr, content: stfx }; compat = gateProblem(file, stfx) } }
         if (compat && budgetLeft()) {
@@ -592,6 +644,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         await writeFile(stepId, file, pr.content)
         triedFiles.add(file); written.push(file)
         repairs += 1
+        if (fpOn) { fpm.repairs_by_step[stepId] = (fpm.repairs_by_step[stepId] ?? 0) + 1; if (pr.kind === 'code') noteEdit(pr, true) }
         attemptsNotes.push(`attempt ${attempt}: ${hypText.slice(0, 120)} (edited ${file}${beforeHash === ws.hash(file) ? ', no effective change' : ''})`)
       }
       const sigBefore = nextH && ev ? ev.signatureOf(nextH.check) : ''
@@ -653,7 +706,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     if (!fixed) return null
     const remaining = gateProblem(path, fixed.text)
     if (remaining && /^route conflict|^your version has a syntax error/.test(remaining)) return null // the move did not resolve the conflict or broke the file: model rewrite instead
-    routeEdits.push({ step: stepId, stage, file: path, mode: fixed.mode, ops: fixed.ops, notes: fixed.notes, finding: problem.slice(0, 400), spanBefore: routeRegion(content, 1500), spanAfter: routeRegion(fixed.text, 1500), originalCheck, resultAfter: remaining ? `route order fixed; remaining gate problem: ${remaining.slice(0, 200)}` : 'route order fixed; all static gates pass' })
+    fpm.deterministic_structural_edits += 1; routeEdits.push({ step: stepId, stage, file: path, mode: fixed.mode, ops: fixed.ops, notes: fixed.notes, finding: problem.slice(0, 400), spanBefore: routeRegion(content, 1500), spanAfter: routeRegion(fixed.text, 1500), originalCheck, resultAfter: remaining ? `route order fixed; remaining gate problem: ${remaining.slice(0, 200)}` : 'route order fixed; all static gates pass' })
     emit('ROUTE_EDIT', `${path}: ${fixed.mode}: ${fixed.notes.join('; ')}`)
     return fixed.text
   }
@@ -662,9 +715,9 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const shapeStatus = (path: string, content: string): string => {
     // test names stay short: a long name is rewritten BEFORE the review (name literal only; the body and every assertion are untouched)
     if (tplan?.files.some((f) => f.path === path)) { const n = normalizeTestNames(path, content); if (n.rewrites.length) { nameRewrites.push(...n.rewrites); emit('TEST_NAMES_SHORTENED', `${path}: ${n.rewrites.length} overlong test name(s) shortened (${n.rewrites.slice(0, 3).map((r) => `C${r.criterion}`).join(', ')}); bodies unchanged`); content = n.content } }
-    const a = attachContractStatuses(path, content, req.acceptance); if (a) emit('STATUS_EDIT', `${path}: errors carry their contract status (${a.notes.slice(0, 4).join('; ')})`); return a ? a.text : content
+    const a = attachContractStatuses(path, content, req.acceptance); if (a) fpm.deterministic_structural_edits += 1; if (a) emit('STATUS_EDIT', `${path}: errors carry their contract status (${a.notes.slice(0, 4).join('; ')})`); return a ? a.text : content
   }
-  const parseShaped = (text: string, current: string | null, path: string): ReturnType<typeof parseEditReply> => { const p = parseEditReply(text, current, path); return p.kind === 'code' ? { ...p, content: shapeStatus(path, p.content) } : p }
+  const parseShaped = (text: string, current: string | null, path: string): ReturnType<typeof parseEditReply> => { let body = text; if (fpOn && !/^test\//.test(path)) { const sm = stripManifest(text); body = sm.text; fpLast.v = { path, manifest: sm.manifest } } const p = parseEditReply(body, current, path); return p.kind === 'code' ? { ...p, content: shapeStatus(path, p.content) } : p }
   const structuralStatus = (path: string, content: string, problem: string): string | null => {
     if (!/^the acceptance contract requires HTTP/.test(problem)) return null
     const fixed = mapCatchStatus(path, content)
@@ -682,6 +735,36 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const bs0 = budgetStop(); if (bs0) { failAssignment(log, assignmentId, actor, bs0.reason, undefined, clock()); return bs0 }
       if (deps.crashAfterSteps !== undefined && stepsDone >= deps.crashAfterSteps) { checkpoint(); return result('CRASHED', `simulated process death after ${stepsDone} step(s)`) }
       state.currentStepId = step.id; step.status = 'ACTIVE'; checkpoint()
+      if (step.id === 'preflight') {
+        if (!fpContract) { step.status = 'DONE'; checkpoint(); continue }
+        const runPf = async (): Promise<PreflightReport> => {
+          const rep = await runPreflight(ws.root, fpContract!, { recipes: fpRecipes, baseline: baselineText, runtime: deps.firstPass?.runtime !== false })
+          fpm.preflight_runs.push({ findings: rep.findings.length, advisories: rep.advisories.length, ms: rep.runtimeMs })
+          fpm.final_preflight = rep
+          fpExtra = (() => { const en = rep.findings.find((f) => f.stage === 'RUNTIME')?.file ?? 'server.mjs'; return preflightHypotheses(rep.findings, en, ws.exists(en) ? ws.read(en) : '') })()
+          if (fpm.first_preflight === null) fpm.first_preflight = rep.findings
+          emit('PREFLIGHT', `${rep.passed ? 'PASS' : `FAIL (${rep.findings.length})`}: ${rep.checked.length} check(s)${rep.advisories.length ? `, ${rep.advisories.length} advisory` : ''}${rep.skipped.length ? `, ${rep.skipped.length} skipped` : ''} in ${rep.runtimeMs}ms${rep.findings.length ? ` — ${rep.findings.slice(0, 3).map((f) => f.check).join(', ')}` : ''}`)
+          return rep
+        }
+        const asRecord = (rep: PreflightReport): CommandRecord => { const body = preflightTap(rep); return { argv: ['implementation-preflight'], cwd: ws.root, exitCode: rep.passed ? 0 : 1, timedOut: false, stdout: body, stderr: '', durationMs: rep.runtimeMs, startedAt: clock().toISOString(), outputHash: sha256(body) } }
+        let rep = await runPf()
+        if (!rep.passed && fpContract) {
+          // deterministic structural fixes first: they cost no model call and change only the lines they name
+          const byFile = new Map<string, RecipeFinding[]>()
+          for (const f of rep.findings) if (f.file && f.recipe && f.stage === 'STATIC') byFile.set(f.file, [...(byFile.get(f.file) ?? []), { recipe: f.recipe, check: f.check.replace(/^[A-Z_]+\./, ''), criterion: f.criterion, file: f.file, symbol: f.symbol, fact: f.fact, expected: f.expected }])
+          let fixed = 0
+          for (const [file, fs_] of byFile) { if (!ws.exists(file)) continue; const fx = autofix(file, ws.read(file), fs_, fpContract); if (fx) { await writeFile(step.id, file, fx.content); fixed += 1; fpm.deterministic_structural_edits += fx.notes.length; emit('STRUCTURAL_AUTOFIX', `${file}: ${fx.notes.join('; ')}`) } }
+          if (fixed) { const again = await runPf(); fpm.first_preflight = fpm.first_preflight ?? again.findings; rep = again }
+        }
+        if (!rep.passed) {
+          const before = repairs
+          await debugLoop(asRecord(rep), [...changed].filter((f) => !/^test\//.test(f)), step.id, 'implementation preflight', async () => asRecord(await runPf()))
+          fpm.preflight_repairs = repairs - before
+          rep = fpm.final_preflight ?? rep
+          if (!rep.passed) emit('PREFLIGHT_UNRESOLVED', `${rep.findings.length} preflight finding(s) remain after bounded repairs: ${rep.findings.slice(0, 3).map((f) => f.fact.slice(0, 120)).join(' | ')}`)
+        }
+        step.status = 'DONE'; step.note = rep.passed ? 'preflight passed' : `preflight: ${rep.findings.length} unresolved (the independent verification judges)`; stepsDone += 1; checkpoint(); continue
+      }
       if (step.id === 'accept') {
         const fv = deps.finalVerification!
         // advisory pre-check: a storage round trip on the real module (create -> read -> fresh process -> read) BEFORE the independent verification is spent on it
@@ -693,6 +776,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
           }
         }
         const run = await fv.run()
+        if (fpOn && fpm.first_verifier === null) { const po = parseToolOutput(run.stdout, run.stderr); fpm.first_verifier = { pass: Number(po.pass) || 0, fail: Number(po.fail) || 0 }; fpm.verifier_failure_names = [...`${run.stdout}\n${run.stderr}`.matchAll(/^not ok \d+ - (.+)$/gm)].map((m) => m[1]).slice(0, 12) }
         state.validations.push({ stepId: 'accept', command: fv.argv.join(' '), status: run.exitCode === 0 ? 'PASSED' : 'FAILED', at: clock().toISOString(), outputHash: run.outputHash, summary: fv.label })
         if (run.exitCode !== 0) {
           const ok = await debugLoop(run, [...changed].filter((f) => !/^test\//.test(f)), step.id, fv.label, fv.run)
@@ -736,7 +820,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       let feedback = ''
       let routeKept = ''
       const keep = keepExportsFor(path)
-      const mode = chooseMode(job.exists, job.current.split('\n').length, keep)
+      // first-pass: an existing implementation file of real size (30+ lines) is changed by structural/range edits, not regenerated; a tiny file is simply rewritten (its exports are still guarded)
+      const mode = fpOn && job.role === 'feature' && job.exists ? (job.current.split('\n').length >= 30 ? 'edits' : 'rewrite') : chooseMode(job.exists, job.current.split('\n').length, keep)
+      const fpStep: ImplStep | null = fpOn && fpContract && job.role === 'feature' ? buildImplStep(fpContract, fpRecipes, { file: path, layer: step.layer ?? 'domain', exists: job.exists, current: job.current, step: state.steps.findIndex((x) => x.id === step.id) + 1, dependsOn: state.steps.filter((x) => x.status === 'DONE' && x.files[0] && !/^test\//.test(x.files[0])).map((x) => x.files[0]) }) : null
+      if (fpStep && !fpSteps.some((x) => x.TARGET_FILE === path)) fpSteps.push(fpStep)
+      let fpForceRewrite = false // first-pass: edits that cannot be applied fall back to ONE whole-file reply (counted as a rewrite, never silent)
+      const fpPrompt = (): { firstPass?: { contractText: string; recipeText: string; stepText: string; manifest: boolean } } => (fpStep && fpContract ? { firstPass: { contractText: renderContract(fpContract, 1300), recipeText: renderRecipes(fpContract, fpRecipes, step.layer ?? 'domain', 2300, { path, text: job.current }), stepText: renderImplStep(fpStep, 1500), manifest: true } } : {})
       const contractFile = !!tplan && step.layer === 'tests' && tplan.files.some((f) => f.path === path)
       if (contractFile && tplan) {
         // the harness is Foundry's, not the model's: deterministic text, rewritten whenever it differs
@@ -755,7 +844,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         }
         return out
       }
-      const askFile = async (extra: string[], retry = 0, viaOverride?: ModelClient) => { const r = await call(mode === 'edits' ? ENGINEER_SYSTEM : ENGINEER_REWRITE_SYSTEM, featurePrompt({ request: req.request, acceptance: req.acceptance, plan, job, related: contractFile ? implRelated() : relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode, ...(contractFile && tplan ? { testPlanText: planPromptFor(tplan, path) } : {}) }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}, viaOverride ?? (job.role === 'test' ? deps.testWriter?.model : undefined)); noteTokens(r); return r }
+      const askFile = async (extra: string[], retry = 0, viaOverride?: ModelClient) => { const useMode = fpForceRewrite ? 'rewrite' : mode; const r = await call(useMode === 'edits' ? (fpStep ? ENGINEER_STRUCT_SYSTEM : ENGINEER_SYSTEM) : ENGINEER_REWRITE_SYSTEM, featurePrompt({ ...fpPrompt(), request: req.request, acceptance: req.acceptance, plan, job, related: contractFile ? implRelated() : relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode: useMode, ...(contractFile && tplan ? { testPlanText: planPromptFor(tplan, path) } : {}) }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}, viaOverride ?? (job.role === 'test' ? deps.testWriter?.model : undefined)); noteTokens(r); return r }
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseShaped(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       if (parsedReply.kind === 'code') parsedReply = { ...parsedReply, content: shapeStatus(path, parsedReply.content) }
@@ -767,6 +856,19 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
           const stfx = problem ? structuralStatus(path, parsedReply.content, problem) : null
           if (stfx !== null) { parsedReply = { ...parsedReply, content: stfx }; problem = gateProblem(path, stfx) }
         }
+        // first-pass: recipe static checks, then the worker's manifest is verified independently (a claim is never trusted)
+        if (!problem && fpStep && parsedReply.kind === 'code') {
+          // known, bounded defects are fixed by a deterministic structural edit BEFORE the worker is asked again
+          let fresh = fpRecipeFresh(path, parsedReply.content)
+          if (fresh.length && fpContract) { const fx = autofix(path, parsedReply.content, fresh, fpContract); if (fx) { parsedReply = { ...parsedReply, content: fx.content }; fpm.deterministic_structural_edits += fx.notes.length; emit('STRUCTURAL_AUTOFIX', `${path}: ${fx.notes.join('; ')}`); fresh = fpRecipeFresh(path, fx.content) } }
+          problem = fpFindingsText(fresh)
+          if (!problem && fpContract) {
+            const fl = runRecipeChecks(fpFilesWith(path, parsedReply.content), fpContract, fpRecipes).filter((f) => f.file === path)
+            const mc = checkManifest(fpLast.v?.path === path ? fpLast.v.manifest : null, parsedReply.content, fpStep, job.current, fl)
+            if (mc.missing) { if (deps.firstPass?.requireManifest === true && rej === 0) { fpm.manifests.retries += 1; problem = 'MANIFEST_MISSING: add the ```manifest block (CHANGED / WHY / SATISFIES / PRESERVES / RISKS) after your code; keep the code exactly as it is' } }
+            else if (mc.problems.length) { fpm.manifests.false_claims += mc.problems.length; emit('MANIFEST_CLAIM_UNVERIFIED', `${path}: ${mc.problems.slice(0, 2).join('; ').slice(0, 220)}`); if (mc.blocking.length) problem = `MANIFEST CHECK: ${mc.blocking.slice(0, 3).join('; ')}` }
+          }
+        }
         // TEST REVIEWER (deterministic contract-grounding challenge): a test that maps to no numbered criterion is sent back before it is ever executed
         if (!problem && contractFile && tplan && rej < 2 && parsedReply.kind === 'code') { const rv = reviewTestFile(path, parsedReply.content, tplan); const rp = reviewProblem(rv); if (rp) { problem = `TEST REVIEWER: ${rp}`; testReviews.push({ file: path, reviewer: 'foundry:deterministic-review', verdict: 'REVISE', findings: rv.map((f) => `${f.code}: ${f.detail}`.slice(0, 200)) }) } }
         if (!problem && job.role === 'test' && (deps.testWriter || deps.groundTests || contractFile) && rej < 2 && parsedReply.kind === 'code') { const ch = ungroundedChallenge(groundTests(path, parsedReply.content, req.acceptance, writerLabel), req.acceptance.length); if (ch) problem = `TEST REVIEWER: ${ch}` }
@@ -775,6 +877,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         feedback = problem
         emit('REJECT', `${path}: ${problem}`)
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
+        if (fpStep && !/^MANIFEST/.test(problem)) fpm.reply_rejections.push({ file: path, problem: problem.slice(0, 220) })
+        if (fpStep && mode === 'edits' && !fpForceRewrite && parsedReply.kind === 'invalid') { fpForceRewrite = true; emit('EDIT_FALLBACK_REWRITE', `${path}: the structural/range edits could not be applied (${parsedReply.reason.slice(0, 120)}); asking for the whole file once`) }
         const bs = budgetStop(); if (bs) { failAssignment(log, assignmentId, actor, bs.reason, undefined, clock()); return bs }
         reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`, (routeKept && parsedReply.kind === 'code' ? `THE ENGINE ALREADY CORRECTED THE ROUTE ORDER of your reply (do not change the order of the routes). Here is the corrected file; return it with ONLY the problem above fixed:\n${parsedReply.content.slice(0, 7500)}` : parsedReply.kind === 'code' && /^route conflict|^the server does not serve/.test(problem) && routeRegion(parsedReply.content) ? `THE ROUTE LAYOUT OF THE REJECTED REPLY (line numbers match the message above; reorder these so every specific route comes before the broader route that also matches it, then keep everything else):\n${routeRegion(parsedReply.content)}` : `THE REJECTED REPLY (do NOT repeat it):\n${reply.text.slice(0, 700)}`)], rej + 1)
         parsedReply = reply.ok ? parseShaped(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
@@ -799,6 +903,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const pr = parsedReply
       if (pr.kind === 'no_change') { step.status = 'SKIPPED'; step.note = 'model: NO_CHANGE needed for this file'; checkpoint(); emit('NO_CHANGE', path); continue }
       if (pr.kind === 'invalid') { step.status = 'FAILED'; step.note = `unusable reply: ${pr.reason}`; checkpoint(); failAssignment(log, assignmentId, actor, `model reply unusable for ${path}: ${pr.reason}`, undefined, clock()); return result('FAILED', `unusable reply for ${path}`) }
+      if (fpStep && pr.kind === 'code') { noteEdit(pr, job.exists); if (fpLast.v?.path === path && fpLast.v.manifest) fpm.manifests.present += 1; else fpm.manifests.missing += 1 }
       let toWrite = pr.content
       if (contractFile && tplan) {
         const dropped = dropUngrounded(path, toWrite, req.acceptance)
@@ -864,6 +969,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                 if (!fx) continue
                 snap[f] = ws.read(f)
                 await writeFile(step.id, f, fx.content)
+                fpm.deterministic_structural_edits += 1
                 emit('IMPLEMENTATION_REPAIR', `${f}: ${fx.note}`)
               }
             }

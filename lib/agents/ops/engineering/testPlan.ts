@@ -374,7 +374,7 @@ export function repairMissingStorageDir(src: string, envVar: string, defaultPath
   const esc = envVar.replace(/[^A-Z0-9_]/g, '')
   const want = defaultPath.replace(/^\.?\//, '')
   if (!esc || !want || /^\/|\.\.|[\\]/.test(want) || !want.includes('/')) return null
-  if (/\bmkdir(?:Sync|p)?\b/.test(src) || !/^\s*import\s/m.test(src)) return null
+  if (/\bmkdir(?:Sync|p)?\s*\(/.test(src) || !/^\s*import\s/m.test(src)) return null
   const re = new RegExp(`\\b(?:const|let|var)\\s+\\w+\\s*=\\s*process\\.env\\.${esc}\\s*(?:\\|\\||\\?\\?)\\s*([^\\n;]+)`)
   const m = re.exec(src)
   if (!m) return null

@@ -10,7 +10,7 @@ export type CheckKind = 'TEST_FAILURE' | 'SERVER_START' | 'ROUTE_MISSING' | 'STA
 export type Hypothesis = { key: string; kind: CheckKind; statement: string; files: string[]; check: number }
 export type CheckFailure = { n: number; name: string; message: string; kind: CheckKind; facts: string[]; hypotheses: Hypothesis[] }
 export type StructuredEvidence = { checks: CheckFailure[]; queue: Hypothesis[]; files: string[]; signatureOf: (n: number) => string }
-export type EvidenceInput = { output: string; acceptance: string[]; files: Record<string, string>; baseline?: Record<string, string>; changed?: string[]; probe?: PersistenceProbe | null; startupOutput?: string; testScope?: boolean }
+export type EvidenceInput = { output: string; acceptance: string[]; files: Record<string, string>; baseline?: Record<string, string>; changed?: string[]; probe?: PersistenceProbe | null; startupOutput?: string; testScope?: boolean; /** hypotheses supplied by the caller for named checks (the implementation preflight knows exactly what it observed) */ extra?: { check: string; statement: string; files: string[] }[] }
 
 const PRIORITY: CheckKind[] = ['TEST_FAILURE', 'SERVER_START', 'ROUTE_MISSING', 'STATUS_MISMATCH', 'RESPONSE_SHAPE', 'LOOKUP_AFTER_CREATE', 'LEGACY_REGRESSION', 'UI_PAGE', 'PERSISTENCE', 'GENERIC']
 export function parseChecks(out: string): { n: number; name: string; message: string }[] {
@@ -83,6 +83,7 @@ export function buildEvidence(inp: EvidenceInput): StructuredEvidence {
 
   const kindOf = (c: { n: number; name: string; message: string }): CheckKind => (testInfo.has(c.n) ? 'TEST_FAILURE' : /could not complete|server exited|did not start/i.test(`${c.name} ${c.message}`) ? 'SERVER_START' : /persist|surviv|restart|durab/i.test(c.name) ? 'PERSISTENCE' : 'GENERIC')
   const out0 = checks.map((c) => ({ n: c.n, kind: kindOf(c) }))
+  const extraUsed = new Map<string, number>()
   const out: CheckFailure[] = checks.map((c) => {
     const text = `${c.name} ${c.message}`
     const facts: string[] = [], hyps: Hypothesis[] = []
@@ -189,6 +190,11 @@ export function buildEvidence(inp: EvidenceInput): StructuredEvidence {
         H(kind, `persist:reload:${storeFile}`, `everything else passes, so the storage round trip itself is wrong (${c.message.slice(0, 120)}): data or counters are not written completely, not read back from ${envs.join('/') || 'the data file'}, or are mixed with unrelated (pre-existing) state. Check what is saved (every field and the id counter), where it is loaded at start-up, and that only the new entity is stored in this file`, [storeFile])
       } else H(kind, 'persist:cascade', `the storage round trip itself is not broken; this check fails on data produced by earlier functional defects in the same scenario. Fix the other failing checks first and re-run`, [])
     }
+    const tagged = inp.extra?.filter((e) => c.name.includes(`[${e.check}]`)) ?? []
+    const tagKey = tagged[0]?.check ?? ''
+    const ex = tagged[extraUsed.get(tagKey) ?? 0]
+    if (tagKey) extraUsed.set(tagKey, (extraUsed.get(tagKey) ?? 0) + 1)
+    if (ex) { facts.unshift(`observed by the implementation preflight: ${c.message.slice(0, 200)}`); hyps.unshift({ key: `preflight:${ex.check}:${c.n}`, kind, statement: ex.statement, files: [...new Set(ex.files.filter(Boolean))].slice(0, 2), check: c.n }) }
     return { n: c.n, name: c.name, message: c.message, kind, facts, hypotheses: hyps }
   })
   out.sort((a, b) => PRIORITY.indexOf(a.kind) - PRIORITY.indexOf(b.kind) || a.n - b.n)

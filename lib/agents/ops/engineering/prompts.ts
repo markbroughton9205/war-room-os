@@ -2,6 +2,8 @@ import { mergeAppend } from './editMerge'
 import type { EngineeringCodePlan } from './codePlanner'
 import { planContextForModel } from './codePlanner'
 import { testObligations } from './testContract'
+import { MANIFEST_INSTRUCTION as MANIFEST_TEXT } from './recipes'
+import { applyStructOps, hasStructOps, parseStructOps } from './structEdit'
 
 export const ENGINEER_SYSTEM = [
   "You are Foundry's engineering worker. You edit ONE file at a time inside a bounded workspace.",
@@ -24,6 +26,28 @@ export const ENGINEER_SYSTEM = [
   '- Use ES modules (import/export). Use only Node.js built-in modules. Do not add dependencies.',
   '- Do not invent files, functions or routes that are not in the provided code unless the task requires them; use the exact names that exist in the provided code.',
   '- Keep the code simple and correct.',
+].join('\n')
+
+/** First-pass edit protocol: structural, range-aware edits are preferred over search/replace and over rewriting; the manifest is a self-check Foundry verifies. */
+export const ENGINEER_STRUCT_SYSTEM = [
+  ENGINEER_SYSTEM,
+  'STRUCTURAL EDITS (preferred for an EXISTING file; they change only what they name and keep every other byte):',
+  '- Replace ONE top-level function/const by name (give the complete new declaration):',
+  '```replace-symbol NAME',
+  'export function NAME(...) { ... }',
+  '```',
+  '- Add a declaration next to another one: ```insert-after NAME  or  ```insert-before NAME  or  ```insert-end',
+  '- Add imports (merged into an existing import of the same module): ```add-import with the import line(s)',
+  '- Change a few lines inside ONE function (the SEARCH text only has to be unique inside that function):',
+  '```change-in NAME',
+  '<<<<<<< SEARCH',
+  'exact text inside NAME',
+  '=======',
+  'replacement',
+  '>>>>>>> REPLACE',
+  '```',
+  '- Add a route branch beside an existing line of a request handler: a block ```insert-before-line or ```insert-after-line whose first line is ANCHOR: <exact existing line> followed by the new code.',
+  'Use a whole-file block only for a NEW file. Never regenerate a file to change a few lines.',
 ].join('\n')
 
 export const ENGINEER_REWRITE_SYSTEM = [
@@ -63,13 +87,16 @@ export function statusContract(acceptance: string[], layer: string): string {
   return ['CONTRACT CHECKLIST (the independent verifier checks exactly these):', ...routes.map((r) => `- route: ${r}`), ...codes.filter((c) => !routes.includes(c)).map((c) => `- status: ${c}`), '- every route and every status above must be reachable: register specific routes before prefix/parameter routes, and let errors carry their own status (a catch-all that always answers 400 can never produce 404 or 409).'].join('\n')
 }
 
-export function featurePrompt(input: { request: string; acceptance: string[]; plan: EngineeringCodePlan; job: FileJob; related: { path: string; text: string }[]; lessons: string[]; priorNotes: string[]; keepExports?: string[]; mode?: EditMode; testPlanText?: string }): string {
+export function featurePrompt(input: { request: string; acceptance: string[]; plan: EngineeringCodePlan; job: FileJob; related: { path: string; text: string }[]; lessons: string[]; priorNotes: string[]; keepExports?: string[]; mode?: EditMode; testPlanText?: string; firstPass?: { contractText: string; recipeText: string; stepText: string; manifest: boolean } }): string {
   const rel = input.related.map((r) => `--- ${r.path} ---\n${r.text}`).join('\n\n')
   return [
     `TASK: ${input.request}`,
     `ACCEPTANCE CRITERIA:\n${input.acceptance.map((a) => `- ${a}`).join('\n')}`,
     `PLAN (from code evidence):\n${planContextForModel(input.plan, 1500)}`,
-    statusContract(input.acceptance, input.job.layer),
+    input.firstPass ? '' : statusContract(input.acceptance, input.job.layer),
+    input.firstPass?.contractText ?? '',
+    input.firstPass?.recipeText ?? '',
+    input.firstPass?.stepText ?? '',
     input.lessons.length ? `LESSONS FROM EARLIER WORK (apply them):\n${input.lessons.map((l) => `- ${l}`).join('\n')}` : '',
     input.priorNotes.length ? `ALREADY DONE IN THIS FEATURE:\n${input.priorNotes.map((n) => `- ${n}`).join('\n')}` : '',
     rel ? `RELATED CODE (use these exact names and signatures):\n${rel}` : '',
@@ -79,6 +106,7 @@ export function featurePrompt(input: { request: string; acceptance: string[]; pl
     input.job.role === 'test' && input.testPlanText ? `Write node:test tests (import test from 'node:test'; import assert from 'node:assert') for ${input.job.path} from the approved plan below, and nothing else.\n${input.testPlanText}` : '',
     input.job.role === 'test' && !input.testPlanText ? `Write node:test tests (import test from 'node:test'; import assert from 'node:assert') that prove the feature through the real functions above, calling them with exactly the signatures shown in RELATED CODE. Use a temporary data file via the environment variable the code reads. Name every test starting with [C<n>] where <n> is the number of the single obligation it proves. Write at most one or two focused tests per obligation and keep the whole file under about 120 lines. Every test must be independent: start it from its own fresh state (a new temporary data file set through the storage environment variable inside that test, or a unique id) and never depend on another test having run first or on leftover files.\n${testObligations(input.acceptance)}` : '',
     !input.job.exists || input.mode === 'rewrite' ? `Reply with the complete ${input.job.exists ? 'new content' : 'content'} of ${input.job.path} in one fenced block${input.job.exists ? ', or NO_CHANGE' : ''}.` : `Reply with edits for ${input.job.path} (append and/or search/replace), or NO_CHANGE.`,
+      input.firstPass?.manifest && input.job.role === 'feature' ? MANIFEST_TEXT : '',
   ].filter(Boolean).join('\n\n')
 }
 
@@ -91,9 +119,11 @@ export function analystPrompt(input: { failureOutput: string; candidates: { path
   ].filter(Boolean).join('\n\n')
 }
 
-export function repairPrompt(input: { failureOutput: string; hypothesis: string; file: string; current: string; related: { path: string; text: string }[]; request: string; lessons: string[]; mode?: EditMode; evidence?: string; relatedCap?: number }): string {
+export function repairPrompt(input: { failureOutput: string; hypothesis: string; file: string; current: string; related: { path: string; text: string }[]; request: string; lessons: string[]; mode?: EditMode; evidence?: string; relatedCap?: number; firstPass?: { contractText: string; recipeText: string } }): string {
   return [
     `FEATURE: ${input.request}`,
+    input.firstPass?.contractText ?? '',
+    input.firstPass?.recipeText ?? '',
     input.lessons.length ? `LESSONS (apply them):\n${input.lessons.map((l) => `- ${l}`).join('\n')}` : '',
     `FAILED COMMAND OUTPUT (real, trimmed):\n${input.failureOutput.slice(-2000)}`,
     input.evidence ?? '',
@@ -119,13 +149,18 @@ export function parseCodeReply(text: string): { kind: 'code'; content: string } 
  * Parse a worker reply against the CURRENT file: edits (append / search-replace) are applied and validated; a full fenced block
  * is treated as a rewrite (still subject to the API-compat gate). Unmatched or ambiguous SEARCH text is refused, never guessed.
  */
-export function parseEditReply(text: string, current: string | null, rel = 'file.mjs'): { kind: 'code'; content: string; mode: 'rewrite' | 'edits' | 'new' } | { kind: 'no_change' } | { kind: 'invalid'; reason: string } {
+export function parseEditReply(text: string, current: string | null, rel = 'file.mjs'): { kind: 'code'; content: string; mode: 'rewrite' | 'edits' | 'new'; structural?: string[] } | { kind: 'no_change' } | { kind: 'invalid'; reason: string } {
   const t = text.trim()
   if (t === 'NO_CHANGE' || t === '`NO_CHANGE`') return { kind: 'no_change' }
-  const blocks = [...t.matchAll(/<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g)]
-  const appends = [...t.matchAll(/```append\n([\s\S]*?)```/g)]
-  if (current !== null && (blocks.length || appends.length)) {
+  // structural (symbol / anchor / import) edits are applied first by AST range; the SEARCH/REPLACE blocks that belong to them are not applied a second time
+  const sops = current !== null && hasStructOps(t) ? parseStructOps(t) : []
+  const plain = sops.length ? t.replace(/```(?:replace-symbol|insert-(?:after|before|end)|add-import|change-in|insert-(?:after|before)-line)\b[\s\S]*?```/g, '') : t
+  const blocks = [...plain.matchAll(/<<<<<<< SEARCH\n([\s\S]*?)\n=======\n([\s\S]*?)\n>>>>>>> REPLACE/g)]
+  const appends = [...plain.matchAll(/```append\n([\s\S]*?)```/g)]
+  if (current !== null && (blocks.length || appends.length || sops.length)) {
     let out = current
+    let structural: string[] | undefined
+    if (sops.length) { const r = applyStructOps(rel, out, sops); if (!r.ok) return { kind: 'invalid', reason: r.reason }; out = r.content; structural = r.applied }
     for (const b of blocks) {
       const search = b[1]
       const n = search.length ? out.split(search).length - 1 : 0
@@ -135,7 +170,7 @@ export function parseEditReply(text: string, current: string | null, rel = 'file
     }
     for (const a of appends) out = mergeAppend(rel, out, a[1].replace(/\s+$/, '')).content
     if (out === current) return { kind: 'invalid', reason: 'the edits change nothing' }
-    return { kind: 'code', content: out, mode: 'edits' }
+    return { kind: 'code', content: out, mode: 'edits', ...(structural ? { structural } : {}) }
   }
   const full = parseCodeReply(text)
   if (full.kind === 'code') return { kind: 'code', content: full.content, mode: current === null ? 'new' : 'rewrite' }
