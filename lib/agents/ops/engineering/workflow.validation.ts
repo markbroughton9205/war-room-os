@@ -14,7 +14,7 @@ import { runCommand } from './runtime/commandRunner'
 import type { EngineeringTool } from '../types'
 import { AgentRegistry } from '../registry'
 import { parseEditReply } from './prompts'
-import { correctContractAssertions } from './testContract'
+import { correctContractAssertions, testNames } from './testContract'
 import { completionClass } from './completionClass'
 import type { FrontierProvider } from './frontierBridge'
 import { existsSync, readFileSync } from 'node:fs'
@@ -861,6 +861,67 @@ void deriveAssignments; void AgentRegistry
   const qx = makeWorld(); const evq: string[] = []
   const rq = await runFeatureWorkflow(deps(qx, mkWriter({ [F1]: () => invented }), { contractTests: true, testCandidates: [{ label: 'alt-bad', model: mkWriter({ [F1]: () => invented }) }], onEvent: ev(evq) }), REQ)
   check('P43_quarantine_comes_last_after_the_candidate_failed_and_the_run_is_not_CLEAN', rq.status === 'COMPLETED' && (rq.quarantinedTests ?? 0) >= 1 && rq.completionClass === 'WITH_QUARANTINE' && rq.cleanKind === null && evq.findIndex((e) => e.startsWith('TEST_CANDIDATE ')) >= 0 && evq.findIndex((e) => e.startsWith('QUARANTINE')) > evq.findIndex((e) => e.startsWith('TEST_CANDIDATE ')), `${rq.status} ${rq.completionClass} q=${rq.quarantinedTests} ${evq.filter((e) => /CANDID|QUAR/.test(e)).join('|').slice(0, 300)}`)
+
+  // P80..P89: short test names and the reserved test-rescue budget
+  {
+    const LONG = 'POST /api/sessions with a name creates a session and answers 201 with the name and a numeric id and an empty messages list; an empty name is rejected with 400; repeating the request never reuses an id'
+    const longNamed = FILE1.replace(/test\('\[C1\] [^']*'/, `test('[C1] ${LONG}'`)
+    const nm = makeWorld(); const evn: string[] = []
+    const rn = await runFeatureWorkflow(deps(nm, mkWriter({ [F1]: () => longNamed }), { contractTests: true, onEvent: ev(evn) }), REQ)
+    const finalNames = testNames(F1, nm.ws.read(F1))
+    check('P80_an_overlong_test_name_is_shortened_before_the_review_to_a_tagged_short_label', rn.status === 'COMPLETED' && finalNames.every((n) => n.length <= 80) && finalNames.some((n) => /^\[C1\] POST \/api\/sessions/.test(n)) && (rn.testAuthoring?.nameRewrites ?? []).length >= 1 && evn.some((e) => e.startsWith('TEST_NAMES_SHORTENED')), `${rn.status} ${rn.reason} names=${finalNames.join('|').slice(0, 300)}`)
+    const blank = (t: string) => t.replace(/^test\('[^']*'/gm, "test(''")
+    const restored = blank(nm.ws.read(F1))
+    check('P81_only_the_name_literal_changes_the_test_body_and_every_assertion_are_byte_identical', restored === blank(FILE1), `bodies differ (${restored.length} vs ${blank(FILE1).length})`)
+    check('P82_criterion_traceability_survives_the_rename_the_rewrite_records_criterion_old_and_new_name_and_the_test_still_grounds_to_C1', (rn.testAuthoring?.nameRewrites ?? []).some((w) => w.criterion === 1 && w.from.includes(LONG.slice(0, 40)) && w.to.length <= 80) && (rn.testTraceability ?? []).some((t) => t.file === F1 && t.criterion_ids.includes(1)) && rn.completionClass === 'CLEAN', `${rn.completionClass}`)
+
+    // rescue: the normal helper threshold (runtime share 0 = "already past 70%") no longer starves the final candidate
+    const rs1 = makeWorld(); const evr: string[] = []
+    const w7 = mkWriter({ [F1]: () => invented }); const alt7 = mkWriter()
+    const rr1 = await runFeatureWorkflow(deps(rs1, w7, { contractTests: true, helperPolicy: { runtimeShare: 0 }, testCandidates: [{ label: 'alt-local', model: alt7 }], onEvent: ev(evr) }), REQ)
+    const rsv = rr1.testAuthoring?.rescue
+    check('P83_one_final_candidate_rescue_still_runs_after_the_normal_runtime_threshold_and_avoids_quarantine', rr1.status === 'COMPLETED' && alt7.calls.length === 1 && rr1.completionClass === 'CLEAN' && (rr1.quarantinedTests ?? 0) === 0 && !!rsv && rsv.rescue_attempted && rsv.used_calls === 1 && rsv.rescue_skipped_reason === null && !evr.some((e) => e.startsWith('HELPER_BUDGET_EXHAUSTED') && /competing/.test(e)), `${rr1.status} ${rr1.completionClass} ${JSON.stringify(rsv)} ${evr.filter((e) => /HELPER|RESCUE/.test(e)).join('|')}`)
+    check('P84_the_rescue_ledger_reports_reserved_and_used_calls_and_time', !!rsv && rsv.reserved_calls >= 1 && rsv.reserved_time_ms > 0 && rsv.used_time_ms >= 0 && rsv.used_calls <= rsv.reserved_calls, JSON.stringify(rsv))
+    const rs2 = makeWorld()
+    const rr2 = await runFeatureWorkflow(deps(rs2, mkWriter({ [F1]: () => invented }), { contractTests: true, rescueReserve: { calls: 10_000, ms: 10 ** 12 }, testCandidates: [{ label: 'alt-local', model: mkWriter() }] }), REQ)
+    check('P85_the_reserve_can_never_exceed_the_global_hard_budget', !!rr2.testAuthoring?.rescue && rr2.testAuthoring.rescue.reserved_calls <= Math.floor(40 * 0.2) && rr2.testAuthoring.rescue.reserved_time_ms <= Math.floor(600_000 * 0.2), JSON.stringify(rr2.testAuthoring?.rescue))
+    // quarantine still happens when the rescue fails, and the rescue stays bounded to one candidate
+    const rs3 = makeWorld(); const bad3 = mkWriter({ [F1]: () => invented })
+    const rr3 = await runFeatureWorkflow(deps(rs3, mkWriter({ [F1]: () => invented }), { contractTests: true, helperPolicy: { runtimeShare: 0 }, testCandidates: [{ label: 'alt-bad', model: bad3 }] }), REQ)
+    check('P86_a_failed_rescue_is_bounded_to_one_candidate_and_quarantine_still_follows_never_CLEAN', rr3.status === 'COMPLETED' && bad3.calls.length === 1 && (rr3.quarantinedTests ?? 0) >= 1 && rr3.completionClass === 'WITH_QUARANTINE' && rr3.cleanKind === null && (rr3.testAuthoring?.rescue?.used_calls ?? 0) === 1, `${rr3.completionClass} cand=${bad3.calls.length} ${JSON.stringify(rr3.testAuthoring?.rescue)}`)
+    check('P87_no_acceptance_criterion_is_weakened_by_the_rescue_or_the_rename_every_criterion_is_still_covered', [rn, rr1].every((r) => (r.cleanBlockers ?? []).length === 0) && [1, 2, 3, 4].every((c) => (rn.testTraceability ?? []).some((t) => t.criterion_ids.includes(c))), JSON.stringify((rn.testTraceability ?? []).map((t) => t.criterion_ids)))
+    // hard stops: the rescue never overrides the call ceiling
+    const rs4 = makeWorld({ limits: { maxModelCalls: 30 } }); const alt4 = mkWriter()
+    const rr4 = await runFeatureWorkflow(deps(rs4, mkWriter({ [F1]: () => invented }), { contractTests: true, rescueReserve: { calls: 0, ms: 0 }, helperPolicy: { runtimeShare: 0 }, testCandidates: [{ label: 'alt', model: alt4 }] }), REQ)
+    check('P88_with_no_reserve_configured_the_old_threshold_still_applies_and_the_skip_reason_is_recorded', alt4.calls.length === 0 && rr4.testAuthoring?.rescue?.rescue_skipped_reason === 'NO_RESERVE' && rr4.testAuthoring.rescue.rescue_attempted === false, JSON.stringify(rr4.testAuthoring?.rescue))
+  }
+
+  {
+    // P89: earlier repair activity cannot spend the reserve. Each earlier test-writer call advances a virtual clock by 45s of a 120s assignment: without the reserve the repairs run the clock out and the
+    // candidate is blocked by the global hard timeout; with it the repairs stop early and the candidate still gets its one bounded attempt.
+    let f1Calls = 0, skew = 0
+    const slow = async (reserve: { calls: number; ms: number } | undefined) => {
+      f1Calls = 0
+      const wx = makeWorld({ limits: { maxRuntimeMs: 120_000 } }); const altx = mkWriter(); const evx: string[] = []
+      const wr = mkWriter({ [F1]: () => invented }); const og = wr.generate.bind(wr)
+      wr.generate = async (i) => { if (/FILE TO (?:CREATE|FIX): test\/contract\.api-1/.test(i.prompt)) { f1Calls += 1; skew += 45_000 } return og(i) }
+      const realNow = Date.now; skew = 0; Date.now = () => realNow() + skew
+      let r: Awaited<ReturnType<typeof runFeatureWorkflow>>
+      try { r = await runFeatureWorkflow(deps(wx, wr, { contractTests: true, ...(reserve ? { rescueReserve: reserve } : {}), testCandidates: [{ label: 'alt-local', model: altx }], onEvent: ev(evx) }), REQ) } finally { Date.now = realNow }
+      return { r, alt: altx.calls.length, f1: f1Calls }
+    }
+    const held = await slow(undefined), none = await slow({ calls: 0, ms: 0 })
+    console.log('P89TRY', held.r.reason, '|', none.r.reason, held.f1, none.f1, held.alt, held.r.status, JSON.stringify(held.r.testAuthoring?.rescue), '|', none.alt, none.r.status, JSON.stringify(none.r.testAuthoring?.rescue))
+    check('P89_the_reserved_candidate_allowance_survives_earlier_repairs_that_would_otherwise_run_the_clock_out', held.alt === 1 && held.r.testAuthoring?.rescue?.rescue_attempted === true && held.r.testAuthoring.rescue.used_calls === 1 && none.alt === 0, `held=${held.alt} none=${none.alt} ${JSON.stringify(held.r.testAuthoring?.rescue)}`)
+    // P90: a pause or cancel stops the work: the rescue is never started once the Commander has stopped the assignment
+    for (const mode of ['pause', 'cancel'] as const) {
+      const wx = makeWorld(); const altx = mkWriter(); let fileCalls = 0
+      const wr = mkWriter({ [F1]: () => invented }); const og = wr.generate.bind(wr)
+      wr.generate = async (i) => { if (/test\/contract\.api-1/.test(i.prompt)) { fileCalls += 1; if (fileCalls === 3) { if (mode === 'pause') pauseAssignment(wx.log, wx.asg.id, C, 'operator pause', NOW); else requestCancel(wx.log, wx.asg.id, C, 'operator cancel', NOW) } } return og(i) }
+      const r = await runFeatureWorkflow(deps(wx, wr, { contractTests: true, testCandidates: [{ label: 'alt-local', model: altx }] }), REQ)
+      check(`P90_${mode}_stops_the_work_immediately_and_the_reserved_rescue_is_never_started`, altx.calls.length === 0 && r.status === (mode === 'pause' ? 'PAUSED' : 'CANCELLED'), `${r.status} alt=${altx.calls.length} ${JSON.stringify(r.testAuthoring?.rescue)}`)
+    }
+  }
 
   // P44: omitting a required criterion cannot produce CLEAN (weakening by omission)
   const om = makeWorld()

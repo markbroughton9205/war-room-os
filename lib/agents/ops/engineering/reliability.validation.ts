@@ -167,5 +167,14 @@ void cpSync
   const deep = mk("import { deepStrictEqual } from 'node:assert'", 'deepStrictEqual', 410)
   const dc = correctContractAssertions('test/c.test.mjs', deep, [{ line: lineOf(deep), actual: '404', expected: '410' }], ACC)
   check('R59_bare_deepStrictEqual_is_covered_with_the_same_single_literal_rule', !!dc && dc.corrections.length === 1 && dc.content === deep.replace('res.status, 410', 'res.status, 404'))
+}{
+  // alert run 1: a check about "?state=unread|read|archived|all" was attributed to POST /api/alerts/read-all because the query words matched the route words
+  const srvq = "import { createServer } from 'node:http'\nimport { markAllReadService, listAlertsService } from './src/eventService.mjs'\nconst server = createServer(async (req, res) => {\n  const url = new URL(req.url, 'http://x')\n  if (url.pathname === '/api/alerts/read-all' && req.method === 'POST') {\n    const result = await markAllReadService()\n    return reply(res, 200, result)\n  }\n  if (url.pathname === '/api/alerts' && req.method === 'GET') {\n    const alerts = await listAlertsService(url.searchParams.get('state'))\n    return reply(res, 200, alerts)\n  }\n})\n"
+  const svcq = "export async function markAllReadService() { return { updated: 0 } }\nexport async function listAlertsService(state) { return [] }\n"
+  const evq = buildEvidence({ output: TAP([[6, 'the list excludes archived by default and ?state=unread|read|archived|all select the right alerts', 'def=null unread=null read=null archived=null all=null']]), acceptance: ALERT_FEATURE.acceptance, files: { 'server.mjs': srvq, 'src/eventService.mjs': svcq } })
+  const keys = evq.queue.map((h) => h.key)
+  check('R60_a_check_about_a_query_filter_is_attributed_to_the_GET_collection_route_not_to_a_read_all_route_that_shares_its_words', keys.some((k) => /listAlertsService/.test(k)) && !keys.some((k) => /markAllReadService/.test(k)), keys.join(' | '))
+  const evr = buildEvidence({ output: TAP([[9, 'POST /api/alerts/read-all marks the non-archived alerts read and reports how many changed', 'status=200 body=null']]), acceptance: ALERT_FEATURE.acceptance, files: { 'server.mjs': srvq, 'src/eventService.mjs': svcq } })
+  check('R61_a_check_that_names_its_own_path_still_resolves_to_that_route', evr.queue.some((h) => /markAllReadService/.test(h.key)) || evr.queue.some((h) => h.files.includes('server.mjs')), evr.queue.map((h) => h.key).join(' | '))
 }
 finish()

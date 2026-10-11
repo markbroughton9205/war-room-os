@@ -59,10 +59,15 @@ export function buildEvidence(inp: EvidenceInput): StructuredEvidence {
   const catchMaps = catchLine >= 0 && /(?:err|e|error)\.(?:status|statusCode|code)/.test(lines.slice(catchLine, catchLine + 8).join('\n'))
   const handlerFor = (name: string, message = '') => {
     const paths = [...name.matchAll(/\/api\/[\w\-/:.]+/g)].map((m) => m[0].replace(/:\w+/g, '1'))
+    // a check about a QUERY (`?state=unread|read|all`) concerns a GET collection route: the words inside the query and the verifier's own variant labels must not pull in a route like /read-all
+    const queryCheck = /\?\w+=/.test(name)
+    if (queryCheck) { name = name.replace(/\?[\w=|&,.%-]+/g, ' '); message = message.replace(/(\w+)=/g, ' ') }
     const toks = (`${name} ${[...message.matchAll(/(\w+)=/g)].map((m) => m[1]).join(' ')}`.toLowerCase().match(/[a-z][a-z-]{2,}/g) ?? []).filter((t) => !['marks', 'returns', 'reports', 'excludes', 'default', 'rejected', 'unknown', 'alert', 'alerts', 'session', 'sessions', 'tasks', 'task', 'todo', 'with', 'that', 'only', 'survive', 'across', 'server', 'stores', 'message', 'messages', 'creates', 'their', 'flags', 'select', 'right', 'filter', 'narrows', 'state'].includes(t))
     const words = (t: string) => new Set(t.toLowerCase().match(/[a-z]+/g) ?? [])
-    const scored = routes.map((r) => { const w = words(r.pattern); return { r, s: (paths.some((p) => r.matches(p)) ? 3 : 0) + [...new Set(toks.flatMap((t) => t.split('-')))].filter((t) => w.has(t)).length } })
-    return scored.filter((x) => x.s > 0).sort((a, b) => b.s - a.s || a.r.line - b.r.line)[0]?.r ?? null
+    const pool = queryCheck && routes.some((r) => r.method === 'GET') ? routes.filter((r) => r.method === 'GET') : routes
+    const nameWords = words(name)
+    const scored = pool.map((r) => { const w = words(r.pattern); return { r, s: (paths.some((p) => r.matches(p)) ? 3 : 0) + [...new Set(toks.flatMap((t) => t.split('-')))].filter((t) => w.has(t)).length + (queryCheck ? [...w].filter((t) => t.length > 3 && t !== 'api' && nameWords.has(t)).length : 0) } })
+    return scored.filter((x) => x.s > 0).sort((a, b) => b.s - a.s || (queryCheck ? a.r.pattern.length - b.r.pattern.length : 0) || a.r.line - b.r.line)[0]?.r ?? null
   }
   const handlerBody = (r: Route | null) => (r ? lines.slice(r.line - 1, r.end).join('\n') : '')
   const calleeFiles = (body: string): { fn: string; file: string }[] => [...new Set([...body.matchAll(/\b([A-Za-z_]\w*)\s*\(/g)].map((m) => m[1]))].map((fn) => ({ fn, file: exportedBy(files, fn) ?? '' })).filter((x) => x.file && x.file !== serverFile)

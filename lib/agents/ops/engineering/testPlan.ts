@@ -197,15 +197,52 @@ export function planPromptFor(plan: TestPlan, file: string): string {
   const elsewhere = plan.tests.filter((t) => t.priority === 'COVERED_ELSEWHERE')
   return [
     `APPROVED TEST PLAN FOR ${file} (implement exactly these tests; invent no behaviour that is not in a row):`,
-    ...rows.map((t) => `  [C${t.criterion_id}] ${t.behavior}${t.variants?.length ? `\n     VARIANTS (write EXACTLY one separate, independent test per variant; each name is "[C${t.criterion_id}] <KEY>: <a short description in your own words, under 90 characters, NOT the recipe text>"; a test proves ONLY its own variant and never mixes two): ${t.variants.map((v) => `${v.key} -> ${v.recipe.replace(/\[C#\]/g, `[C${t.criterion_id}]`)}`).join(' || ')}` : ''}${t.clauses?.length ? `\n     CLAUSES (write ONE separate test per clause, each named [C${t.criterion_id}] followed by the clause words; each test asserts only that clause's status and nothing from the other clauses): ${t.clauses.map((c, k) => `(${k + 1}) ${c}`).join(' | ')}` : ''}\n     preconditions: ${t.preconditions}\n     action: ${t.action}\n     expected: ${t.expected_result}${t.state_requirements.length ? `\n     state: ${t.state_requirements.join('; ')}` : ''}`),
+    ...rows.map((t) => `  [C${t.criterion_id}] ${t.behavior}${t.variants?.length ? `\n     VARIANTS (write EXACTLY one separate, independent test per variant; each name is "[C${t.criterion_id}] <KEY>: <a short description in your own words, under 60 characters, NOT the recipe text>"; a test proves ONLY its own variant and never mixes two): ${t.variants.map((v) => `${v.key} -> ${v.recipe.replace(/\[C#\]/g, `[C${t.criterion_id}]`)}`).join(' || ')}` : ''}${t.clauses?.length ? `\n     CLAUSES (write ONE separate test per clause, each named [C${t.criterion_id}] followed by the clause words; each test asserts only that clause's status and nothing from the other clauses): ${t.clauses.map((c, k) => `(${k + 1}) ${c}`).join(' | ')}` : ''}\n     preconditions: ${t.preconditions}\n     action: ${t.action}\n     expected: ${t.expected_result}${t.state_requirements.length ? `\n     state: ${t.state_requirements.join('; ')}` : ''}`),
     elsewhere.length ? `NOT TESTED IN THIS FILE (covered elsewhere, do not write tests for them): ${elsewhere.map((t) => `[C${t.criterion_id}] ${t.covered_by}`).join('; ')}` : '',
     `HOW TO WRITE THEM: every test talks to the real server through the harness. Do NOT import anything from ../src or ../server; do NOT create files, temp paths or ports yourself; do NOT keep state in variables outside a test. Every test starts its own fresh server with withApp, so tests are independent by construction.`,
+    `TEST NAMES: "[C<n>] <short behaviour label>", at most 60 characters after the tag, e.g. "[C<n>] list filters by state" or "[C<n>] unread count". NEVER copy the criterion text into a test name; the tag already links the test to its criterion.`,
     `HARNESS API (import { withApp } from './support/harness.mjs'):`,
     `  await withApp(async (app) => { ... })  -> app.get(path) | app.post(path, body) | app.put(path, body) | app.patch(path, body) | app.del(path) each return { status, body, text } (body = parsed JSON or null)`,
     `  app.restart() restarts the server on the SAME data (persistence); app.storageFile(VARIABLE) is the data file path; withApp(fn, { defaultStorage: true }) runs without the storage variables in a private working directory (app.cwd).`,
     `EXAMPLE (shape only):\nimport test from 'node:test'\nimport assert from 'node:assert'\nimport { withApp } from './support/harness.mjs'\n\ntest('[C${rows[0]?.criterion_id ?? 1}] <behavior from the plan>', () => withApp(async (app) => {\n  const r = await app.post('/api/things', { name: 'a' })\n  assert.strictEqual(r.status, 201)\n  assert.strictEqual(r.body.name, 'a')\n}))`,
     `STATE RULE: before the request a test is about, bring the data to the state it needs using ONLY requests the contract allows (for a state machine, walk the allowed moves one step at a time from the initial state; never jump straight to a state, and never assume a state you did not create in that same test). A request the contract forbids is the thing being tested, never the way to get ready.\n    RULES: name each test starting with [C<number>] of the single plan row it proves; cover EVERY row above with at least one test; at most two tests per row (a row with VARIANTS: exactly one test per variant); assert only what the row's criterion states (status codes, named fields and values, counts) and never exact error wording, id values (beyond numeric/increasing), ordering of unrelated fields or timing; no test.skip, test.todo or .only; every test must contain a real assertion about the response; at most about ${40 + 25 * rows.length + 18 * rows.reduce((n, r) => n + (r.variants?.length ?? 0), 0)} lines in total.`,
   ].filter(Boolean).join('\n')
+}
+
+/** Hard limit for a contract test name (tag and variant key included). Longer names are rewritten before the review; the test body is never touched. */
+export const TEST_NAME_LIMIT = 80
+export type NameRewrite = { file: string; criterion: number; from: string; to: string }
+const shortLabel = (rest: string, room: number): string => {
+  const clause = rest.replace(/\s+/g, ' ').trim().split(/\s*(?:;|:\s|\s[-\u2013\u2014]\s|\.\s)/)[0] ?? ''
+  let out = clause
+  if (out.length > room) { out = out.slice(0, room); const sp = out.lastIndexOf(' '); if (sp > room * 0.5) out = out.slice(0, sp) }
+  return out.replace(/[\s,;:(\-]+$/, '').replace(/['"`\\]/g, '')
+}
+/** Deterministic NAME-only rewrite: "[C<n>] <KEY>: <criterion text...>" becomes "[C<n>] <KEY>: <short label>" when the name exceeds TEST_NAME_LIMIT. The criterion stays traceable through its tag; assertions and body are byte-identical. */
+export function normalizeTestNames(rel: string, text: string): { content: string; rewrites: NameRewrite[] } {
+  const calls = testCalls(rel, text), rewrites: NameRewrite[] = [], edits: { from: number; to: number; value: string }[] = []
+  const used = new Set(calls.filter((c) => c.name.length <= TEST_NAME_LIMIT).map((c) => c.name))
+  for (const c of calls) {
+    if (c.name.length <= TEST_NAME_LIMIT) continue
+    const tag = /^\s*(\[C(\d{1,2})\])\s*((?:CUSTOM_PATH|DEFAULT_PATH|PERSISTENCE|IDS)\s*:)?\s*/.exec(c.name)
+    if (!tag) continue
+    const head = `${tag[1]} ${tag[3] ? tag[3].replace(/\s+/g, '') + ' ' : ''}`
+    const label = shortLabel(c.name.slice(tag[0].length), TEST_NAME_LIMIT - head.length) || 'contract behaviour'
+    let name = head + label, n = 2
+    while (used.has(name)) name = `${head}${label.slice(0, TEST_NAME_LIMIT - head.length - 3)} #${n++}`
+    used.add(name)
+    const m = /^\s*(?:test|it)(?:\.\w+)?\s*\(\s*(['"`])/.exec(c.text)
+    if (!m) continue
+    const q = m[1], open = c.start + m[0].length - 1
+    let i = open + 1
+    while (i < text.length && text[i] !== q) i += text[i] === '\\' ? 2 : 1
+    if (i >= text.length) continue
+    edits.push({ from: open + 1, to: i, value: name })
+    rewrites.push({ file: rel, criterion: Number(tag[2]), from: c.name, to: name })
+  }
+  let content = text
+  for (const e of edits.sort((a, b) => b.from - a.from)) content = content.slice(0, e.from) + e.value + content.slice(e.to)
+  return { content, rewrites }
 }
 
 export type ReviewFinding = { code: string; detail: string }
@@ -232,7 +269,7 @@ export function reviewTestFile(rel: string, text: string, plan: TestPlan): Revie
     else if (!assigned.has(Number(tag[1]))) out.push({ code: 'FOREIGN_CRITERION', detail: `"${c.name.slice(0, 60)}" proves C${tag[1]}, which is not assigned to ${rel} (assigned: ${[...assigned].map((n) => 'C' + n).join(', ')})` })
   }
   const tagged = new Set(calls.map((c) => Number(/\[C(\d{1,2})\]/.exec(c.name)?.[1])).filter(Boolean))
-  for (const c of calls) if (c.name.length > 140) out.push({ code: 'NAME_TOO_LONG', detail: `"${c.name.slice(0, 50)}..." has a ${c.name.length}-character name; name the test with a short description (under 90 characters), never the recipe text` })
+  for (const c of calls) if (c.name.length > 140) out.push({ code: 'NAME_TOO_LONG', detail: `"${c.name.slice(0, 50)}..." has a ${c.name.length}-character name; name the test with a short description (under 60 characters), never the recipe text` })
   for (const row of rows) for (const v of row.variants ?? []) {
     const mine = calls.filter((c) => new RegExp(`\\[C${row.criterion_id}\\]\\s*${v.key}\\b`).test(c.name))
     if (!mine.length) { out.push({ code: 'MISSING_VARIANT', detail: `[C${row.criterion_id}] needs a separate test named "[C${row.criterion_id}] ${v.key}: ..." (${v.recipe.slice(0, 160)})` }); continue }

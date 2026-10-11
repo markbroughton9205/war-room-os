@@ -10,7 +10,7 @@ import { runHermetic } from './runtime/commandRunner'
 import { correctContractAssertions } from './testContract'
 import { attachContractStatuses, mapCatchStatus } from './errorStatus'
 import { statusReachability } from './staticGates'
-import { criteriaForFailures } from './testPlan'
+import { criteriaForFailures, normalizeTestNames, TEST_NAME_LIMIT } from './testPlan'
 import { HARNESS_PATH, buildTestPlan, clausesOf, correctionAcceptance, classifyTestDefect, dropUngrounded, harnessSource, parseReviewerVerdict, planPromptFor, reviewProblem, reviewTestFile, reviewerPrompt, repairDefaultStoragePath, startEntry, uncoveredCriteria, variantsOf } from './testPlan'
 import type { EngineeringTool } from '../types'
 
@@ -147,4 +147,17 @@ check('P76_after_both_edits_the_domain_throws_carry_409_and_the_handler_can_answ
 
 const cf = criteriaForFailures('ok 1 - POST /api/alerts creates unread\nnot ok 6 - the list excludes archived by default and ?state=unread|read|archived|all select the right alerts\n  message: def=[1,4]\n', ALERT_ACC)
 check('P77_a_failing_check_is_paired_with_the_contract_sentence_it_proves_so_the_repair_model_sees_the_expected_value_not_only_the_observed_one', cf.length >= 1 && /lists alerts that are not archived/.test(cf[0]) && criteriaForFailures('ok 1 - x\n', ALERT_ACC).length === 0)
+// ---- short test names: the name literal is rewritten, the body never is
+const LONGN = 'GET /api/alerts lists alerts that are not archived; ?state=unread returns only unread alerts that are not archived, ?state=read only read alerts that are not archived, ?state=archived only archived alerts, ?state=all every alert; ?severity=critical (or warning, info) narrows any of these'
+const longFile = GOOD.replace("test('[C1] behavior 1'", `test('[C1] ${LONGN}'`).replace("test('[C4] PERSISTENCE: behavior 4'", `test('[C4] PERSISTENCE: ${LONGN}'`)
+const nn = normalizeTestNames(F1, longFile)
+const namesOf = (t: string) => [...t.matchAll(/^test\('([^']*)'/gm)].map((m) => m[1])
+check('P78_long_criterion_text_becomes_a_short_tagged_name_and_a_variant_keeps_its_key', nn.rewrites.length === 2 && namesOf(nn.content).every((n) => n.length <= TEST_NAME_LIMIT) && namesOf(nn.content)[0].startsWith('[C1] GET /api/alerts lists alerts') && /^\[C4\] PERSISTENCE: /.test(namesOf(nn.content)[3]), namesOf(nn.content).join('|'))
+check('P79_only_the_name_literal_changes_the_body_and_assertions_are_byte_identical_and_the_criterion_stays_in_the_rewrite_record', nn.content.replace(/^test\('[^']*'/gm, "test(''") === longFile.replace(/^test\('[^']*'/gm, "test(''") && nn.rewrites.every((r) => r.from.length > TEST_NAME_LIMIT && r.to.length <= TEST_NAME_LIMIT) && nn.rewrites.map((r) => r.criterion).join() === '1,4')
+check('P80s_normalising_is_idempotent_leaves_short_names_alone_and_the_result_passes_the_review', normalizeTestNames(F1, nn.content).rewrites.length === 0 && normalizeTestNames(F1, GOOD).content === GOOD && !reviewTestFile(F1, nn.content, plan).some((f) => f.code === 'NAME_TOO_LONG' || f.code === 'MISSING_COVERAGE' || f.code === 'UNTAGGED'))
+const twice = normalizeTestNames(F1, GOOD.replace("test('[C2] behavior 2'", `test('[C2] ${LONGN}'`) + `test('[C2] ${LONGN}!', () => withApp(async (app) => {\n  assert.ok(app)\n}))\n`)
+check('P81s_two_long_names_that_shorten_to_the_same_label_stay_distinct', new Set(namesOf(twice.content)).size === namesOf(twice.content).length, namesOf(twice.content).join('|'))
+const longDefault = normalizeTestNames('test/c.test.mjs', `test('[C7] DEFAULT_PATH: ${LONGN}', () => withApp(async (app) => {\n  assert.ok(app)\n}, { defaultStorage: true }))\n`)
+check('P82s_the_short_name_keeps_the_tag_and_variant_key_so_variant_coverage_is_still_recognised', /^test\('\[C7\] DEFAULT_PATH: /.test(longDefault.content) && /\{ defaultStorage: true \}/.test(longDefault.content))
+
 finish()
