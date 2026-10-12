@@ -480,7 +480,7 @@ process.env.ENGINE_NODE_PARSE = '0'
   const runaway = await withFetch(() => new Response(streamOf([ndjson(["test('a', () => {\n", ...loopLines.slice(0, 3)]).replace(/\n\{"response":"","done":true.*\n$/, '\n'), ...loopLines.map((l) => JSON.stringify({ response: l, done: false }) + '\n')], true), { status: 200 }), () => new OllamaModelClient('m').generate({ system: 's', prompt: 'p' })) as { ok: boolean; detail?: string }
   const err = await withFetch(() => new Response(JSON.stringify({ error: 'boom' }) + '\n', { status: 200 }), () => new OllamaModelClient('m').generate({ system: 's', prompt: 'p' })) as { ok: boolean; detail?: string }
   check('F108_the_model_client_reads_a_streamed_reply_with_real_token_counts_even_when_a_line_is_split_across_chunks', ok.ok && ok.text === 'hello' && ok.outputTokens === 7 && ok.promptTokens === 3 && split.ok && split.text === 'abcd', JSON.stringify([ok, split]))
-  check('F109_a_runaway_stream_is_stopped_early_with_a_retryable_failure_and_a_model_error_line_fails_honestly', !runaway.ok && /degenerate repetition/.test(runaway.detail ?? '') && classifyModelFailure(runaway.detail ?? '', false) === 'TIMEOUT' && !err.ok && /model error/.test(err.detail ?? '') && classifyModelFailure(err.detail ?? '', false) === 'NO_RETRY', JSON.stringify([runaway, err]))
+  check('F109_a_runaway_stream_is_stopped_early_with_a_retryable_failure_and_a_model_error_line_is_reported_as_a_transient_failure', !runaway.ok && /degenerate repetition/.test(runaway.detail ?? '') && classifyModelFailure(runaway.detail ?? '', false) === 'TIMEOUT' && !err.ok && /model error/.test(err.detail ?? '') && classifyModelFailure(err.detail ?? '', false) === 'TRANSIENT', JSON.stringify([runaway, err]))
   const wf2 = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
   const planP = buildTestPlan(ALERT_FEATURE.acceptance, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
   check('F110_after_a_runaway_the_retry_is_warmer_and_asks_for_compact_setup_and_the_test_prompt_says_to_use_a_loop_for_bulk_data', /REPEATED THE SAME STATEMENT ENDLESSLY/.test(wf2) && /if \(!r\.ok && \/degenerate repetition\/i\.test\(r\.detail\)\) runaway = true/.test(wf2) && !!planP && /KEEP SETUP SHORT/.test(planPromptFor(planP, planP.files.find((f) => !f.generated)!.path)))
@@ -539,6 +539,10 @@ process.env.ENGINE_NODE_PARSE = '0'
   const probs = contractRouteProblems('server.mjs', SRV, ['POST /api/alerts creates one', 'POST /api/alerts/:id/read marks read', 'POST /api/alerts/:id/archive archives'])
   check('F119_a_route_whose_match_result_is_stored_in_a_constant_and_used_later_in_the_condition_is_recognised', rt.some((r) => r.kind === 'regex' && r.matches('/api/alerts/1/read') && r.method === 'POST') && !probs.some((x) => /read|archive/.test(x)), JSON.stringify(rt.map((r) => [r.pattern, r.method])) + probs.join('|'))
   check('F120_nothing_is_generated_for_transitions_without_a_move_route_or_a_create_route', generateTransitionTests(2, { ...ct, routes: ct.routes.map((r) => ({ ...r, createsRecord: false })) }) === null && generateTransitionTests(2, { ...ct, transitions: [] }) === null && generateTransitionTests(1, ct) === null && generateTransitionTests(2, ca) === null)
+}
+
+{
+  check('F121_a_model_server_error_reported_inside_the_stream_is_retried_like_an_http_5xx_and_a_malformed_reply_is_not', classifyModelFailure('model error: an error was encountered while running the model: CUDA error: the launch timed out and was terminated', false) === 'TRANSIENT' && classifyModelFailure('HTTP 503', false) === 'TRANSIENT' && classifyModelFailure('malformed response', false) === 'NO_RETRY' && classifyModelFailure('model error: x', true) === 'NO_RETRY')
 }
 void deriveAssignments; void AgentOpsLog
 
