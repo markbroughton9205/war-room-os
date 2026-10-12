@@ -194,6 +194,80 @@ export function generateFilterTests(id: number, c: ImplementationContract): stri
   return lines.join('\n')
 }
 
+/**
+ * A state-count criterion ("GET /api/tasks/summary returns the number of tasks per status as {todo:n,doing:n,done:n}") is generated from the contract: tasks are created and walked to each
+ * status along the ALLOWED transitions only (the writer kept jumping straight to a status or naming tasks after statuses), then the counts are compared exactly; an empty board answers all zeros.
+ * Null when the contract does not carry what is needed (no create route, no PATCH route with a body field, a status that cannot be reached from the initial one).
+ */
+export function generateCounterTests(id: number, c: ImplementationContract): string | null {
+  const strip = (r: string) => r.replace(/^(?:GET|POST|PUT|PATCH|DELETE)\s+/, '')
+  const sum = c.routes.find((r) => r.criterion === id && r.method === 'GET' && !r.params.length && r.shape && Object.keys(r.shape).length >= 2 && Object.values(r.shape).every((v) => v === 'n'))
+  const create = c.routes.find((r) => r.createsRecord)
+  const move = c.routes.find((r) => r.method === 'PATCH' && r.bodyField && r.params.length === 1)
+  if (!sum || !create || !move || !c.transitions.length) return null
+  const keys = Object.keys(sum.shape!)
+  const edges = c.transitions.filter((t) => t.allowed)
+  const states = new Set(edges.flatMap((t) => [t.from, t.to]))
+  if (!keys.every((k) => states.has(k))) return null
+  const field = c.fields.find((f) => f.name === move.bodyField)
+  const initial = field?.default && states.has(field.default) ? field.default : keys.find((k) => !edges.some((t) => t.to === k))
+  if (!initial) return null
+  const route: Record<string, string[]> = {}
+  for (const k of keys) {
+    const prev: Map<string, string | null> = new Map([[initial, null]]); const queue: string[] = [initial]
+    while (queue.length) { const cur = queue.shift()!; for (const t of edges.filter((e) => e.from === cur)) if (!prev.has(t.to)) { prev.set(t.to, cur); queue.push(t.to) } }
+    if (!prev.has(k)) return null
+    const path: string[] = []; let at: string | null = k; while (at && at !== initial) { path.unshift(at); at = prev.get(at) ?? null }
+    route[k] = path
+  }
+  const counts = Object.fromEntries(keys.map((k, i) => [k, i + 1]))
+  const textField = c.fields.find((f) => f.required && !f.values.length)?.name
+  const extra = c.fields.filter((f) => f.required && f.values.length).map((f) => `${JSON.stringify(f.name)}: ${JSON.stringify(f.values[0])}`)
+  const bodyJs = textField || extra.length ? `{ ${[textField ? `${JSON.stringify(textField)}: 'item ' + n` : '', ...extra].filter(Boolean).join(', ')} }` : '{}'
+  const movePath = "'" + strip(move.path).replace(/:\w+/, "' + id + '") + "'"
+  const zeros = Object.fromEntries(keys.map((k) => [k, 0]))
+  return [
+    "import test from 'node:test'",
+    "import assert from 'node:assert/strict'",
+    "import { withApp } from './support/harness.mjs'",
+    '',
+    `const CREATE = ${JSON.stringify(strip(create.path))}`,
+    `const SUMMARY = ${JSON.stringify(strip(sum.path))}`,
+    `const COUNTS = ${JSON.stringify(counts)}`,
+    `const ROUTE = ${JSON.stringify(route)}`,
+    `const moveTo = (id) => ${movePath}`,
+    '',
+    'async function populate(app) {',
+    '  let n = 0',
+    '  for (const state of Object.keys(COUNTS)) {',
+    '    for (let i = 0; i < COUNTS[state]; i++) {',
+    '      n += 1',
+    `      const created = await app.post(CREATE, ${bodyJs})`,
+    "      assert.ok(created.status >= 200 && created.status < 300, 'create answered ' + created.status)",
+    '      for (const step of ROUTE[state]) {',
+    `        const r = await app.patch(moveTo(created.body.id), { ${JSON.stringify(move.bodyField)}: step })`,
+    "        assert.ok(r.status >= 200 && r.status < 300, 'moving to ' + step + ' answered ' + r.status)",
+    '      }',
+    '    }',
+    '  }',
+    '}',
+    '',
+    `test(${JSON.stringify(`[C${id}] SUMMARY: counts per status`)}, () => withApp(async (app) => {`,
+    '  await populate(app)',
+    '  const res = await app.get(SUMMARY)',
+    '  assert.equal(res.status, 200)',
+    '  assert.deepStrictEqual(res.body, COUNTS)',
+    '}))',
+    '',
+    `test(${JSON.stringify(`[C${id}] SUMMARY_EMPTY: an empty board counts zero`)}, () => withApp(async (app) => {`,
+    '  const res = await app.get(SUMMARY)',
+    '  assert.equal(res.status, 200)',
+    `  assert.deepStrictEqual(res.body, ${JSON.stringify(zeros)})`,
+    '}))',
+    '',
+  ].join('\n')
+}
+
 export function buildTestPlan(acceptance: string[], packageJson: string | null): TestPlan | null {
   const entry = startEntry(packageJson)
   if (!entry) return null
@@ -209,7 +283,7 @@ export function buildTestPlan(acceptance: string[], packageJson: string | null):
     const envNamed = vars.filter((v) => a.includes(v))
     const defaultPath = /default:?\s*([\w./-]+\.\w+)/i.exec(a)?.[1]
     const recipe = envNamed.length ? `STORAGE LOCATION RECIPE: create data through the API, then assert.ok(existsSync(app.storageFile('${envNamed[0]}'))) (import { existsSync } from 'node:fs'). app.storageFile(VAR) is a path inside a temp directory and its file NAME is not the default name, so never assert anything about the name${defaultPath ? `. For the default location use withApp(async (app) => { ...create data through the API...; assert.ok(existsSync(app.cwd + '/${defaultPath}')) }, { defaultStorage: true })` : ''}` : ''
-    const gen = generateFilterTests(id, full)
+    const gen = generateFilterTests(id, full) ?? generateCounterTests(id, full)
     if (gen) generated[id] = gen
     const variants = [...variantsOf(a, envNamed[0], defaultPath, persists), ...(gen ? [] : filterVariantsOf(id, full))]
     const state = [...(persists ? ['the data must be on disk: call app.restart() and read it back'] : []), ...envNamed.map((v) => `storage location comes from ${v}`)]
@@ -236,7 +310,7 @@ export function buildTestPlan(acceptance: string[], packageJson: string | null):
     for (const t of group) t.file = p
   }
   // each generated criterion is its own file (one set of helpers per file)
-  for (const t of required.filter((x) => generated[x.criterion_id])) { const gp = `test/contract.filters-c${t.criterion_id}.test.mjs`; files.push({ path: gp, criteria: [t.criterion_id], generated: generated[t.criterion_id] }); t.file = gp }
+  for (const t of required.filter((x) => generated[x.criterion_id])) { const gp = `test/contract.generated-c${t.criterion_id}.test.mjs`; files.push({ path: gp, criteria: [t.criterion_id], generated: generated[t.criterion_id] }); t.file = gp }
   return { entry, storageVars: vars, harnessPath: HARNESS_PATH, tests, files }
 }
 

@@ -470,6 +470,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   let restoreSeq = 0
   /** tag: a restore/revert is a NEW effect even when the same content was written earlier (the idempotency key would otherwise treat it as already done and skip it). */
   const writeFile = async (stepId: string, path: string, content: string, tag = '') => {
+    // first-pass: a known, deterministic defect is corrected on EVERY model write (edit stage, preflight repair, acceptance repair), not only on the first one
+    if (fpOn && fpContract && tag === '' && !/^test\//.test(path) && /\.m?js$/.test(path)) {
+      const fl = runRecipeChecks(fpFilesWith(path, content), fpContract, fpRecipes).filter((f) => f.file === path)
+      const fx = fl.length ? autofix(path, content, fl, fpContract) : null
+      if (fx) { content = fx.content; fpm.deterministic_structural_edits += fx.notes.length; emit('STRUCTURAL_AUTOFIX', `${path}: ${fx.notes.join('; ')} (on write)`) }
+    }
     const key = `write:${path}:${sha256(content).slice(0, 12)}${tag}`
     const before = ws.hash(path)
     const expected: FileChange = { path, beforeHash: before, afterHash: sha256(content), stepId }

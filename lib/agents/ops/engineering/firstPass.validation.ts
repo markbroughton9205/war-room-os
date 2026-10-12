@@ -7,7 +7,7 @@ import { harness, engWorld, addAgent, draftFor, C, NOW, tmp } from './engtestkit
 import { AgentOpsLog } from '../log'
 import { assign, deriveAssignments, startAssignment } from './assignments'
 import { ALERT_FEATURE, ALERT_REFERENCE, makeAlertApp } from './alertFixture'
-import { TASK_FEATURE, makeTaskApp } from './taskFixture'
+import { TASK_FEATURE, TASK_REFERENCE, makeTaskApp } from './taskFixture'
 import { CHAT_FEATURE, CHAT_REFERENCE, CHAT_VERIFY_SCRIPT, makeChatApp } from './chatFixture'
 import { deriveImplementationContract, renderContract, resolveContract, inheritConventions, safeRelativePath, unresolvedAmbiguities } from './implContract'
 import { buildEvidence } from './failureEvidence'
@@ -18,7 +18,7 @@ import { OllamaModelClient, isRunaway } from './runtime/ollamaModel'
 import { classifyModelFailure } from './modelFailure'
 import { parseEditReply, fitPrompt, ENGINEER_STRUCT_SYSTEM } from './prompts'
 import { importProblems, runPreflight, staticPreflight, preflightTap, preflightHypotheses } from './preflight'
-import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateFilterTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
+import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateCounterTests, generateFilterTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
 import { classifyLeftShift, criterionOfCheck, newFirstPassState, buildFirstPassReport } from './firstPass'
 import { runFeatureWorkflow, type WorkflowDeps } from './workflow'
 import { Workspace } from './runtime/workspaceFs'
@@ -495,6 +495,26 @@ process.env.ENGINE_NODE_PARSE = '0'
   const found2 = runRecipeChecks({ 'server.mjs': BAD2 }, cc, recs).filter((f) => f.check === 'readfile-encoding')
   const fixed2 = autofix('server.mjs', BAD2, found2, cc)
   check('F111_a_content_type_passed_to_readFileSync_as_its_encoding_is_found_and_moved_into_the_reply_call_deterministically', found.length === 1 && !!fixed && /readFileSync\('public\/app\.js', 'utf8'\), 'text\/javascript'\)/.test(fixed.content) && /readFileSync\('public\/index\.html', 'utf8'\), 'text\/html'\)/.test(fixed.content) && runRecipeChecks({ 'server.mjs': fixed.content }, cc, recs).filter((f) => f.check === 'readfile-encoding').length === 0 && syntaxOk(fixed.content) && found2.length === 1 && !!fixed2 && fixed2.content.includes("readFileSync('public/client.js', 'utf8'), 'text/javascript')") && !/'text\/javascript'\), 'text\/javascript'\), 'text/.test(fixed2.content) && syntaxOk(fixed2.content), JSON.stringify(found.map((f) => f.fact)))
+}
+
+{
+  const pkg = JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } })
+  const plan = buildTestPlan(TASK_FEATURE.acceptance, pkg)
+  const gf = plan?.files.find((f) => f.generated)
+  check('F112_the_task_summary_criterion_is_covered_by_a_generated_count_file_walked_along_allowed_transitions', !!plan && !!gf && gf.criteria.join() === '4' && /SUMMARY: counts per status/.test(gf.generated!) && /"doing":\["doing"\]/.test(gf.generated!) && /"done":\["doing","done"\]/.test(gf.generated!) && !/title: 'todo'/.test(gf.generated!) && plan.files.filter((f) => !f.generated).every((f) => !f.criteria.includes(4)), JSON.stringify(plan?.files.map((f) => [f.path, f.criteria])))
+  const mk = (patch: (rel: string, text: string) => string, tag: string) => {
+    const dir = makeTaskApp(path.join(tmp(), tag))
+    for (const [rel, text] of Object.entries(TASK_REFERENCE)) { if (!/^test\//.test(rel)) { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), patch(rel, text)) } }
+    mkdirSync(path.join(dir, 'test', 'support'), { recursive: true }); writeFileSync(path.join(dir, HARNESS_PATH), harnessSource('server.mjs', ['TASKS_FILE'])); writeFileSync(path.join(dir, gf!.path), gf!.generated!)
+    return dir
+  }
+  const run = (d: string) => spawnSync('node', ['--test', gf!.path], { cwd: d, encoding: 'utf8', timeout: 90_000, env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' } as unknown as NodeJS.ProcessEnv })
+  const ok = run(mk((_r, t) => t, 'task-gen'))
+  check('F113_the_generated_count_tests_pass_against_the_reference_implementation', ok.status === 0 && /(?:# |ℹ )pass 2\b/.test(ok.stdout) && /(?:# |ℹ )fail 0/.test(ok.stdout), `${ok.status} ${ok.stdout.slice(-300)} ${ok.stderr.slice(-200)}`)
+  const bad = run(mk((rel, t) => (/summary|Service|service/.test(rel) ? t.replace(/doing:\s*0/g, 'doing: 9').replace(/\.done\b/, '.todo') : t), 'task-gen-bug'))
+  check('F114_the_generated_count_tests_fail_when_the_summary_counts_the_wrong_status', bad.status !== 0, `${bad.status} ${bad.stdout.slice(-200)}`)
+  const wf = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
+  check('F115_a_known_deterministic_defect_is_corrected_on_every_model_write_and_nothing_is_generated_without_the_needed_contract_facts', /\(on write\)/.test(wf) && /tag === '' && !\/\^test/.test(wf) && generateCounterTests(4, { ...ct, transitions: [] }) === null && generateCounterTests(4, { ...ct, routes: ct.routes.map((r) => ({ ...r, createsRecord: false })) }) === null && generateCounterTests(1, ct) === null)
 }
 void deriveAssignments; void AgentOpsLog
 
