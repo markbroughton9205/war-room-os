@@ -14,7 +14,8 @@ import { buildEvidence } from './failureEvidence'
 import { RECIPES, autofix, buildImplStep, checkManifest, matchRecipes, renderImplStep, renderRecipes, runRecipeChecks, stripManifest, unawaitedFsCalls } from './recipes'
 import { applyStructOps, parseStructOps, preservedShare, topLevelDecls } from './structEdit'
 import { contractRouteProblems, routeTable } from './staticGates'
-import { OllamaModelClient } from './runtime/ollamaModel'
+import { OllamaModelClient, isRunaway } from './runtime/ollamaModel'
+import { classifyModelFailure } from './modelFailure'
 import { parseEditReply, fitPrompt, ENGINEER_STRUCT_SYSTEM } from './prompts'
 import { importProblems, runPreflight, staticPreflight, preflightTap, preflightHypotheses } from './preflight'
 import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateFilterTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
@@ -462,6 +463,26 @@ process.env.ENGINE_NODE_PARSE = '0'
   } finally { globalThis.fetch = realFetch }
   const e2e = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'e2eRealModel.ts'), 'utf8')
   check('F106_the_builder_model_stays_loaded_while_helper_models_unload_right_after_use', seen.join() === '10m,0' && /const localClient = \(name: string\): ModelClient => \{ const c = new OllamaModelClient\(name, undefined, '0'\)/.test(e2e), seen.join())
+}
+
+{
+  const endless = ["test('[C6] read-all', () => withApp(async (app) => {", ...Array.from({ length: 70 }, (_, i) => `  await app.post('/api/alerts', { title: 'x${i}', severity: 'info' })`)].join('\n')
+  const normal = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'alertFixture.ts'), 'utf8')
+  check('F107_a_generation_that_repeats_one_statement_endlessly_is_recognised_and_ordinary_code_is_not', isRunaway(endless) && !isRunaway(normal) && !isRunaway(endless.split('\n').slice(0, 30).join('\n')))
+  const ndjson = (parts: string[], extra: object = {}) => parts.map((r) => JSON.stringify({ response: r, done: false })).join('\n') + '\n' + JSON.stringify({ response: '', done: true, eval_count: 7, prompt_eval_count: 3, ...extra }) + '\n'
+  const streamOf = (chunks: string[], delay = false) => new ReadableStream<Uint8Array>({ async start(c) { for (const k of chunks) { c.enqueue(new TextEncoder().encode(k)); if (delay) await new Promise((r) => setTimeout(r, 5)) } c.close() } })
+  const realFetch2 = globalThis.fetch
+  const withFetch = async (body: () => Response, fn: () => Promise<unknown>) => { globalThis.fetch = (async () => body()) as typeof fetch; try { return await fn() } finally { globalThis.fetch = realFetch2 } }
+  const ok = await withFetch(() => new Response(streamOf([ndjson(['hel', 'lo'])]), { status: 200 }), () => new OllamaModelClient('m').generate({ system: 's', prompt: 'p' })) as { ok: boolean; text?: string; outputTokens?: unknown; promptTokens?: unknown }
+  const split = await withFetch(() => new Response(streamOf([ndjson(['ab', 'cd']).slice(0, 25), ndjson(['ab', 'cd']).slice(25)]), { status: 200 }), () => new OllamaModelClient('m').generate({ system: 's', prompt: 'p' })) as { ok: boolean; text?: string }
+  const loopLines = Array.from({ length: 80 }, (_, i) => `  await app.post('/api/alerts', { title: 'x${i}' })\n`)
+  const runaway = await withFetch(() => new Response(streamOf([ndjson(["test('a', () => {\n", ...loopLines.slice(0, 3)]).replace(/\n\{"response":"","done":true.*\n$/, '\n'), ...loopLines.map((l) => JSON.stringify({ response: l, done: false }) + '\n')], true), { status: 200 }), () => new OllamaModelClient('m').generate({ system: 's', prompt: 'p' })) as { ok: boolean; detail?: string }
+  const err = await withFetch(() => new Response(JSON.stringify({ error: 'boom' }) + '\n', { status: 200 }), () => new OllamaModelClient('m').generate({ system: 's', prompt: 'p' })) as { ok: boolean; detail?: string }
+  check('F108_the_model_client_reads_a_streamed_reply_with_real_token_counts_even_when_a_line_is_split_across_chunks', ok.ok && ok.text === 'hello' && ok.outputTokens === 7 && ok.promptTokens === 3 && split.ok && split.text === 'abcd', JSON.stringify([ok, split]))
+  check('F109_a_runaway_stream_is_stopped_early_with_a_retryable_failure_and_a_model_error_line_fails_honestly', !runaway.ok && /degenerate repetition/.test(runaway.detail ?? '') && classifyModelFailure(runaway.detail ?? '', false) === 'TIMEOUT' && !err.ok && /model error/.test(err.detail ?? '') && classifyModelFailure(err.detail ?? '', false) === 'NO_RETRY', JSON.stringify([runaway, err]))
+  const wf2 = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
+  const planP = buildTestPlan(ALERT_FEATURE.acceptance, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
+  check('F110_after_a_runaway_the_retry_is_warmer_and_asks_for_compact_setup_and_the_test_prompt_says_to_use_a_loop_for_bulk_data', /REPEATED THE SAME STATEMENT ENDLESSLY/.test(wf2) && /if \(!r\.ok && \/degenerate repetition\/i\.test\(r\.detail\)\) runaway = true/.test(wf2) && !!planP && /KEEP SETUP SHORT/.test(planPromptFor(planP, planP.files.find((f) => !f.generated)!.path)))
 }
 void deriveAssignments; void AgentOpsLog
 

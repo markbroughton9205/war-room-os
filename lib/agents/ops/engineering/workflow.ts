@@ -311,6 +311,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     // A timed-out model call is retried a bounded number of times. The call has no side effects (nothing is written until a reply is parsed), the prompt and
     // sampling are reused unchanged, and every attempt counts against the model-call budget, so no state is lost and no effect is duplicated.
     const purpose = (/FILE TO (?:EDIT|CREATE|FIX): (\S+)/.exec(prompt)?.[1] ?? system.slice(0, 40)).slice(0, 80)
+    let runaway = false
     for (let attempt = 0; ; attempt++) {
       modelCalls += 1
       const callNo = modelCalls
@@ -318,7 +319,11 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const poll = setInterval(() => { const g = executionGate(log, assignmentId); if (!g.proceed && g.reason !== 'OK') ac.abort() }, 400)
       const started = Date.now()
       let r: ModelResult
-      try { r = await (via ?? activeModel).generate({ system, prompt, json, ...sampling, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }) } finally { clearInterval(poll) }
+      // after a runaway generation the same request would loop again: the retry says so, asks for compact setup code and samples warmer
+      const retryNote = runaway ? '\n\nYOUR PREVIOUS ATTEMPT REPEATED THE SAME STATEMENT ENDLESSLY. Write each test with at most 6 setup requests; create bulk data with a for loop (for (let i = 0; i < 5; i++) await app.post(path, { title: \'t\' + i })), never by writing one line per item. Keep the whole file short.' : ''
+      const sampled = runaway ? { ...sampling, temperature: Math.min(0.7, (sampling.temperature ?? 0.1) + 0.25 * attempt) } : sampling
+      try { r = await (via ?? activeModel).generate({ system, prompt: prompt + retryNote, json, ...sampled, signal: ac.signal, maxTokens: 3500, timeoutMs: Math.min(300_000, limits.maxRuntimeMs) }) } finally { clearInterval(poll) }
+      if (!r.ok && /degenerate repetition/i.test(r.detail)) runaway = true
       const waitedMs = Date.now() - started
       const note = (kind: 'TIMEOUT' | 'TRANSIENT', rec: Omit<ModelTimeoutRecord, 'kind'>) => (kind === 'TIMEOUT' ? timeouts : transients).push({ ...rec, kind })
       if (r.ok) { if (attempt > 0) { const kind = lastKind; note(kind, { call: callNo, attempt, outcome: 'RECOVERED', waitedMs, detail: 'reply received after retry', purpose }); emit(kind === 'TIMEOUT' ? 'MODEL_TIMEOUT_RECOVERED' : 'MODEL_TRANSIENT_RECOVERED', `${purpose}: reply on attempt ${attempt + 1}`) } return r }

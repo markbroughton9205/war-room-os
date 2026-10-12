@@ -9,5 +9,5 @@ export function classifyModelFailure(detail: string, aborted: boolean): ModelFai
   if (aborted) return 'NO_RETRY' // a pause/cancel abort driven by Foundry's own gate
   const http = /^HTTP (\d{3})\b/.exec(detail.trim())
   if (http) return (TRANSIENT_HTTP as readonly number[]).includes(Number(http[1])) ? 'TRANSIENT' : 'NO_RETRY'
-  return /timeout/i.test(detail) ? 'TIMEOUT' : 'NO_RETRY'
+  return /timeout|degenerate repetition/i.test(detail) ? 'TIMEOUT' : 'NO_RETRY' // a runaway generation is retried like a timeout, with a changed prompt and sampling (see the caller)
 }
