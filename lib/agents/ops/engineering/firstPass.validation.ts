@@ -402,8 +402,6 @@ process.env.ENGINE_NODE_PARSE = '0'
   check('F96_the_alert_list_criterion_is_split_into_one_variant_per_filter_value_and_one_for_the_default_view', ['FILTER_UNREAD', 'FILTER_READ', 'FILTER_ARCHIVED', 'FILTER_ALL', 'FILTER_DEFAULT'].every((k) => keys.includes(k as never)) && fv.length === 5, keys.join())
   const unread = fv.find((v) => v.key === 'FILTER_UNREAD')?.recipe ?? ''
   check('F97_a_filter_variant_carries_the_exact_population_recipe_flag_routes_the_blocking_action_last_and_the_selection', /(read is false and archived is false|archived is false and read is false)/.test(unread) && !/:id/.test(unread) && /LAST/.test(unread) && /archive/.test(unread) && /real id|REAL id/.test(unread) && /state=unread/.test(unread), unread.slice(0, 300))
-  const plan = buildTestPlan(ALERT_FEATURE.acceptance, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
-  const row = plan?.tests.find((t) => t.criterion_id === 4)
   const acc2 = ALERT_FEATURE.acceptance.map((a, i) => (i === 0 ? a.replace(/\s*\(201\)/, '') : a))
   const plan2 = buildTestPlan(acc2, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
   const row2 = plan2?.tests.find((t) => t.criterion_id === 4)
