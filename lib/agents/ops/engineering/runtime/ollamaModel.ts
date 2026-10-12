@@ -9,7 +9,8 @@ export function loopbackBaseUrl(raw: string | undefined = process.env.WAR_ROOM_O
 }
 
 export class OllamaModelClient implements ModelClient {
-  constructor(readonly model: string, private readonly baseUrl: string = loopbackBaseUrl()) { loopbackBaseUrl(baseUrl) }
+  /** `keepAlive`: how long Ollama keeps the model loaded after a call. Helper models (test reviewer, competing writers) use '0' so they free the GPU for the builder instead of competing with it for memory. */
+  constructor(readonly model: string, private readonly baseUrl: string = loopbackBaseUrl(), private readonly keepAlive: string = '10m') { loopbackBaseUrl(baseUrl) }
   async generate(input: { system: string; prompt: string; maxTokens?: number; timeoutMs?: number; signal?: AbortSignal; json?: boolean; temperature?: number; seed?: number }): Promise<ModelResult> {
     const executor = { provider: 'ollama', model: this.model }
     const t0 = Date.now()
@@ -19,7 +20,7 @@ export class OllamaModelClient implements ModelClient {
     try {
       const res = await fetch(`${this.baseUrl}/api/generate`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: ctrl.signal,
-        body: JSON.stringify({ model: this.model, system: input.system, prompt: input.prompt, stream: false, think: false, keep_alive: '10m', ...(input.json ? { format: 'json' } : {}), options: { temperature: input.temperature ?? 0.1, num_predict: input.maxTokens ?? 3000, num_ctx: 8192, ...(input.seed !== undefined ? { seed: input.seed } : {}) } }),
+        body: JSON.stringify({ model: this.model, system: input.system, prompt: input.prompt, stream: false, think: false, keep_alive: this.keepAlive, ...(input.json ? { format: 'json' } : {}), options: { temperature: input.temperature ?? 0.1, num_predict: input.maxTokens ?? 3000, num_ctx: 8192, ...(input.seed !== undefined ? { seed: input.seed } : {}) } }),
       })
       if (!res.ok) return { ok: false, detail: `HTTP ${res.status}`, executor }
       const j = (await res.json()) as { response?: unknown; eval_count?: unknown; prompt_eval_count?: unknown }

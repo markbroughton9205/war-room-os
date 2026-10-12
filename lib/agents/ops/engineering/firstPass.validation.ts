@@ -14,6 +14,7 @@ import { buildEvidence } from './failureEvidence'
 import { RECIPES, autofix, buildImplStep, checkManifest, matchRecipes, renderImplStep, renderRecipes, runRecipeChecks, stripManifest, unawaitedFsCalls } from './recipes'
 import { applyStructOps, parseStructOps, preservedShare, topLevelDecls } from './structEdit'
 import { contractRouteProblems, routeTable } from './staticGates'
+import { OllamaModelClient } from './runtime/ollamaModel'
 import { parseEditReply, fitPrompt, ENGINEER_STRUCT_SYSTEM } from './prompts'
 import { importProblems, runPreflight, staticPreflight, preflightTap, preflightHypotheses } from './preflight'
 import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateFilterTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
@@ -449,6 +450,18 @@ process.env.ENGINE_NODE_PARSE = '0'
   const bad = run(bugDir)
   check('F104_the_generated_filter_tests_fail_when_the_implementation_lets_an_archived_alert_into_the_unread_list', bad.status !== 0 && /FILTER_UNREAD/.test(bad.stdout + bad.stderr), `${bad.status} ${bad.stdout.slice(-300)}`)
   check('F105_the_generated_file_passes_the_pre_execution_review_and_nothing_is_generated_when_the_contract_lacks_a_setter_or_a_create_route', !!plan && reviewTestFile(gf!.path, gf!.generated!, plan).length === 0 && generateFilterTests(4, { ...ca, flags: [] }) === null && generateFilterTests(4, { ...ca, routes: ca.routes.map((r) => ({ ...r, createsRecord: false })) }) === null && generateFilterTests(1, ca) === null, JSON.stringify(plan ? reviewTestFile(gf!.path, gf!.generated!, plan) : []))
+}
+
+{
+  const seen: string[] = []
+  const realFetch = globalThis.fetch
+  globalThis.fetch = (async (_u: unknown, init?: { body?: string }) => { seen.push(String(JSON.parse(String(init?.body)).keep_alive)); return new Response(JSON.stringify({ response: 'x', eval_count: 1, prompt_eval_count: 1 }), { status: 200 }) }) as typeof fetch
+  try {
+    await new OllamaModelClient('m').generate({ system: 's', prompt: 'p' })
+    await new OllamaModelClient('m', undefined, '0').generate({ system: 's', prompt: 'p' })
+  } finally { globalThis.fetch = realFetch }
+  const e2e = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'e2eRealModel.ts'), 'utf8')
+  check('F106_the_builder_model_stays_loaded_while_helper_models_unload_right_after_use', seen.join() === '10m,0' && /const localClient = \(name: string\): ModelClient => \{ const c = new OllamaModelClient\(name, undefined, '0'\)/.test(e2e), seen.join())
 }
 void deriveAssignments; void AgentOpsLog
 
