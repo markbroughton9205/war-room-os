@@ -33,6 +33,8 @@ export type Recipe = {
 }
 
 const isSource = (p: string) => /\.m?js$/.test(p) && !/^(test|node_modules|public)\//.test(p)
+/** readFileSync('public/app.js', 'text/javascript'): the content type landed in the encoding argument (inside a reply call such as send(res, 200, ...)). */
+const READFILE_MIME = /\breadFileSync\(([^,()]+),\s*(['"])((?:text|application)\/[\w.+-]+)\2\s*\)/g
 const sources = (files: Files) => Object.entries(files).filter(([p]) => isSource(p))
 const parse = (p: string, t: string) => ts.createSourceFile(p, t, ts.ScriptTarget.ES2022, true)
 const find = (rec: string, check: string, f: Omit<RecipeFinding, 'recipe' | 'check'>): RecipeFinding => ({ recipe: rec, check, ...f })
@@ -336,6 +338,7 @@ export const RECIPES: Recipe[] = [
         if (!entry || /\.listen\([^)]*process\.env\.PORT/.test(entry[1]) || /process\.env\.PORT/.test(entry[1])) return []
         return [find('STARTUP', 'listens-on-port', { criterion: c.routes[0]?.criterion ?? null, file: entry[0], symbol: null, fact: `${entry[0]} never reads process.env.PORT, so a test or runner cannot choose its port`, expected: 'server.listen(Number(process.env.PORT) || <default>)' })]
       } },
+      { id: 'readfile-encoding', describe: 'a content type is never passed to readFileSync as its encoding', run: (files) => sources(files).flatMap(([p, t]) => [...t.matchAll(READFILE_MIME)].map((m) => find('STARTUP', 'readfile-encoding', { criterion: null, file: p, symbol: null, fact: `${p}: readFileSync(${m[1].trim()}, ${m[2]}${m[3]}${m[2]}) passes the content type as the ENCODING, so the route answers 400 "invalid encoding"`, expected: "readFileSync(path, 'utf8') and the content type as the next argument of the reply call" }))) },
       { id: 'syntax', describe: 'every source file parses', run: (files) => Object.entries(files).filter(([p]) => /\.m?js$/.test(p) && !/node_modules/.test(p)).flatMap(([p, t]) => syntaxProblems(p, t).map((s) => find('STARTUP', 'syntax', { criterion: null, file: p, symbol: null, fact: `${p}: ${s}`, expected: 'a syntactically valid file' }))) },
     ],
     verificationChecks: ['the server boots and answers on the chosen port'],
@@ -477,6 +480,12 @@ export function autofix(path: string, content: string, findings: RecipeFinding[]
   let out = content
   const notes: string[] = []
   for (const f of findings.filter((x) => x.file === path)) {
+    if (f.recipe === 'STARTUP' && f.check === 'readfile-encoding') {
+      // (1) the content type is already passed on to the reply call: only the encoding is wrong; (2) it is missing there: it moves out of readFileSync into the reply call
+      let fx = out.replace(/\breadFileSync\(([^,()]+),\s*(['"])((?:text|application)\/[\w.+-]+)\2\s*\)(\s*,\s*(['"])\3\5)/g, "readFileSync($1, 'utf8')$4")
+      fx = fx.replace(/(\b\w+\(\s*res\s*,\s*\d+\s*,\s*)readFileSync\(([^,()]+),\s*(['"])((?:text|application)\/[\w.+-]+)\3\s*\)(\s*\))/g, "$1readFileSync($2, 'utf8'), $3$4$3$5")
+      if (fx !== out) { out = fx; notes.push("CHANGE_ARGUMENT: the content type is not the encoding of readFileSync ('utf8'); it belongs to the reply call") }
+    }
     if (f.recipe === 'REST_STATUS' && f.check === 'catch-all-status') { const fx = mapCatchStatus(path, out); if (fx && fx !== out) { out = fx; notes.push('CHANGE_STATUS: the catch block answers the status an error carries') } }
     if (f.recipe === 'JSON_FILE_STORE' && f.check === 'parent-dir' && c.persistence.envVar && c.persistence.defaultPath) { const fx = repairMissingStorageDir(out, c.persistence.envVar, c.persistence.defaultPath); if (fx && fx.content !== out) { out = fx.content; notes.push(`ADD_DIRECTORY_GUARD: ${fx.note}`) } }
   }

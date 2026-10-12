@@ -13,7 +13,7 @@ import { deriveImplementationContract, renderContract, resolveContract, inheritC
 import { buildEvidence } from './failureEvidence'
 import { RECIPES, autofix, buildImplStep, checkManifest, matchRecipes, renderImplStep, renderRecipes, runRecipeChecks, stripManifest, unawaitedFsCalls } from './recipes'
 import { applyStructOps, parseStructOps, preservedShare, topLevelDecls } from './structEdit'
-import { contractRouteProblems, routeTable } from './staticGates'
+import { contractRouteProblems, routeTable, syntaxProblems } from './staticGates'
 import { OllamaModelClient, isRunaway } from './runtime/ollamaModel'
 import { classifyModelFailure } from './modelFailure'
 import { parseEditReply, fitPrompt, ENGINEER_STRUCT_SYSTEM } from './prompts'
@@ -29,6 +29,7 @@ import type { EngineeringTool } from '../types'
 const { check, finish } = harness('AGENT_ENG_FIRSTPASS_VALIDATION')
 const TOOLS: EngineeringTool[] = ['read_workspace', 'write_workspace', 'run_workspace_tests', 'run_typecheck', 'model_local', 'read_runtime_output']
 
+const syntaxOk = (t: string) => syntaxProblems('server.mjs', t).length === 0
 // ======================================================================= 1. implementation contract
 const ca = deriveImplementationContract(ALERT_FEATURE.acceptance, ALERT_FEATURE.request)
 const ct = deriveImplementationContract(TASK_FEATURE.acceptance, TASK_FEATURE.request)
@@ -483,6 +484,17 @@ process.env.ENGINE_NODE_PARSE = '0'
   const wf2 = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
   const planP = buildTestPlan(ALERT_FEATURE.acceptance, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
   check('F110_after_a_runaway_the_retry_is_warmer_and_asks_for_compact_setup_and_the_test_prompt_says_to_use_a_loop_for_bulk_data', /REPEATED THE SAME STATEMENT ENDLESSLY/.test(wf2) && /if \(!r\.ok && \/degenerate repetition\/i\.test\(r\.detail\)\) runaway = true/.test(wf2) && !!planP && /KEEP SETUP SHORT/.test(planPromptFor(planP, planP.files.find((f) => !f.generated)!.path)))
+}
+
+{
+  const BAD2 = "const reply = (res, status, body, type) => res.end(body)\nexport const h2 = (url, res) => {\n  if (url.pathname === '/client.js') return reply(res, 200, readFileSync('public/client.js', 'text/javascript'), 'text/javascript')\n}\n"
+  const BAD = "import { readFileSync } from 'node:fs'\nconst send = (res, status, body, type = 'application/json') => { res.writeHead(status, { 'content-type': type }); res.end(body) }\nexport const handle = (url, res) => {\n  if (url.pathname === '/app.js') return send(res, 200, readFileSync('public/app.js', 'text/javascript'))\n  if (url.pathname === '/') return send(res, 200, readFileSync('public/index.html', 'utf8'), 'text/html')\n}\n"
+  const recs = matchRecipes(cc)
+  const found = runRecipeChecks({ 'server.mjs': BAD }, cc, recs).filter((f) => f.check === 'readfile-encoding')
+  const fixed = autofix('server.mjs', BAD, found, cc)
+  const found2 = runRecipeChecks({ 'server.mjs': BAD2 }, cc, recs).filter((f) => f.check === 'readfile-encoding')
+  const fixed2 = autofix('server.mjs', BAD2, found2, cc)
+  check('F111_a_content_type_passed_to_readFileSync_as_its_encoding_is_found_and_moved_into_the_reply_call_deterministically', found.length === 1 && !!fixed && /readFileSync\('public\/app\.js', 'utf8'\), 'text\/javascript'\)/.test(fixed.content) && /readFileSync\('public\/index\.html', 'utf8'\), 'text\/html'\)/.test(fixed.content) && runRecipeChecks({ 'server.mjs': fixed.content }, cc, recs).filter((f) => f.check === 'readfile-encoding').length === 0 && syntaxOk(fixed.content) && found2.length === 1 && !!fixed2 && fixed2.content.includes("readFileSync('public/client.js', 'utf8'), 'text/javascript')") && !/'text\/javascript'\), 'text\/javascript'\), 'text/.test(fixed2.content) && syntaxOk(fixed2.content), JSON.stringify(found.map((f) => f.fact)))
 }
 void deriveAssignments; void AgentOpsLog
 
