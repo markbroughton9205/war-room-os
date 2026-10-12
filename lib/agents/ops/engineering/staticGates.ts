@@ -62,6 +62,8 @@ export function routeTable(text: string): Route[] {
     for (const m of ln.matchAll(/pathname\s*===?\s*['"]([^'"]+)['"]/g)) { found = true; add('literal', m[1], (p) => p === m[1]) }
     for (const m of ln.matchAll(/pathname\.startsWith\(\s*['"]([^'"]+)['"]\s*\)/g)) { found = true; add('prefix', m[1], (p) => p.startsWith(m[1])) }
     for (const m of ln.matchAll(/\/((?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\n\\\[])+)\/\w*\.test\(\s*[\w.]*pathname\s*\)/g)) { found = true; try { const re = new RegExp(m[1]); add('regex', m[1], (p) => re.test(p)) } catch { /* not a usable regex */ } }
+    // a pattern written as a string: new RegExp('^/api/x/(\\d+)/read$').test(url.pathname)
+    for (const m of ln.matchAll(/(?:new\s+)?RegExp\(\s*(['"])((?:\\.|(?!\1)[^\\\n])*)\1\s*(?:,\s*['"]\w*['"]\s*)?\)\.test\(\s*[\w.]*pathname\s*\)/g)) { found = true; const src = m[2].replace(/\\\\/g, '\\').replace(/\\(['"])/g, '$1'); try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* not a usable regex */ } }
     for (const m of ln.matchAll(/[\w.]*pathname\.(?:match|search)\(\s*\/((?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\n\\\[])+)\/\w*\s*\)|\/((?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\n\\\[])+)\/\w*\.exec\(\s*[\w.]*pathname\s*\)/g)) { const src = m[1] ?? m[2]; if (found && out.some((o) => o.line === i + 1 && o.pattern === src)) continue; found = true; try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* not a usable regular expression */ } }
     for (const [a, src] of alias) if (new RegExp(`\\bif\\s*\\(\\s*!?${a}\\b`).test(ln) && !found) { found = true; try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* ignore */ } }
   })

@@ -32,6 +32,7 @@ export const ENGINEER_SYSTEM = [
 export const ENGINEER_STRUCT_SYSTEM = [
   ENGINEER_SYSTEM,
   'STRUCTURAL EDITS (preferred for an EXISTING file; they change only what they name and keep every other byte):',
+  '- WHERE CODE GOES: ```append and ```insert-end add code at the very END OF THE FILE, outside every function. Statements that belong INSIDE a function or request handler (an if/return inside the dispatcher, a case in a switch) must use insert-after-line / insert-before-line with an ANCHOR line, or change-in NAME. Never use append for them: a return outside a function breaks the file.',
   '- Replace ONE top-level function/const by name (give the complete new declaration):',
   '```replace-symbol NAME',
   'export function NAME(...) { ... }',

@@ -1,6 +1,7 @@
 import { groundTests } from './testGrounding'
 import { storageEnvVars } from './persistenceContract'
 import { testCalls } from './testContract'
+import { deriveImplementationContract, type ImplementationContract } from './implContract'
 
 /**
  * Contract-first test authoring (Phase 10). Before any model writes test code, Foundry turns the acceptance contract into a structured plan; the writer may only
@@ -26,13 +27,14 @@ export type PlannedTest = {
   /** a storage/persistence criterion is split into independent variants (CUSTOM_PATH, DEFAULT_PATH, PERSISTENCE, IDS); each needs its own test, named [C<n>] <KEY>: */
   variants?: { key: VariantKey; recipe: string }[]
 }
-export type VariantKey = 'CUSTOM_PATH' | 'DEFAULT_PATH' | 'PERSISTENCE' | 'IDS'
+export type VariantKey = 'CUSTOM_PATH' | 'DEFAULT_PATH' | 'PERSISTENCE' | 'IDS' | `FILTER_${string}`
 export type TestPlan = {
   entry: string
   storageVars: string[]
   harnessPath: string
   tests: PlannedTest[]
-  files: { path: string; criteria: number[] }[]
+  /** `generated`: the complete test file text, produced by Foundry from the contract (no model call writes it) */
+  files: { path: string; criteria: number[]; generated?: string }[]
 }
 
 export const HARNESS_PATH = 'test/support/harness.mjs'
@@ -88,10 +90,116 @@ export function variantsOf(criterion: string, envVar: string | undefined, defaul
   return out
 }
 
+
+/**
+ * A list criterion that selects by flag state ("?state=unread returns only unread alerts that are not archived") is a compound statement the writer keeps getting wrong in ONE test
+ * (a population that never reaches the state it asserts on). It is split into one independent test per filter value (and one for the default view), each with an exact population recipe
+ * built from the contract: which flag routes exist, which flag values the selection needs, and the rule that a flag that blocks later actions is applied last.
+ */
+export function filterVariantsOf(id: number, c: ImplementationContract): { key: VariantKey; recipe: string }[] {
+  const tpl = (r: string) => r.replace(/:(\w+)/g, '${$1}')
+  const flagRoutes = c.flags.map((f) => `${tpl(f.route)} sets ${f.name}=${f.sets}`)
+  const blockers = [...new Set(c.conflicts.map((x) => x.flag))]
+  const state = (r: { flag: string; value: boolean }[]) => r.map((x) => `${x.flag} is ${x.value}`).join(' and ') || 'any'
+  const population = `Build the population through the API in the SAME test and keep every created id: create one item for each combination of the flags involved (${[...new Set(c.flags.map((f) => f.name))].join(', ') || 'the flags'}), then bring each item to its state with the flag routes (${flagRoutes.join('; ') || 'the contract routes'}) using the real id of that item (build the path from that id, for example by concatenating item.id into the path; never send a literal placeholder)${blockers.length ? `; apply the action that blocks others (${blockers.join(', ')}) LAST, because afterwards the other actions answer 409` : ''}. Write the population ONCE as a helper function declared at the top of the file (async function populate(app) { ... return the ids by state }) and call it from each filter test, so the tests stay short. Then GET the filtered list and compare the sorted ids with the ids of exactly the items whose state matches, so an item in another state must be absent.`
+  const out: { key: VariantKey; recipe: string }[] = []
+  for (const r of c.filterRules.filter((x) => x.criterion === id)) {
+    const key = `FILTER_${r.value.toUpperCase().replace(/\W+/g, '_')}` as VariantKey
+    out.push({ key, recipe: `${population} Selection: GET <list route>?${r.param}=${r.value} -> ${r.everything ? 'every item' : `items where ${state(r.requires)}`} (${r.clause}).` })
+  }
+  for (const d of c.defaultViews.filter((x) => x.criterion === id)) out.push({ key: 'FILTER_DEFAULT', recipe: `${population} Selection: ${d.route} with no query -> items where ${state(d.requires)} (${d.clause}).` })
+  return out
+}
+
+/**
+ * Tests for a list criterion that selects by flag state are GENERATED from the contract: the population (one item per combination of the flags involved, brought to its state through the
+ * flag routes, the blocking action last), then one test per filter value and one for the default view that compares the exact set of ids. No model writes them, so they cost no model call
+ * and cannot carry a population mistake. Null when the contract does not carry what the generator needs (no create route, a flag without a setter route, a setter route with extra parameters):
+ * the criterion then falls back to model-written filter variants.
+ */
+export function generateFilterTests(id: number, c: ImplementationContract): string | null {
+  const rules = c.filterRules.filter((r) => r.criterion === id), views = c.defaultViews.filter((d) => d.criterion === id)
+  if (!rules.length && !views.length) return null
+  const create = c.routes.find((r) => r.createsRecord)
+  if (!create) return null
+  const strip = (r: string) => r.replace(/^(?:GET|POST|PUT|PATCH|DELETE)\s+/, '')
+  const listPath = strip(views[0]?.route ?? c.filters.find((f) => rules.some((r) => r.param === f.param))?.route ?? '')
+  if (!listPath || /:/.test(listPath)) return null
+  const names = [...new Set([...rules, ...views].flatMap((r) => r.requires.map((q) => q.flag)))]
+  if (!names.length) return null
+  const blockers = new Set(c.conflicts.map((x) => x.flag))
+  const setters: Record<string, string> = {}
+  for (const n of names) {
+    const f = c.flags.find((x) => x.name === n && x.sets === true)
+    const params = f ? [...f.route.matchAll(/:(\w+)/g)] : []
+    if (!f || params.length !== 1) return null
+    setters[n] = "'" + strip(f.route).replace(/:\w+/, "' + id + '") + "'"
+  }
+  const order = [...names.filter((n) => !blockers.has(n)), ...names.filter((n) => blockers.has(n))]
+  const combos: Record<string, boolean>[] = []
+  for (let m = 0; m < 1 << names.length; m++) combos.push(Object.fromEntries(names.map((n, i) => [n, !!(m & (1 << i))])))
+  const body = Object.fromEntries(c.fields.filter((f) => f.required).map((f) => [f.name, f.values[0] ?? 'item']))
+  const bodyExpr = (field: string | undefined) => (field ? `{ ${JSON.stringify(field)}: 'item ' + n }` : '{}')
+  const textField = c.fields.find((f) => f.required && !f.values.length)?.name
+  const extra = c.fields.filter((f) => f.required && f.values.length).map((f) => `${JSON.stringify(f.name)}: ${JSON.stringify(f.values[0])}`)
+  const bodyJs = textField || extra.length ? `{ ${[textField ? `${JSON.stringify(textField)}: 'item ' + n` : '', ...extra].filter(Boolean).join(', ')} }` : bodyExpr(undefined)
+  void body
+  const pred = (r: { flag: string; value: boolean }[]) => (r.length ? r.map((q) => `s.${q.flag} === ${q.value}`).join(' && ') : 'true')
+  const lines: string[] = [
+    "import test from 'node:test'",
+    "import assert from 'node:assert/strict'",
+    "import { withApp } from './support/harness.mjs'",
+    '',
+    `const CREATE = ${JSON.stringify(strip(create.path))}`,
+    `const LIST = ${JSON.stringify(listPath)}`,
+    `const COMBOS = ${JSON.stringify(combos)}`,
+    `const ORDER = ${JSON.stringify(order)}`,
+    `const SETTER = { ${names.map((n) => `${JSON.stringify(n)}: (id) => ${setters[n]}`).join(', ')} }`,
+    '',
+    'async function populate(app) {',
+    '  const items = []',
+    '  let n = 0',
+    '  for (const state of COMBOS) {',
+    '    n += 1',
+    `    const created = await app.post(CREATE, ${bodyJs})`,
+    "    assert.ok(created.status >= 200 && created.status < 300, 'create answered ' + created.status)",
+    '    const id = created.body.id',
+    '    for (const flag of ORDER) {',
+    '      if (!state[flag]) continue',
+    '      const r = await app.post(SETTER[flag](id), {})',
+    "      assert.ok(r.status >= 200 && r.status < 300, 'setting ' + flag + ' answered ' + r.status)",
+    '    }',
+    '    items.push({ id: String(id), state })',
+    '  }',
+    '  return items',
+    '}',
+    "const idsOf = (res) => { assert.ok(Array.isArray(res.body), 'the list is an array'); return res.body.map((x) => String(x.id)).sort() }",
+    'const want = (items, pred) => items.filter((i) => pred(i.state)).map((i) => i.id).sort()',
+    '',
+  ]
+  for (const r of rules) lines.push(
+    `test(${JSON.stringify(`[C${id}] FILTER_${r.value.toUpperCase().replace(/\W+/g, '_')}: ?${r.param}=${r.value}`)}, () => withApp(async (app) => {`,
+    '  const items = await populate(app)',
+    `  const res = await app.get(LIST + ${JSON.stringify(`?${r.param}=${r.value}`)})`,
+    '  assert.equal(res.status, 200)',
+    `  assert.deepStrictEqual(idsOf(res), want(items, (s) => ${r.everything ? 'true' : pred(r.requires)}))`,
+    '}))', '')
+  for (const d of views) lines.push(
+    `test(${JSON.stringify(`[C${id}] FILTER_DEFAULT: the list without a query`)}, () => withApp(async (app) => {`,
+    '  const items = await populate(app)',
+    '  const res = await app.get(LIST)',
+    '  assert.equal(res.status, 200)',
+    `  assert.deepStrictEqual(idsOf(res), want(items, (s) => ${pred(d.requires)}))`,
+    '}))', '')
+  return lines.join('\n')
+}
+
 export function buildTestPlan(acceptance: string[], packageJson: string | null): TestPlan | null {
   const entry = startEntry(packageJson)
   if (!entry) return null
   const vars = storageEnvVars(acceptance)
+  const full = deriveImplementationContract(acceptance)
+  const generated: Record<number, string> = {}
   const tests: PlannedTest[] = acceptance.map((a, i) => {
     const id = i + 1
     const http = ROUTE.test(a)
@@ -101,7 +209,9 @@ export function buildTestPlan(acceptance: string[], packageJson: string | null):
     const envNamed = vars.filter((v) => a.includes(v))
     const defaultPath = /default:?\s*([\w./-]+\.\w+)/i.exec(a)?.[1]
     const recipe = envNamed.length ? `STORAGE LOCATION RECIPE: create data through the API, then assert.ok(existsSync(app.storageFile('${envNamed[0]}'))) (import { existsSync } from 'node:fs'). app.storageFile(VAR) is a path inside a temp directory and its file NAME is not the default name, so never assert anything about the name${defaultPath ? `. For the default location use withApp(async (app) => { ...create data through the API...; assert.ok(existsSync(app.cwd + '/${defaultPath}')) }, { defaultStorage: true })` : ''}` : ''
-    const variants = variantsOf(a, envNamed[0], defaultPath, persists)
+    const gen = generateFilterTests(id, full)
+    if (gen) generated[id] = gen
+    const variants = [...variantsOf(a, envNamed[0], defaultPath, persists), ...(gen ? [] : filterVariantsOf(id, full))]
     const state = [...(persists ? ['the data must be on disk: call app.restart() and read it back'] : []), ...envNamed.map((v) => `storage location comes from ${v}`)]
     return {
       criterion_id: id, behavior: a, level: 'HTTP',
@@ -118,12 +228,15 @@ export function buildTestPlan(acceptance: string[], packageJson: string | null):
   const required = tests.filter((t) => t.priority === 'REQUIRED')
   if (!required.length) return null
   const files: TestPlan['files'] = []
-  for (let i = 0; i < required.length; i += MAX_CRITERIA_PER_FILE) {
-    const group = required.slice(i, i + MAX_CRITERIA_PER_FILE)
+  const modelRows = required.filter((t) => !generated[t.criterion_id])
+  for (let i = 0; i < modelRows.length; i += MAX_CRITERIA_PER_FILE) {
+    const group = modelRows.slice(i, i + MAX_CRITERIA_PER_FILE)
     const p = `test/contract.api-${files.length + 1}.test.mjs`
     files.push({ path: p, criteria: group.map((t) => t.criterion_id) })
     for (const t of group) t.file = p
   }
+  // each generated criterion is its own file (one set of helpers per file)
+  for (const t of required.filter((x) => generated[x.criterion_id])) { const gp = `test/contract.filters-c${t.criterion_id}.test.mjs`; files.push({ path: gp, criteria: [t.criterion_id], generated: generated[t.criterion_id] }); t.file = gp }
   return { entry, storageVars: vars, harnessPath: HARNESS_PATH, tests, files }
 }
 

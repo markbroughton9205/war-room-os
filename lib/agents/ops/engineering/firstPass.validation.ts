@@ -1,20 +1,22 @@
 /** First-pass correctness: implementation contract, proven recipes, plan, structural edits, manifest, preflight (static + runtime), left-shift classification, metrics, workflow wiring. Run: pnpm run validate:agent-eng-firstpass */
 import path from 'node:path'
+import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { harness, engWorld, addAgent, draftFor, C, NOW, tmp } from './engtestkit'
 import { AgentOpsLog } from '../log'
 import { assign, deriveAssignments, startAssignment } from './assignments'
-import { ALERT_FEATURE, makeAlertApp } from './alertFixture'
+import { ALERT_FEATURE, ALERT_REFERENCE, makeAlertApp } from './alertFixture'
 import { TASK_FEATURE, makeTaskApp } from './taskFixture'
 import { CHAT_FEATURE, CHAT_REFERENCE, CHAT_VERIFY_SCRIPT, makeChatApp } from './chatFixture'
 import { deriveImplementationContract, renderContract, resolveContract, inheritConventions, safeRelativePath, unresolvedAmbiguities } from './implContract'
 import { buildEvidence } from './failureEvidence'
 import { RECIPES, autofix, buildImplStep, checkManifest, matchRecipes, renderImplStep, renderRecipes, runRecipeChecks, stripManifest, unawaitedFsCalls } from './recipes'
 import { applyStructOps, parseStructOps, preservedShare, topLevelDecls } from './structEdit'
-import { parseEditReply, fitPrompt } from './prompts'
+import { contractRouteProblems, routeTable } from './staticGates'
+import { parseEditReply, fitPrompt, ENGINEER_STRUCT_SYSTEM } from './prompts'
 import { importProblems, runPreflight, staticPreflight, preflightTap, preflightHypotheses } from './preflight'
-import { buildTestPlan, repairDefaultStoragePath, reviewTestFile } from './testPlan'
+import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateFilterTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
 import { classifyLeftShift, criterionOfCheck, newFirstPassState, buildFirstPassReport } from './firstPass'
 import { runFeatureWorkflow, type WorkflowDeps } from './workflow'
 import { Workspace } from './runtime/workspaceFs'
@@ -391,6 +393,64 @@ process.env.ENGINE_NODE_PARSE = '0'
   const good = plan ? reviewTestFile(file, mk('await app.post(`/api/alerts/${a.body.id}/read`, {})'), plan) : []
   const bad2 = plan ? reviewTestFile(file, mk("await app.get('/api/alerts/<id>')"), plan) : []
   check('F95_a_test_that_requests_a_template_path_with_a_placeholder_id_is_sent_back_before_it_runs_and_a_real_id_path_is_not', !!plan && bad.some((f) => f.code === 'PLACEHOLDER_PATH') && bad2.some((f) => f.code === 'PLACEHOLDER_PATH') && !good.some((f) => f.code === 'PLACEHOLDER_PATH'))
+}
+
+// ======================================================================= gold-round-1 findings: compound list criterion split per filter value, edit-result syntax fallback
+{
+  const fv = filterVariantsOf(4, ca)
+  const keys = fv.map((v) => v.key)
+  check('F96_the_alert_list_criterion_is_split_into_one_variant_per_filter_value_and_one_for_the_default_view', ['FILTER_UNREAD', 'FILTER_READ', 'FILTER_ARCHIVED', 'FILTER_ALL', 'FILTER_DEFAULT'].every((k) => keys.includes(k as never)) && fv.length === 5, keys.join())
+  const unread = fv.find((v) => v.key === 'FILTER_UNREAD')?.recipe ?? ''
+  check('F97_a_filter_variant_carries_the_exact_population_recipe_flag_routes_the_blocking_action_last_and_the_selection', /(read is false and archived is false|archived is false and read is false)/.test(unread) && !/:id/.test(unread) && /LAST/.test(unread) && /archive/.test(unread) && /real id|REAL id/.test(unread) && /state=unread/.test(unread), unread.slice(0, 300))
+  const plan = buildTestPlan(ALERT_FEATURE.acceptance, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
+  const row = plan?.tests.find((t) => t.criterion_id === 4)
+  const acc2 = ALERT_FEATURE.acceptance.map((a, i) => (i === 0 ? a.replace(/\s*\(201\)/, '') : a))
+  const plan2 = buildTestPlan(acc2, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
+  const row2 = plan2?.tests.find((t) => t.criterion_id === 4)
+  check('F98_when_the_contract_cannot_support_generated_filter_tests_the_row_falls_back_to_model_variants_and_a_file_without_them_is_sent_back', !!plan2 && !plan2.files.some((f) => f.generated) && (row2?.variants ?? []).length === 5 && reviewTestFile(row2!.file!, "import { test } from 'node:test'\nimport assert from 'node:assert/strict'\nimport { withApp } from './support/harness.mjs'\ntest('[C4] list filters', () => withApp(async (app) => { const r = await app.get('/api/alerts'); assert.ok(r) }))\n", plan2).some((f) => f.code === 'MISSING_VARIANT' && /FILTER_UNREAD/.test(f.detail)))
+  const tplan = buildTestPlan(TASK_FEATURE.acceptance, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
+  check('F99_a_criterion_without_flag_selections_gets_no_filter_variants', !!tplan && tplan.tests.every((t) => !(t.variants ?? []).some((v) => String(v.key).startsWith('FILTER_'))))
+  const wf = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
+  check('F100_an_edit_that_leaves_a_file_that_does_not_parse_falls_back_to_one_whole_file_reply_and_the_edit_protocol_says_where_code_goes', /parsedReply\.mode === 'edits' && \/syntax error\|would not start\/i\.test\(problem\)/.test(wf) && /WHERE CODE GOES/.test(ENGINEER_STRUCT_SYSTEM) && /outside every function/.test(ENGINEER_STRUCT_SYSTEM))
+}
+
+{
+  const SRV = [
+    "const server = createServer(async (req, res) => {",
+    "  const url = new URL(req.url, 'http://localhost')",
+    "  try {",
+    "    if (url.pathname === '/api/alerts' && req.method === 'POST') return reply(res, 201, {})",
+    "    if (new RegExp('^/api/alerts/(\\\\d+)/read$').test(url.pathname) && req.method === 'POST') return reply(res, 200, {})",
+    "    if (RegExp(\"^/api/alerts/(\\\\d+)/unread$\").test(url.pathname) && req.method === 'POST') return reply(res, 200, {})",
+    "    return reply(res, 404, {})",
+    "  } catch (e) { return reply(res, 400, {}) }",
+    "})",
+  ].join('\n')
+  const rt = routeTable(SRV)
+  const probs = contractRouteProblems('server.mjs', SRV, ['POST /api/alerts creates one', 'POST /api/alerts/:id/read marks read', 'POST /api/alerts/:id/unread marks unread'])
+  check('F101_a_route_written_as_a_string_regular_expression_is_recognised_by_the_dispatcher_analysis', rt.filter((r) => r.kind === 'regex').length === 2 && rt.some((r) => r.matches('/api/alerts/1/read')) && !probs.some((x) => /read|unread/.test(x)), JSON.stringify(rt.map((r) => r.pattern)) + probs.join('|'))
+}
+
+{
+  const pkg = JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } })
+  const plan = buildTestPlan(ALERT_FEATURE.acceptance, pkg)
+  const gf = plan?.files.find((f) => f.generated)
+  const row = plan?.tests.find((t) => t.criterion_id === 4)
+  check('F102_the_list_criterion_is_covered_by_a_Foundry_generated_file_and_the_model_files_no_longer_carry_it', !!plan && !!gf && gf.criteria.join() === '4' && row?.file === gf.path && !(row?.variants ?? []).some((v) => String(v.key).startsWith('FILTER_')) && plan.files.filter((f) => !f.generated).every((f) => !f.criteria.includes(4)) && !planPromptFor(plan, plan.files.find((f) => !f.generated)!.path).includes('[C4]'), JSON.stringify(plan?.files.map((f) => [f.path, f.criteria])))
+  const dir = makeAlertApp(path.join(tmp(), 'alert-gen'))
+  for (const [rel, text] of Object.entries(ALERT_REFERENCE)) { if (!/^test\//.test(rel)) { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), text) } }
+  mkdirSync(path.join(dir, 'test', 'support'), { recursive: true })
+  writeFileSync(path.join(dir, HARNESS_PATH), harnessSource('server.mjs', ['ALERTS_FILE']))
+  writeFileSync(path.join(dir, gf!.path), gf!.generated!)
+  const run = (d: string) => spawnSync('node', ['--test', gf!.path], { cwd: d, encoding: 'utf8', timeout: 90_000, env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' } as unknown as NodeJS.ProcessEnv })
+  const ok = run(dir)
+  check('F103_the_generated_filter_tests_pass_against_the_reference_implementation_one_test_per_filter_value_and_one_for_the_default_view', ok.status === 0 && /(?:# |ℹ )pass 5\b/.test(ok.stdout) && /(?:# |ℹ )fail 0/.test(ok.stdout), `${ok.status} ${ok.stdout.slice(-400)} ${ok.stderr.slice(-300)}`)
+  const bugDir = makeAlertApp(path.join(tmp(), 'alert-gen-bug'))
+  for (const [rel, text] of Object.entries(ALERT_REFERENCE)) { if (!/^test\//.test(rel)) { mkdirSync(path.dirname(path.join(bugDir, rel)), { recursive: true }); writeFileSync(path.join(bugDir, rel), rel === 'src/alertService.mjs' ? text.replace("if (a.archived) return false\n    if (want === 'unread')", "if (want === 'unread')") : text) } }
+  mkdirSync(path.join(bugDir, 'test', 'support'), { recursive: true }); writeFileSync(path.join(bugDir, HARNESS_PATH), harnessSource('server.mjs', ['ALERTS_FILE'])); writeFileSync(path.join(bugDir, gf!.path), gf!.generated!)
+  const bad = run(bugDir)
+  check('F104_the_generated_filter_tests_fail_when_the_implementation_lets_an_archived_alert_into_the_unread_list', bad.status !== 0 && /FILTER_UNREAD/.test(bad.stdout + bad.stderr), `${bad.status} ${bad.stdout.slice(-300)}`)
+  check('F105_the_generated_file_passes_the_pre_execution_review_and_nothing_is_generated_when_the_contract_lacks_a_setter_or_a_create_route', !!plan && reviewTestFile(gf!.path, gf!.generated!, plan).length === 0 && generateFilterTests(4, { ...ca, flags: [] }) === null && generateFilterTests(4, { ...ca, routes: ca.routes.map((r) => ({ ...r, createsRecord: false })) }) === null && generateFilterTests(1, ca) === null, JSON.stringify(plan ? reviewTestFile(gf!.path, gf!.generated!, plan) : []))
 }
 void deriveAssignments; void AgentOpsLog
 

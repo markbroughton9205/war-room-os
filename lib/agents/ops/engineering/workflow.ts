@@ -162,7 +162,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   // reserved test-rescue budget (contract mode with a candidate model only): held back from all other activity, capped well inside the global hard limits
   const rescue: RescueBudget = { reserved_calls: 0, reserved_time_ms: 0, used_calls: 0, used_time_ms: 0, rescue_attempted: false, rescue_skipped_reason: null }
   if (tplan && deps.testCandidates?.length) {
-    rescue.reserved_calls = Math.max(0, Math.min(deps.rescueReserve?.calls ?? tplan.files.length * Math.max(1, deps.maxCandidatesPerFile ?? 1), Math.floor(limits.maxModelCalls * RESCUE_MAX_SHARE)))
+    rescue.reserved_calls = Math.max(0, Math.min(deps.rescueReserve?.calls ?? tplan.files.filter((f) => !f.generated).length * Math.max(1, deps.maxCandidatesPerFile ?? 1), Math.floor(limits.maxModelCalls * RESCUE_MAX_SHARE)))
     rescue.reserved_time_ms = Math.max(0, Math.min(deps.rescueReserve?.ms ?? RESCUE_DEFAULT_MS, Math.floor(limits.maxRuntimeMs * RESCUE_MAX_SHARE)))
   }
   let rescueReleased = false
@@ -304,6 +304,10 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   }
   const call = async (system: string, prompt: string, json = false, sampling: { temperature?: number; seed?: number } = {}, via?: ModelClient): Promise<ModelResult> => {
     if (!deps.tools.includes('model_local')) return { ok: false, detail: 'model_local not granted', executor: 'UNKNOWN' }
+    // a test file Foundry generates from the contract is delivered as the reply: no model is asked, no model call is counted
+    const genPath = /FILE TO CREATE: (\S+)/.exec(prompt)?.[1]
+    const genText = genPath ? tplan?.files.find((f) => f.path === genPath)?.generated : undefined
+    if (genText) return { ok: true, text: '```javascript\n' + genText + '\n```', executor: { provider: 'foundry', model: 'contract-test-generator' }, promptTokens: 0, outputTokens: 0, latencyMs: 0 }
     // A timed-out model call is retried a bounded number of times. The call has no side effects (nothing is written until a reply is parsed), the prompt and
     // sampling are reused unchanged, and every attempt counts against the model-call budget, so no state is lost and no effect is duplicated.
     const purpose = (/FILE TO (?:EDIT|CREATE|FIX): (\S+)/.exec(prompt)?.[1] ?? system.slice(0, 40)).slice(0, 80)
@@ -879,7 +883,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         emit('REJECT', `${path}: ${problem}`)
         state.doNotRepeat.push({ key: `reject:${path}:${rej}`, reason: problem })
         if (fpStep && !/^MANIFEST/.test(problem)) fpm.reply_rejections.push({ file: path, problem: problem.slice(0, 220) })
-        if (fpStep && mode === 'edits' && !fpForceRewrite && parsedReply.kind === 'invalid') { fpForceRewrite = true; emit('EDIT_FALLBACK_REWRITE', `${path}: the structural/range edits could not be applied (${parsedReply.reason.slice(0, 120)}); asking for the whole file once`) }
+        if (fpStep && mode === 'edits' && !fpForceRewrite && (parsedReply.kind === 'invalid' || (parsedReply.kind === 'code' && parsedReply.mode === 'edits' && /syntax error|would not start/i.test(problem)))) { fpForceRewrite = true; emit('EDIT_FALLBACK_REWRITE', `${path}: the structural/range edits ${parsedReply.kind === 'invalid' ? `could not be applied (${parsedReply.reason.slice(0, 120)})` : 'produced a file that does not parse'}; asking for the whole file once`) }
         const bs = budgetStop(); if (bs) { failAssignment(log, assignmentId, actor, bs.reason, undefined, clock()); return bs }
         reply = await askFile([`YOUR PREVIOUS REPLY WAS REJECTED: ${problem}`, (routeKept && parsedReply.kind === 'code' ? `THE ENGINE ALREADY CORRECTED THE ROUTE ORDER of your reply (do not change the order of the routes). Here is the corrected file; return it with ONLY the problem above fixed:\n${parsedReply.content.slice(0, 7500)}` : parsedReply.kind === 'code' && /^route conflict|^the server does not serve/.test(problem) && routeRegion(parsedReply.content) ? `THE ROUTE LAYOUT OF THE REJECTED REPLY (line numbers match the message above; reorder these so every specific route comes before the broader route that also matches it, then keep everything else):\n${routeRegion(parsedReply.content)}` : `THE REJECTED REPLY (do NOT repeat it):\n${reply.text.slice(0, 700)}`)], rej + 1)
         parsedReply = reply.ok ? parseShaped(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
@@ -910,7 +914,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         const dropped = dropUngrounded(path, toWrite, req.acceptance)
         if (dropped) { toWrite = dropped.content; testReviews.push({ file: path, reviewer: 'foundry:deterministic-review', verdict: 'REJECTED_UNGROUNDED', findings: dropped.names.map((n) => n.slice(0, 120)) }); emit('TEST_REJECTED_BEFORE_EXECUTION', `${path}: ${dropped.names.length} test(s) map to no acceptance criterion`) }
         // LOCAL TEST REVIEWER: a separate local model judges the file against its plan rows BEFORE it runs; at most one revision, accepted only if it still passes every static and plan check
-        if (deps.testReviewer && budgetLeft() && helperOk(`${path}: local test review`)) {
+        if (deps.testReviewer && !tplan.files.find((f) => f.path === path)?.generated && budgetLeft() && helperOk(`${path}: local test review`)) {
           helperCalls += 1
           const rv = await call(REVIEWER_SYSTEM, reviewerPrompt(tplan, path, toWrite), true, { temperature: 0 }, deps.testReviewer.model)
           const verdict = rv.ok ? parseReviewerVerdict(rv.text) : null
@@ -990,7 +994,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             const rescueMode = !!(tplan && contractFile)
             const rescueNo = rescueMode && run.exitCode !== 0 && deps.testCandidates?.length ? rescueBlocked() : null
             if (rescueNo) { rescue.rescue_skipped_reason = rescueNo; emit('TEST_RESCUE_SKIPPED', `${path}: ${rescueNo}`) }
-            if (run.exitCode !== 0 && deps.testCandidates?.length && state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED') && !rescueNo && (rescueMode || helperOk(`${path}: competing test candidates`))) {
+            if (run.exitCode !== 0 && deps.testCandidates?.length && !tplan?.files.find((f) => f.path === path)?.generated && state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED') && !rescueNo && (rescueMode || helperOk(`${path}: competing test candidates`))) {
             const base = ws.read(path)
             const pool: { label: string; content: string; failing: number; passed: boolean; grounded: number }[] = [{ label: writerLabel, content: base, failing: failCount(run), passed: false, grounded: groundTests(path, base, req.acceptance, writerLabel).filter((g) => g.confidence !== 'NONE').length }]
             for (const alt of deps.testCandidates.slice(0, deps.maxCandidatesPerFile ?? 1)) {
@@ -1039,9 +1043,11 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             const otherTests = tests.slice(2).filter((t) => t !== path && out.includes(t))
             // ...unless the failure output itself implicates implementation files (a stack frame or path inside src/, server, public): then the implementation is a suspect too
             const implicated = candidatesFromOutput(out, []).filter((f) => !/^test\//.test(f))
-            const testOnly = acceptPassed && out.includes(path) && !otherTests.length && !implicated.length
+            // a test Foundry generated from the contract is never rewritten by a model: when it fails against the verified implementation the implementation is the suspect
+            const genFile = !!tplan?.files.find((f) => f.path === path)?.generated
+            const testOnly = !genFile && acceptPassed && out.includes(path) && !otherTests.length && !implicated.length
             const implSnap = Object.fromEntries([...changed].filter((f) => !/^test\//.test(f) && ws.exists(f)).map((f) => [f, ws.read(f)]))
-            stepOk = await debugLoop(run, testOnly ? [path] : [...changed].filter((f) => !/^test\//.test(f)).concat([path]), step.id, 'tests', () => runCheck(tests), testOnly ? [path] : undefined)
+            stepOk = await debugLoop(run, testOnly ? [path] : [...changed].filter((f) => !/^test\//.test(f)).concat(genFile ? [] : [path]), step.id, 'tests', () => runCheck(tests), testOnly ? [path] : undefined)
             // implementation files edited at the test stage must not regress the independently verified behaviour: the verifier is the arbiter, the edit is reverted otherwise
             if (acceptPassed && deps.finalVerification && Object.entries(implSnap).some(([f, t]) => ws.read(f) !== t)) {
               const chk = await deps.finalVerification.run()
