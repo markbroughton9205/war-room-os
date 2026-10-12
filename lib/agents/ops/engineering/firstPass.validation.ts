@@ -18,7 +18,7 @@ import { OllamaModelClient, isRunaway } from './runtime/ollamaModel'
 import { classifyModelFailure } from './modelFailure'
 import { parseEditReply, fitPrompt, ENGINEER_STRUCT_SYSTEM } from './prompts'
 import { importProblems, runPreflight, staticPreflight, preflightTap, preflightHypotheses } from './preflight'
-import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateCounterTests, generateFilterTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
+import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateCounterTests, generateFilterTests, generateTransitionTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
 import { classifyLeftShift, criterionOfCheck, newFirstPassState, buildFirstPassReport } from './firstPass'
 import { runFeatureWorkflow, type WorkflowDeps } from './workflow'
 import { Workspace } from './runtime/workspaceFs'
@@ -500,8 +500,8 @@ process.env.ENGINE_NODE_PARSE = '0'
 {
   const pkg = JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } })
   const plan = buildTestPlan(TASK_FEATURE.acceptance, pkg)
-  const gf = plan?.files.find((f) => f.generated)
-  check('F112_the_task_summary_criterion_is_covered_by_a_generated_count_file_walked_along_allowed_transitions', !!plan && !!gf && gf.criteria.join() === '4' && /SUMMARY: counts per status/.test(gf.generated!) && /"doing":\["doing"\]/.test(gf.generated!) && /"done":\["doing","done"\]/.test(gf.generated!) && !/title: 'todo'/.test(gf.generated!) && plan.files.filter((f) => !f.generated).every((f) => !f.criteria.includes(4)), JSON.stringify(plan?.files.map((f) => [f.path, f.criteria])))
+  const gf = plan?.files.find((f) => f.generated && f.criteria.join() === '4')
+  check('F112_the_task_summary_criterion_is_covered_by_a_generated_count_file_walked_along_allowed_transitions', !!plan && !!gf && plan.files.some((f) => f.generated && f.criteria.join() === '4') && /SUMMARY: counts per status/.test(gf.generated!) && /"doing":\["doing"\]/.test(gf.generated!) && /"done":\["doing","done"\]/.test(gf.generated!) && !/title: 'todo'/.test(gf.generated!) && plan.files.filter((f) => !f.generated).every((f) => !f.criteria.includes(4)), JSON.stringify(plan?.files.map((f) => [f.path, f.criteria])))
   const mk = (patch: (rel: string, text: string) => string, tag: string) => {
     const dir = makeTaskApp(path.join(tmp(), tag))
     for (const [rel, text] of Object.entries(TASK_REFERENCE)) { if (!/^test\//.test(rel)) { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), patch(rel, text)) } }
@@ -515,6 +515,30 @@ process.env.ENGINE_NODE_PARSE = '0'
   check('F114_the_generated_count_tests_fail_when_the_summary_counts_the_wrong_status', bad.status !== 0, `${bad.status} ${bad.stdout.slice(-200)}`)
   const wf = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
   check('F115_a_known_deterministic_defect_is_corrected_on_every_model_write_and_nothing_is_generated_without_the_needed_contract_facts', /\(on write\)/.test(wf) && /tag === '' && !\/\^test/.test(wf) && generateCounterTests(4, { ...ct, transitions: [] }) === null && generateCounterTests(4, { ...ct, routes: ct.routes.map((r) => ({ ...r, createsRecord: false })) }) === null && generateCounterTests(1, ct) === null)
+}
+
+{
+  const pkg = JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } })
+  const plan = buildTestPlan(TASK_FEATURE.acceptance, pkg)
+  const gf = plan?.files.find((f) => f.generated && f.criteria.join() === '2')
+  check('F116_the_task_move_criterion_is_covered_by_a_generated_transition_file_with_allowed_rejected_unknown_status_and_unknown_id_tests', !!gf && /MOVES_ALLOWED/.test(gf.generated!) && /MOVES_REJECTED/.test(gf.generated!) && /STATUS_UNKNOWN/.test(gf.generated!) && /ID_UNKNOWN/.test(gf.generated!) && /\["todo","done"\]/.test(gf.generated!) && /\["done","todo"\]/.test(gf.generated!) && plan!.files.filter((f) => !f.generated).every((f) => !f.criteria.includes(2)), JSON.stringify(plan?.files.map((f) => [f.path, f.criteria])))
+  const mk = (patch: (rel: string, text: string) => string, tag: string) => {
+    const dir = makeTaskApp(path.join(tmp(), tag))
+    for (const [rel, text] of Object.entries(TASK_REFERENCE)) { if (!/^test\//.test(rel)) { mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), patch(rel, text)) } }
+    mkdirSync(path.join(dir, 'test', 'support'), { recursive: true }); writeFileSync(path.join(dir, HARNESS_PATH), harnessSource('server.mjs', ['TASKS_FILE'])); writeFileSync(path.join(dir, gf!.path), gf!.generated!)
+    return dir
+  }
+  const run = (d: string) => spawnSync('node', ['--test', gf!.path], { cwd: d, encoding: 'utf8', timeout: 90_000, env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' } as unknown as NodeJS.ProcessEnv })
+  const ok = run(mk((_r, t) => t, 'task-trans'))
+  check('F117_the_generated_transition_tests_pass_against_the_reference_implementation', ok.status === 0 && /(?:# |ℹ )pass 4\b/.test(ok.stdout) && /(?:# |ℹ )fail 0/.test(ok.stdout), `${ok.status} ${ok.stdout.slice(-400)} ${ok.stderr.slice(-200)}`)
+  const ref = TASK_REFERENCE['src/taskService.mjs'] ?? ''
+  const loose = run(mk((rel, t) => (rel === 'src/taskService.mjs' ? t.replace(/(done:\s*\[)'doing'\]/, "$1'doing', 'todo']") : t), 'task-trans-bug'))
+  check('F118_the_generated_transition_tests_fail_when_the_implementation_allows_a_move_the_contract_forbids', ref.length > 0 && loose.status !== 0, `${loose.status} ${loose.stdout.slice(-300)} ref=${ref.length}`)
+  const SRV = ["const server = createServer(async (req, res) => {", "  const url = new URL(req.url, 'http://localhost')", "  try {", "    if (req.method === 'POST' && url.pathname === '/api/alerts') return reply(res, 201, {})", "    const readMatch = url.pathname.match(/^\\/api\\/alerts\\/(\\d+)\\/read$/)", "    if (req.method === 'POST' && readMatch) {", "      return reply(res, 200, {})", "    }", "    const archiveMatch = url.pathname.match(/^\\/api\\/alerts\\/(\\d+)\\/archive$/)", "    if (req.method === 'POST' && archiveMatch) return reply(res, 200, {})", "    const bad = url.pathname.match(/^\\/x$/)", "    if (!bad) return reply(res, 404, {})", "    return reply(res, 404, {})", "  } catch (e) { return reply(res, 400, {}) }", "})"].join('\n')
+  const rt = routeTable(SRV)
+  const probs = contractRouteProblems('server.mjs', SRV, ['POST /api/alerts creates one', 'POST /api/alerts/:id/read marks read', 'POST /api/alerts/:id/archive archives'])
+  check('F119_a_route_whose_match_result_is_stored_in_a_constant_and_used_later_in_the_condition_is_recognised', rt.some((r) => r.kind === 'regex' && r.matches('/api/alerts/1/read') && r.method === 'POST') && !probs.some((x) => /read|archive/.test(x)), JSON.stringify(rt.map((r) => [r.pattern, r.method])) + probs.join('|'))
+  check('F120_nothing_is_generated_for_transitions_without_a_move_route_or_a_create_route', generateTransitionTests(2, { ...ct, routes: ct.routes.map((r) => ({ ...r, createsRecord: false })) }) === null && generateTransitionTests(2, { ...ct, transitions: [] }) === null && generateTransitionTests(1, ct) === null && generateTransitionTests(2, ca) === null)
 }
 void deriveAssignments; void AgentOpsLog
 

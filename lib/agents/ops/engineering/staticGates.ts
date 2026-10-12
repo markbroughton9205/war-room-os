@@ -41,6 +41,8 @@ export type Route = { kind: 'literal' | 'prefix' | 'regex'; pattern: string; met
 const METHOD_RE = /\b(?:req\.)?method\s*===?\s*['"]([A-Z]+)['"]/
 const unesc = (s: string) => s.replace(/\\\//g, '/').replace(/\\([.\-])/g, '$1')
 /** Every HTTP route a dispatcher registers by testing the request path: literal ===, startsWith prefix, regex test/exec/match (also through a const alias), with its method and handler span. */
+/** `if (m)`, `if (!m)` and `if (req.method === 'POST' && m)`: the condition tests the match result stored in the alias. */
+const aliasInIf = (a: string, ln: string): boolean => new RegExp(`\\bif\\s*\\(\\s*(?:[^()\\n]*?(?:&&|\\|\\|)\\s*)?!?${a}\\b(?!\\s*[.(\\[])`).test(ln)
 export function routeTable(text: string): Route[] {
   const lines = text.split('\n')
   const alias = new Map<string, string>()
@@ -57,7 +59,7 @@ export function routeTable(text: string): Route[] {
     const method = METHOD_RE.exec(ln)?.[1] ?? null
     const { end, returns } = span(i)
     const add = (kind: Route['kind'], pattern: string, matches: (p: string) => boolean) => out.push({ kind, pattern, method, line: i + 1, end: end + 1, returns, matches })
-    if (!/pathname|\.test\(|\.exec\(|\.match\(/.test(ln) && ![...alias.keys()].some((a) => new RegExp(`\\bif\\s*\\(\\s*!?${a}\\b`).test(ln))) return
+    if (!/pathname|\.test\(|\.exec\(|\.match\(/.test(ln) && ![...alias.keys()].some((a) => aliasInIf(a, ln))) return
     let found = false
     for (const m of ln.matchAll(/pathname\s*===?\s*['"]([^'"]+)['"]/g)) { found = true; add('literal', m[1], (p) => p === m[1]) }
     for (const m of ln.matchAll(/pathname\.startsWith\(\s*['"]([^'"]+)['"]\s*\)/g)) { found = true; add('prefix', m[1], (p) => p.startsWith(m[1])) }
@@ -65,7 +67,7 @@ export function routeTable(text: string): Route[] {
     // a pattern written as a string: new RegExp('^/api/x/(\\d+)/read$').test(url.pathname)
     for (const m of ln.matchAll(/(?:new\s+)?RegExp\(\s*(['"])((?:\\.|(?!\1)[^\\\n])*)\1\s*(?:,\s*['"]\w*['"]\s*)?\)\.test\(\s*[\w.]*pathname\s*\)/g)) { found = true; const src = m[2].replace(/\\\\/g, '\\').replace(/\\(['"])/g, '$1'); try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* not a usable regex */ } }
     for (const m of ln.matchAll(/[\w.]*pathname\.(?:match|search)\(\s*\/((?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\n\\\[])+)\/\w*\s*\)|\/((?:\\.|\[(?:\\.|[^\]\\\n])*\]|[^/\n\\\[])+)\/\w*\.exec\(\s*[\w.]*pathname\s*\)/g)) { const src = m[1] ?? m[2]; if (found && out.some((o) => o.line === i + 1 && o.pattern === src)) continue; found = true; try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* not a usable regular expression */ } }
-    for (const [a, src] of alias) if (new RegExp(`\\bif\\s*\\(\\s*!?${a}\\b`).test(ln) && !found) { found = true; try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* ignore */ } }
+    for (const [a, src] of alias) if (aliasInIf(a, ln) && !found) { found = true; try { const re = new RegExp(src); add('regex', src, (p) => re.test(p)) } catch { /* ignore */ } }
   })
   return out.filter((r, i) => !out.slice(0, i).some((e) => e.end > e.line && r.line > e.line && r.line <= e.end))
 }

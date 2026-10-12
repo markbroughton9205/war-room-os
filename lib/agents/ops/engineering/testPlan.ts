@@ -268,6 +268,89 @@ export function generateCounterTests(id: number, c: ImplementationContract): str
   ].join('\n')
 }
 
+/**
+ * A state-machine criterion ("PATCH /api/tasks/:id moves a task; allowed moves are ...; any other move is rejected with 409, an unknown status value with 400, an unknown id with 404")
+ * is generated from the contract: every allowed move is made from a task walked to its source status along allowed moves, every other pair of statuses must answer the rejection
+ * status, an unknown status value and an unknown id answer their statuses. The model-written version kept assuming a move the contract forbids (for example done -> todo).
+ * Null when the contract does not carry what is needed.
+ */
+export function generateTransitionTests(id: number, c: ImplementationContract): string | null {
+  const strip = (r: string) => r.replace(/^(?:GET|POST|PUT|PATCH|DELETE)\s+/, '')
+  const move = c.routes.find((r) => r.criterion === id && r.method === 'PATCH' && r.bodyField && r.params.length === 1)
+  const create = c.routes.find((r) => r.createsRecord)
+  if (!move || !create) return null
+  const edges = c.transitions.filter((t) => t.allowed)
+  if (!edges.length) return null
+  const field = c.fields.find((f) => f.name === move.bodyField)
+  const states = [...new Set([...(field?.values ?? []), ...edges.flatMap((t) => [t.from, t.to])])]
+  const initial = field?.default && states.includes(field.default) ? field.default : states.find((k) => !edges.some((t) => t.to === k))
+  if (!initial) return null
+  const reach: Record<string, string[]> = {}
+  { const prev: Map<string, string | null> = new Map([[initial, null]]); const queue: string[] = [initial]
+    while (queue.length) { const cur = queue.shift()!; for (const t of edges.filter((e) => e.from === cur)) if (!prev.has(t.to)) { prev.set(t.to, cur); queue.push(t.to) } }
+    for (const k of states) { if (!prev.has(k)) continue; const path: string[] = []; let at: string | null = k; while (at && at !== initial) { path.unshift(at); at = prev.get(at) ?? null } reach[k] = path } }
+  const allowed = edges.map((t) => [t.from, t.to]).filter(([f]) => reach[f])
+  const rejected: string[][] = []
+  for (const f of states) for (const t of states) if (f !== t && reach[f] && !edges.some((e) => e.from === f && e.to === t)) rejected.push([f, t])
+  const code = (n: number) => move.statuses.includes(n)
+  const textField = c.fields.find((f) => f.required && !f.values.length)?.name
+  const extra = c.fields.filter((f) => f.required && f.values.length && f.name !== move.bodyField).map((f) => `${JSON.stringify(f.name)}: ${JSON.stringify(f.values[0])}`)
+  const bodyJs = textField || extra.length ? `{ ${[textField ? `${JSON.stringify(textField)}: 'item ' + Date.now()` : '', ...extra].filter(Boolean).join(', ')} }` : '{}'
+  const movePath = "'" + strip(move.path).replace(/:\w+/, "' + id + '") + "'"
+  const bf = JSON.stringify(move.bodyField)
+  const lines: string[] = [
+    "import test from 'node:test'",
+    "import assert from 'node:assert/strict'",
+    "import { withApp } from './support/harness.mjs'",
+    '',
+    `const CREATE = ${JSON.stringify(strip(create.path))}`,
+    `const ROUTE = ${JSON.stringify(reach)}`,
+    `const ALLOWED = ${JSON.stringify(allowed)}`,
+    `const REJECTED = ${JSON.stringify(rejected)}`,
+    `const moveTo = (id) => ${movePath}`,
+    '',
+    'async function taskAt(app, state) {',
+    `  const created = await app.post(CREATE, ${bodyJs})`,
+    "  assert.ok(created.status >= 200 && created.status < 300, 'create answered ' + created.status)",
+    '  const id = created.body.id',
+    '  for (const step of ROUTE[state]) {',
+    `    const r = await app.patch(moveTo(id), { ${bf}: step })`,
+    "    assert.ok(r.status >= 200 && r.status < 300, 'moving to ' + step + ' answered ' + r.status)",
+    '  }',
+    '  return id',
+    '}',
+    '',
+    `test(${JSON.stringify(`[C${id}] MOVES_ALLOWED: every allowed move works`)}, () => withApp(async (app) => {`,
+    '  for (const [from, to] of ALLOWED) {',
+    '    const id = await taskAt(app, from)',
+    `    const r = await app.patch(moveTo(id), { ${bf}: to })`,
+    "    assert.equal(r.status, 200, from + ' -> ' + to)",
+    `    assert.equal(r.body[${bf}], to)`,
+    '  }',
+    '}))', '',
+  ]
+  if (rejected.length && code(409)) lines.push(
+    `test(${JSON.stringify(`[C${id}] MOVES_REJECTED: every other move is rejected with 409`)}, () => withApp(async (app) => {`,
+    '  for (const [from, to] of REJECTED) {',
+    '    const id = await taskAt(app, from)',
+    `    const r = await app.patch(moveTo(id), { ${bf}: to })`,
+    "    assert.equal(r.status, 409, from + ' -> ' + to)",
+    '  }',
+    '}))', '')
+  if (code(400)) lines.push(
+    `test(${JSON.stringify(`[C${id}] STATUS_UNKNOWN: an unknown value is rejected with 400`)}, () => withApp(async (app) => {`,
+    `  const id = await taskAt(app, ${JSON.stringify(initial)})`,
+    `  const r = await app.patch(moveTo(id), { ${bf}: 'no-such-value' })`,
+    '  assert.equal(r.status, 400)',
+    '}))', '')
+  if (code(404)) lines.push(
+    `test(${JSON.stringify(`[C${id}] ID_UNKNOWN: an unknown id answers 404`)}, () => withApp(async (app) => {`,
+    `  const r = await app.patch(moveTo(999999), { ${bf}: ${JSON.stringify(edges[0].to)} })`,
+    '  assert.equal(r.status, 404)',
+    '}))', '')
+  return lines.join('\n')
+}
+
 export function buildTestPlan(acceptance: string[], packageJson: string | null): TestPlan | null {
   const entry = startEntry(packageJson)
   if (!entry) return null
@@ -283,7 +366,7 @@ export function buildTestPlan(acceptance: string[], packageJson: string | null):
     const envNamed = vars.filter((v) => a.includes(v))
     const defaultPath = /default:?\s*([\w./-]+\.\w+)/i.exec(a)?.[1]
     const recipe = envNamed.length ? `STORAGE LOCATION RECIPE: create data through the API, then assert.ok(existsSync(app.storageFile('${envNamed[0]}'))) (import { existsSync } from 'node:fs'). app.storageFile(VAR) is a path inside a temp directory and its file NAME is not the default name, so never assert anything about the name${defaultPath ? `. For the default location use withApp(async (app) => { ...create data through the API...; assert.ok(existsSync(app.cwd + '/${defaultPath}')) }, { defaultStorage: true })` : ''}` : ''
-    const gen = generateFilterTests(id, full) ?? generateCounterTests(id, full)
+    const gen = generateFilterTests(id, full) ?? generateCounterTests(id, full) ?? generateTransitionTests(id, full)
     if (gen) generated[id] = gen
     const variants = [...variantsOf(a, envNamed[0], defaultPath, persists), ...(gen ? [] : filterVariantsOf(id, full))]
     const state = [...(persists ? ['the data must be on disk: call app.restart() and read it back'] : []), ...envNamed.map((v) => `storage location comes from ${v}`)]
