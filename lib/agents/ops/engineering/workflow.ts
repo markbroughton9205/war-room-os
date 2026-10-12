@@ -26,7 +26,7 @@ import { undefinedNames, routeFindings, routeTable, routeRegion, contractRoutePr
 import { persistenceProblems, persistenceProbe, wantsPersistence, type PersistenceProbe } from './persistenceContract'
 import { buildEvidence, renderEvidence, parseTestFailures } from './failureEvidence'
 import { startupProbe } from './startupProbe'
-import { deriveImplementationContract, resolveContract, unresolvedAmbiguities, renderContract, type ImplementationContract } from './implContract'
+import { deriveImplementationContract, inheritConventions, resolveContract, unresolvedAmbiguities, renderContract, type ImplementationContract } from './implContract'
 import { matchRecipes, renderRecipes, buildImplStep, renderImplStep, runRecipeChecks, stripManifest, checkManifest, autofix, type Recipe, type Manifest, type ImplStep, type RecipeFinding } from './recipes'
 import { runPreflight, preflightTap, preflightHypotheses, type PreflightReport } from './preflight'
 import { newFirstPassState, buildFirstPassReport, type FirstPassOptions, type FirstPassReport } from './firstPass'
@@ -221,6 +221,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const baselineSnap = ws.snapshot()
   const baselineText: Record<string, string> = {}
   for (const p of Object.keys(baselineSnap).filter((x) => /\.(m?js|html?)$/.test(x) && !/node_modules/.test(x)).slice(0, 80)) baselineText[p] = ws.read(p)
+  if (fpOn && fpContract) { fpContract = inheritConventions(fpContract, baselineText); fpRecipes = matchRecipes(fpContract) }
   const prior = latestCheckpoint(log, assignmentId)
   const index0 = buildWorkspaceIndex(ws.root)
   if (prior) {

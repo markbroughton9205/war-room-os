@@ -1,18 +1,20 @@
 /** First-pass correctness: implementation contract, proven recipes, plan, structural edits, manifest, preflight (static + runtime), left-shift classification, metrics, workflow wiring. Run: pnpm run validate:agent-eng-firstpass */
 import path from 'node:path'
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import { harness, engWorld, addAgent, draftFor, C, NOW, tmp } from './engtestkit'
 import { AgentOpsLog } from '../log'
 import { assign, deriveAssignments, startAssignment } from './assignments'
-import { ALERT_FEATURE } from './alertFixture'
-import { TASK_FEATURE } from './taskFixture'
+import { ALERT_FEATURE, makeAlertApp } from './alertFixture'
+import { TASK_FEATURE, makeTaskApp } from './taskFixture'
 import { CHAT_FEATURE, CHAT_REFERENCE, CHAT_VERIFY_SCRIPT, makeChatApp } from './chatFixture'
-import { deriveImplementationContract, renderContract, resolveContract, unresolvedAmbiguities } from './implContract'
+import { deriveImplementationContract, renderContract, resolveContract, inheritConventions, safeRelativePath, unresolvedAmbiguities } from './implContract'
 import { buildEvidence } from './failureEvidence'
 import { RECIPES, autofix, buildImplStep, checkManifest, matchRecipes, renderImplStep, renderRecipes, runRecipeChecks, stripManifest, unawaitedFsCalls } from './recipes'
 import { applyStructOps, parseStructOps, preservedShare, topLevelDecls } from './structEdit'
 import { parseEditReply, fitPrompt } from './prompts'
 import { importProblems, runPreflight, staticPreflight, preflightTap, preflightHypotheses } from './preflight'
+import { buildTestPlan, repairDefaultStoragePath, reviewTestFile } from './testPlan'
 import { classifyLeftShift, criterionOfCheck, newFirstPassState, buildFirstPassReport } from './firstPass'
 import { runFeatureWorkflow, type WorkflowDeps } from './workflow'
 import { Workspace } from './runtime/workspaceFs'
@@ -334,6 +336,61 @@ process.env.ENGINE_NODE_PARSE = '0'
   const big = ['TASK', 'ACCEPTANCE', 'RELATED CODE (x)\n' + 'x'.repeat(30000), 'FILE', 'INSTRUCTIONS']
   const fitted = fitPrompt(big, 2)
   check('F81_an_oversized_prompt_is_shortened_in_the_related_code_only_and_a_small_prompt_is_left_alone', fitted.length <= 16_500 + 80 && fitted.includes('TASK') && fitted.includes('INSTRUCTIONS') && fitted.includes('related code shortened') && fitPrompt(['a', 'RELATED CODE b', 'c'], 1) === 'a\n\nRELATED CODE b\n\nc')
+}
+
+// ======================================================================= review blockers (containment of the default storage path, spawn failure)
+{
+  check('F82_a_path_from_acceptance_text_is_used_only_when_relative_and_inside_the_workspace', safeRelativePath('./data/a.json') === 'data/a.json' && safeRelativePath('alerts.json') === 'alerts.json' && safeRelativePath('../x.json') === null && safeRelativePath('../../tasks.json') === null && safeRelativePath('/etc/x.json') === null && safeRelativePath('a/../../b.json') === null && safeRelativePath('a\\b.json') === null && safeRelativePath('') === null)
+  const up = deriveImplementationContract(['POST /api/things creates a thing (201)', 'things are persisted to disk, THINGS_FILE (default ../../tasks.json)'])
+  const abs = deriveImplementationContract(['POST /api/things creates a thing (201)', 'things are persisted to disk, THINGS_FILE (default /etc/things.json)'])
+  const okd = deriveImplementationContract(['POST /api/things creates a thing (201)', 'things are persisted to disk, THINGS_FILE (default data/things.json)'])
+  check('F83_a_default_path_that_climbs_out_of_the_workspace_or_is_absolute_is_never_recorded_in_the_contract_and_a_normal_one_still_is', !up.persistence.defaultPath && !abs.persistence.defaultPath && okd.persistence.defaultPath === 'data/things.json' && !!ca.persistence.defaultPath)
+  const sentinelDir = path.join(os.tmpdir(), `pfsentinel-${process.pid}-${Date.now()}`); mkdirSync(sentinelDir, { recursive: true }); writeFileSync(path.join(sentinelDir, 'keep.txt'), 'x')
+  const hostile = { ...ca, persistence: { ...ca.persistence, defaultPath: `../${path.basename(sentinelDir)}/tasks.json` } }
+  const rHostile = await runPreflight(mkApp(GOOD), hostile)
+  check('F84_the_runtime_preflight_never_deletes_anything_outside_its_private_copy_even_when_the_contract_carries_a_climbing_default_path', existsSync(path.join(sentinelDir, 'keep.txt')) && rHostile.skipped.some((x) => /not a path inside the workspace/.test(x)))
+  const rootDefault = { ...ca, persistence: { ...ca.persistence, defaultPath: 'alerts.json' } }
+  let rootErr = ''
+  const rRoot = await runPreflight(mkApp(GOOD), rootDefault).catch((e) => { rootErr = String(e); return null })
+  check('F85_a_root_level_default_path_does_not_delete_the_private_copy_or_crash_the_preflight', rRoot !== null && rootErr === '' && Array.isArray(rRoot.findings))
+  const rAbs = await runPreflight(mkApp(GOOD), { ...ca, persistence: { ...ca.persistence, defaultPath: '/tmp/never-used.json' } })
+  check('F86_an_absolute_default_path_skips_the_default_path_probe_instead_of_touching_it', rAbs.skipped.some((x) => /not a path inside the workspace/.test(x)) && !existsSync('/tmp/never-used.json'))
+  const bad = repairDefaultStoragePath("import path from 'node:path'\nconst FILE = process.env.ALERTS_FILE || path.join(__dirname, '..', 'alerts.json')\n", 'ALERTS_FILE', '../../alerts.json')
+  const okr = repairDefaultStoragePath("import path from 'node:path'\nconst FILE = process.env.ALERTS_FILE || path.join(__dirname, '..', 'alerts.json')\n", 'ALERTS_FILE', 'data/alerts.json')
+  check('F87_the_default_path_implementation_repair_refuses_a_climbing_path_and_still_repairs_a_normal_one', bad === null && okr !== null)
+  const spawnMissing = await runPreflight(mkApp(GOOD), ca, { entry: 'does-not-exist.mjs' })
+  check('F88_a_missing_entry_file_skips_the_runtime_probe_without_spawning', spawnMissing.skipped.some((x) => /does not exist/.test(x)) && spawnMissing.findings.length === 0)
+  const srcP = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'preflight.ts'), 'utf8')
+  check('F89_the_preflight_server_spawn_has_an_error_handler_and_checks_the_working_directory', /child\.on\('error'/.test(srcP) && /existsSync\(dir\)/.test(srcP))
+}
+
+// ======================================================================= inherited conventions (string ids): the hidden acceptance gap behind chat 0/3
+{
+  const readBase = (root: string) => { const out: Record<string, string> = {}; const walk = (d: string) => { for (const e of readdirSync(d, { withFileTypes: true })) { if (e.name === 'node_modules') continue; const a = path.join(d, e.name); if (e.isDirectory()) walk(a); else if (/\.(m?js|html?)$/.test(e.name)) out[path.relative(root, a).split(path.sep).join('/')] = readFileSync(a, 'utf8') } }; walk(root); return out }
+  const chatBase = readBase(makeChatApp(path.join(tmp(), 'chat-conv'))), alertBase = readBase(makeAlertApp(path.join(tmp(), 'alert-conv'))), taskBase = readBase(makeTaskApp(path.join(tmp(), 'task-conv')))
+  const ccs = inheritConventions(cc, chatBase)
+  check('F90_string_ids_are_inherited_from_the_existing_code_when_the_criteria_do_not_state_the_id_type', !cc.idString && ccs.idString && ccs.ambiguities.some((a) => a.kind === 'CONVENTION_INHERITED' && /STRINGS/.test(a.assumption ?? '')) && unresolvedAmbiguities(ccs).length === 0 && /ids are STRINGS/.test(renderContract(ccs)))
+  check('F91_nothing_is_inherited_when_the_criteria_state_numeric_ids_or_the_code_issues_numeric_ids', inheritConventions(ca, chatBase) === ca && !inheritConventions(ct, taskBase).idString && !inheritConventions(ca, alertBase).idString && inheritConventions(cc, { 'src/a.mjs': 'export const x = () => ({ id: state.nextId++ })' }) === cc && inheritConventions(cc, { 'test/a.test.mjs': 'const m = { id: String(1) }' }) === cc)
+  const ccsRecipes = matchRecipes(ccs)
+  const idRecipe = ccsRecipes.find((r) => r.id === 'MONOTONIC_IDS')
+  check('F92_the_id_recipe_tells_the_builder_to_issue_and_compare_string_ids_when_the_contract_says_so', !!idRecipe && /String\(state\.nextId\+\+\)/.test(idRecipe.brief?.(ccs) ?? '') && /never Number\(\)/.test((idRecipe.structure(ccs)[0] ?? '') + (idRecipe.brief?.(ccs) ?? '')) && /numeric nextId|id = state\.nextId\+\+/.test(idRecipe.brief?.(cc) ?? ''))
+  const strFiles = { 'server.mjs': "const id = Number(url.pathname.split('/')[3])\n", 'src/store.mjs': 'export function create(n) { const s = { id: state.nextId++, name: n }; return s }\n' }
+  const strF = runRecipeChecks(strFiles, ccs, ccsRecipes).filter((f) => f.check === 'string-ids')
+  check('F93_a_numeric_conversion_of_a_path_id_and_a_numeric_id_issue_are_both_found_only_under_string_ids', strF.length === 2 && runRecipeChecks(strFiles, cc, matchRecipes(cc)).filter((f) => f.check === 'string-ids').length === 0 && runRecipeChecks({ 'server.mjs': "const id = url.pathname.split('/')[3]\n", 'src/store.mjs': 'export const create = (n) => ({ id: String(state.nextId++), name: n })\n' }, ccs, ccsRecipes).filter((f) => f.check === 'string-ids').length === 0)
+  const numApp = GOOD.replace(/id: (\w+)\.nextId\+\+/, 'id: $1.nextId++')
+  const ccsNum = { ...ca, idNumeric: false, idString: true }
+  const rNum = await runPreflight(mkApp(GOOD), ccsNum)
+  check('F94_the_runtime_preflight_reports_a_numeric_id_when_the_contract_fixes_string_ids', rNum.findings.some((f) => f.check === 'ROUTE.create-id' && /string id/.test(f.fact)) && numApp.length > 0)
+}
+
+{
+  const plan = buildTestPlan(ALERT_FEATURE.acceptance, JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } }))
+  const file = plan?.tests[0]?.file ?? 'test/contract.api-1.test.mjs'
+  const mk = (call: string) => `import { test } from 'node:test'\nimport assert from 'node:assert/strict'\nimport { withApp } from './support/harness.mjs'\ntest('[C${plan?.tests.find((t) => t.file === file)?.criterion_id ?? 1}] x', () => withApp(async (app) => {\n  const a = await app.post('/api/alerts', { title: 'a' })\n  ${call}\n  assert.ok(a)\n}))\n`
+  const bad = plan ? reviewTestFile(file, mk("await app.post('/api/alerts/:id/read', {})"), plan) : []
+  const good = plan ? reviewTestFile(file, mk('await app.post(`/api/alerts/${a.body.id}/read`, {})'), plan) : []
+  const bad2 = plan ? reviewTestFile(file, mk("await app.get('/api/alerts/<id>')"), plan) : []
+  check('F95_a_test_that_requests_a_template_path_with_a_placeholder_id_is_sent_back_before_it_runs_and_a_real_id_path_is_not', !!plan && bad.some((f) => f.code === 'PLACEHOLDER_PATH') && bad2.some((f) => f.code === 'PLACEHOLDER_PATH') && !good.some((f) => f.code === 'PLACEHOLDER_PATH'))
 }
 void deriveAssignments; void AgentOpsLog
 

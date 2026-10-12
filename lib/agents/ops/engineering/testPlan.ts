@@ -264,6 +264,10 @@ export function reviewTestFile(rel: string, text: string, plan: TestPlan): Revie
     const asserts = c.text.match(/\bassert(?:\.\w+)?\s*\(/g) ?? []
     if (!asserts.length) out.push({ code: 'NO_ASSERTION', detail: `"${c.name.slice(0, 60)}" asserts nothing` })
     if (/assert(?:\.ok|\.equal|\.strictEqual)?\s*\(\s*(?:true|1)\s*(?:,\s*(?:true|1)\s*)?[,)]/.test(c.text) && asserts.length <= 1) out.push({ code: 'TRIVIAL_ASSERTION', detail: `"${c.name.slice(0, 60)}" only makes a trivial assertion` })
+    for (const m of c.text.matchAll(/\bapp\.(?:get|post|patch|put|delete)\s*\(\s*(['"`])((?:(?!\1)[^\\])*)\1/g)) {
+      const lit = m[2].replace(/\$\{[^}]*\}/g, '')
+      if (/\/:[A-Za-z_]\w*|<[A-Za-z_]\w*>|\{[A-Za-z_]\w*\}/.test(lit)) { out.push({ code: 'PLACEHOLDER_PATH', detail: `"${c.name.slice(0, 60)}" requests the template path ${m[2].slice(0, 60)}; a real request needs the real id (create the item first and use \`/api/.../\${created.body.id}/...\`)` }); break }
+    }
     const tag = /\[C(\d{1,2})\]/.exec(c.name)
     if (!tag) out.push({ code: 'UNTAGGED', detail: `"${c.name.slice(0, 60)}" is not named with [C<number>]` })
     else if (!assigned.has(Number(tag[1]))) out.push({ code: 'FOREIGN_CRITERION', detail: `"${c.name.slice(0, 60)}" proves C${tag[1]}, which is not assigned to ${rel} (assigned: ${[...assigned].map((n) => 'C' + n).join(', ')})` })
@@ -347,6 +351,7 @@ export const REVIEWER_SYSTEM = 'You are Foundry\'s test reviewer. You judge gene
  * (the file already honours the contract, or the shape is not recognised: nothing is guessed).
  */
 export function repairDefaultStoragePath(src: string, envVar: string, defaultPath: string): { content: string; note: string } | null {
+  if (/^\/|\.\.|[\\]/.test(defaultPath.replace(/^\.?\//, ''))) return null
   const esc = envVar.replace(/[^A-Z0-9_]/g, '')
   const re = new RegExp(`(\\b(?:const|let|var)\\s+(\\w+)\\s*=\\s*)process\\.env\\.${esc}(\\s*(?:\\|\\||\\?\\?)\\s*)([^\\n;]+)`)
   const m = re.exec(src)

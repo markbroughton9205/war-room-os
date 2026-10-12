@@ -24,7 +24,7 @@ export type ContractFilter = { param: string; values: string[]; route: string | 
 export type ContractFlag = { name: string; route: string; sets: boolean; criterion: number }
 export type ContractTransition = { from: string; to: string; allowed: boolean; criterion: number }
 export type ContractField = { name: string; default: string | null; values: string[]; required: boolean; criterion: number }
-export type ContractAmbiguity = { kind: 'STATUS_WITHOUT_ROUTE' | 'PERSISTENCE_LOCATION_UNSPECIFIED' | 'CRITERION_UNMAPPED'; criterion: number; question: string; resolution: string | null; assumption: string | null }
+export type ContractAmbiguity = { kind: 'STATUS_WITHOUT_ROUTE' | 'PERSISTENCE_LOCATION_UNSPECIFIED' | 'CRITERION_UNMAPPED' | 'CONVENTION_INHERITED'; criterion: number; question: string; resolution: string | null; assumption: string | null }
 export type ContractBehavior = { id: string; criterion: number; text: string; categories: BehaviorCategory[] }
 export type ImplementationContract = {
   version: 1
@@ -44,6 +44,8 @@ export type ImplementationContract = {
   restart: boolean
   /** the contract says ids are numeric (otherwise any id value is accepted) */
   idNumeric: boolean
+  /** Ids are strings: not stated by the criteria but inherited from the existing code (see inheritConventions). The created item's `id` is a string and path ids are never converted to numbers. */
+  idString: boolean
   compat: { routes: string[]; criteria: number[] }
   tests: number[]
   ambiguities: ContractAmbiguity[]
@@ -93,11 +95,21 @@ export function flagRequirements(desc: string, flags: string[]): FlagRequirement
   }
   return out
 }
+/**
+ * A path taken from acceptance text is only ever used relative to a workspace copy. Absolute paths, parent-folder (`..`) segments, backslashes and
+ * empty results are refused (null) so nothing derived from prose can point outside the workspace. A leading `./` is dropped.
+ */
+export function safeRelativePath(raw: string): string | null {
+  const p = String(raw ?? '').trim().replace(/^\.\//, '')
+  if (!p || p.startsWith('/') || /\\/.test(p) || p.split('/').some((seg) => seg === '..' || seg === '')) return null
+  return p
+}
+
 export function deriveImplementationContract(acceptance: string[], request = ''): ImplementationContract {
   const c: ImplementationContract = {
     version: 1, behaviors: [], routes: [], statuses: [], fields: [], flags: [], transitions: [], conflicts: [], filters: [], filterRules: [], defaultViews: [],
     persistence: { required: false, envVar: null, defaultPath: null, surviveRestart: false, idsNeverReused: false, criteria: [] },
-    ui: { ids: [], apis: [], criteria: [] }, errors: [], restart: false, idNumeric: false, compat: { routes: [], criteria: [] }, tests: [], ambiguities: [],
+    ui: { ids: [], apis: [], criteria: [] }, errors: [], restart: false, idNumeric: false, idString: false, compat: { routes: [], criteria: [] }, tests: [], ambiguities: [],
   }
   const routeKey = (m: string, p: string) => `${m} ${p}`
   let lastRoute: string | null = null
@@ -170,7 +182,7 @@ export function deriveImplementationContract(acceptance: string[], request = '')
     }
     for (const v of storageEnvVars([text])) { c.persistence.envVar ??= v; cats.add('PERSISTENCE') }
     const dp = /default:?\s*([\w./-]+\.\w+)/i.exec(text)
-    if (dp) { c.persistence.defaultPath ??= dp[1].replace(/^\.?\//, ''); cats.add('PERSISTENCE') }
+    if (dp) { const safe = safeRelativePath(dp[1]); if (safe) { c.persistence.defaultPath ??= safe; cats.add('PERSISTENCE') } }
     // ---- response shapes on counters ("returns {"unread":n,"critical":n}") and counters in prose
     if (/\bcount|\bnumber of\b|\bhow many\b|\bper status\b/i.test(text)) cats.add('COUNTER')
     // ---- UI
@@ -223,6 +235,21 @@ export function deriveImplementationContract(acceptance: string[], request = '')
 
 /** Ambiguities are resolved by a recorded rule or the build does not start. Returns the unresolved ones. */
 export function unresolvedAmbiguities(c: ImplementationContract): ContractAmbiguity[] { return c.ambiguities.filter((a) => a.resolution === null) }
+
+
+/**
+ * Conventions the criteria leave unstated but the existing code already fixes. Today: the id type. When the baseline code issues string ids
+ * (`id: String(...)`, a template string, a uuid) and nothing in it issues numeric ids, new entities follow the same convention: a hidden acceptance gap
+ * is closed by reading the code the feature has to live next to, never by guessing. Recorded as an assumption in the contract; no effect when the criteria say "numeric id".
+ */
+export function inheritConventions(c: ImplementationContract, baseline: Record<string, string>): ImplementationContract {
+  if (c.idNumeric || c.idString) return c
+  const src = Object.entries(baseline).filter(([p]) => !/(^|\/)(test|tests|node_modules)\//.test(p) && !/\.test\.m?js$/.test(p) && /\.m?js$/.test(p))
+  const strHit = src.find(([, t]) => /\bid\s*:\s*(?:String\s*\(|`|(?:crypto\.)?randomUUID\s*\()/.test(t))
+  const numHit = src.some(([, t]) => /\bid\s*:\s*(?:\w+\.)?\w*[nN]extId\s*\+\+|\bid\s*:\s*\d+\b|\bid\s*:\s*\w+\.length\s*\+\s*1\b/.test(t))
+  if (!strHit || numHit) return c
+  return { ...c, idString: true, ambiguities: [...c.ambiguities, { kind: 'CONVENTION_INHERITED', criterion: 0, question: '', resolution: 'string ids', assumption: `ids are STRINGS (the existing code in ${strHit[0]} issues string ids): the created item's id is a string (keep a numeric counter internally, expose String(n)) and an id taken from the URL is compared as the string it is; never Number()/parseInt() a path id` }] }
+}
 
 /** Applies the deterministic resolutions (a persistence default location) to the contract; the assumptions stay listed. */
 export function resolveContract(c: ImplementationContract): ImplementationContract {

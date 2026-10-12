@@ -136,11 +136,19 @@ export const RECIPES: Recipe[] = [
     matches: (c) => c.persistence.idsNeverReused || (c.persistence.surviveRestart && c.fields.length > 0),
     layers: ['storage', 'domain'],
     prerequisites: ['JSON_FILE_STORE'],
-    brief: () => 'id = state.nextId++ then save(); never items.length + 1; nextId is part of the saved file and survives restarts.',
-    structure: () => ['Keep a numeric nextId in the persisted state; create = id = state.nextId++ then save(). Never derive the next id from items.length (it repeats after a removal) and never reset it on load; on load, nextId = max(saved nextId, max existing id + 1).'],
-    invariants: ['ids are numbers', 'nextId is part of the persisted file', 'a restarted process continues after the highest id ever issued'],
+    brief: (c) => c.idString ? 'keep a numeric counter state.nextId in the saved file; a new item gets id = String(state.nextId++) then save(); the id is a STRING everywhere (response, stored file, lookups compare strings); never items.length + 1.' : 'id = state.nextId++ then save(); never items.length + 1; nextId is part of the saved file and survives restarts.',
+    structure: (c) => c.idString ? ['Keep a numeric counter nextId in the persisted state; create = id = String(state.nextId++) then save(). The id is a string in the response, the saved file and every lookup (compare with the string taken from the URL; never Number()/parseInt() it). Never derive the next id from items.length and never reset the counter on load; on load, nextId = max(saved nextId, highest existing numeric id + 1).'] : ['Keep a numeric nextId in the persisted state; create = id = state.nextId++ then save(). Never derive the next id from items.length (it repeats after a removal) and never reset it on load; on load, nextId = max(saved nextId, max existing id + 1).'],
+    invariants: ['ids are numbers (strings when the contract says string ids)', 'nextId is part of the persisted file', 'a restarted process continues after the highest id ever issued'],
     failureModes: ['nextId resets to 1 on every start', 'nextId derived from items.length', 'nextId not saved so it is lost on restart'],
     staticChecks: [
+      { id: 'string-ids', describe: 'when the contract fixes string ids, ids are issued as strings and a path id is never converted to a number', run: (files, c) => !c.idString ? [] : sources(files).flatMap(([p, t]) => {
+        const out: RecipeFinding[] = []
+        const conv = /\b(?:Number|parseInt|parseFloat)\s*\(\s*[^)]*(?:pathname|\.split\(|params|match\s*\[|\bm\s*\[|\bid\b)/.exec(t)
+        if (conv && /server\.m?js$/.test(p)) out.push(find('MONOTONIC_IDS', 'string-ids', { criterion: c.persistence.criteria[0] ?? null, file: p, symbol: null, fact: `${p} converts an id taken from the URL with ${conv[0].slice(0, 60)}; the contract fixes STRING ids, so a lookup by that number never matches`, expected: 'keep the id from the URL as the string it is' }))
+        const numId = /\bid\s*:\s*(?:state\.|this\.|store\.)?\w*[nN]extId\s*\+\+/.exec(t)
+        if (numId) out.push(find('MONOTONIC_IDS', 'string-ids', { criterion: c.persistence.criteria[0] ?? null, file: p, symbol: null, fact: `${p} issues a numeric id (${numId[0]}); the contract fixes STRING ids`, expected: 'id: String(state.nextId++)' }))
+        return out
+      }) },
       { id: 'id-from-length', describe: 'ids are not derived from the collection length', run: (files, c) => sources(files).filter(([, t]) => /\bid\s*:\s*[\w.]+\.length\s*\+\s*1\b/.test(t)).map(([p]) => find('MONOTONIC_IDS', 'id-from-length', { criterion: c.persistence.criteria[0] ?? null, file: p, symbol: null, fact: `${p} issues ids as <collection>.length + 1, which repeats an id when the collection shrinks or is reloaded`, expected: 'a persisted nextId counter' })) },
     ],
     verificationChecks: ['create two, restart, create one: its id is greater than both'],

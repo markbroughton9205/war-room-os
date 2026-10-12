@@ -17,7 +17,7 @@ import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import ts from 'typescript'
-import { type ImplementationContract, type ContractRoute } from './implContract'
+import { type ImplementationContract, type ContractRoute, safeRelativePath } from './implContract'
 import { matchRecipes, runRecipeChecks, type Recipe, type RecipeFinding } from './recipes'
 import { undefinedNames, legacyStateDrift } from './staticGates'
 
@@ -94,11 +94,13 @@ export function staticPreflight(files: Record<string, string>, c: Implementation
 const freePort = () => new Promise<number>((resolve, reject) => { const s = net.createServer(); s.listen(0, '127.0.0.1', () => { const p = (s.address() as net.AddressInfo).port; s.close(() => resolve(p)) }); s.on('error', reject) })
 type Proc = { port: number; stop: () => Promise<void>; output: () => string; exited: () => boolean }
 async function startServer(dir: string, entry: string, env: Record<string, string>): Promise<Proc | { error: string }> {
+  if (!existsSync(dir)) return { error: `the working directory ${dir} does not exist; the server was not started` }
   const port = await freePort()
   let out = '', exited = false
   const child = spawn('node', [entry], { cwd: dir, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', PORT: String(port), NODE_ENV: 'test', ...env } as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] })
   child.stdout.on('data', (d) => { out = (out + d).slice(-3000) }); child.stderr.on('data', (d) => { out = (out + d).slice(-3000) })
   child.on('exit', () => { exited = true })
+  child.on('error', (e) => { exited = true; out = (out + `\nspawn error: ${String(e)}`).slice(-3000) })
   const stop = () => new Promise<void>((resolve) => { if (exited) return resolve(); child.once('exit', () => resolve()); child.kill('SIGTERM'); setTimeout(() => { if (!exited) child.kill('SIGKILL') }, 800) })
   const deadline = Date.now() + 5000
   while (Date.now() < deadline) {
@@ -165,9 +167,9 @@ export async function runtimePreflight(root: string, c: ImplementationContract, 
       const fo = obj(first.body)
       const okStatuses = successSet(create)
       if (okStatuses.length ? !okStatuses.includes(first.status) : first.status < 200 || first.status >= 300) add('ROUTE.create-status', create.criterion, `${create.method} ${create.path} with a valid body answered ${fmt(first)}`, `HTTP ${okStatuses.join(' or ') || '2xx'} with the created item`, entry, 'ROUTE_ORDER')
-      const idOk = (v: unknown) => (c.idNumeric ? typeof v === 'number' : typeof v === 'number' || (typeof v === 'string' && v !== ''))
+      const idOk = (v: unknown) => (c.idNumeric ? typeof v === 'number' : c.idString ? typeof v === 'string' && v !== '' : typeof v === 'number' || (typeof v === 'string' && v !== ''))
       if (fo && idOk(fo.id)) created.push(fo)
-      else if (first.status >= 200 && first.status < 300) add('ROUTE.create-id', create.criterion, `${create.method} ${create.path} answered ${fmt(first)}: the created item has no ${c.idNumeric ? 'numeric ' : ''}id`, `the created item with ${c.idNumeric ? 'a numeric ' : 'an '}id`, entry, 'MONOTONIC_IDS')
+      else if (first.status >= 200 && first.status < 300) add('ROUTE.create-id', create.criterion, `${create.method} ${create.path} answered ${fmt(first)}: the created item has no ${c.idNumeric ? 'numeric ' : c.idString ? 'string ' : ''}id (its id is ${JSON.stringify(fo?.id)})`, `the created item with ${c.idNumeric ? 'a numeric ' : c.idString ? 'a string ' : 'an '}id`, entry, 'MONOTONIC_IDS')
       if (!created.length) { skipped.push('runtime: the create route did not produce an item; the checks that depend on a record were skipped'); await a.stop(); return { findings, checked, skipped } }
       // defaults the contract states
       if (fo) for (const f of c.fields.filter((x) => x.default !== null)) if (f.name in fo ? String(fo[f.name]) !== f.default : true) add('FIELD.default', f.criterion, `the created item has ${f.name}=${JSON.stringify(fo[f.name])}; the contract requires the default ${f.default}`, `${f.name} defaults to ${f.default}`, entry, 'JSON_FILE_STORE')
@@ -320,8 +322,14 @@ export async function runtimePreflight(root: string, c: ImplementationContract, 
     if (c.persistence.required && c.persistence.defaultPath && create) {
       checked.push('runtime.default storage path')
       const d2 = copy()
-      for (const stale of [path.join(d2, c.persistence.defaultPath)]) rmSync(stale, { force: true })
-      const parent = path.dirname(path.join(d2, c.persistence.defaultPath)); rmSync(parent, { recursive: true, force: true })
+      // containment: the default path is removed only when it stays strictly inside the private copy, and the copy itself is never removed
+      const rel = safeRelativePath(c.persistence.defaultPath)
+      const target = rel ? path.join(d2, rel) : null
+      const inside = (t: string) => { const r = path.relative(d2, t); return !!r && !r.startsWith('..') && !path.isAbsolute(r) }
+      if (!target || !inside(target)) { skipped.push(`runtime: default storage path "${c.persistence.defaultPath}" is not a path inside the workspace; the default-path probe was not run`) }
+      else {
+      rmSync(target, { force: true })
+      const parent = path.dirname(target); if (parent !== d2 && inside(parent)) rmSync(parent, { recursive: true, force: true })
       const p2 = await startServer(d2, entry, {})
       if ('error' in p2) add('PERSISTENCE.default-boot', c.persistence.criteria[0] ?? null, `without ${c.persistence.envVar ?? 'a storage variable'} the server does not start: ${p2.error}`, 'the server starts with the default storage path', entry, 'JSON_FILE_STORE')
       else {
@@ -331,6 +339,7 @@ export async function runtimePreflight(root: string, c: ImplementationContract, 
         const file = path.join(d2, c.persistence.defaultPath)
         if (!existsSync(file)) add('PERSISTENCE.default-path', c.persistence.criteria[0] ?? null, `with no ${c.persistence.envVar ?? 'storage variable'}, a create (${fmt(r)}) did not produce ${c.persistence.defaultPath} under the working directory${/ENOENT/.test(p2.output()) ? ' (the server reported ENOENT: the folder does not exist)' : ''}`, `${c.persistence.defaultPath} is created, including its folder`, entry, 'JSON_FILE_STORE')
         await p2.stop()
+      }
       }
     }
   } catch (e) { skipped.push(`runtime: preflight aborted (${String(e).slice(0, 120)})`) } finally {
