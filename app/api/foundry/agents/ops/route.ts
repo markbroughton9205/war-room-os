@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { AgentOpsLog } from '@/lib/agents/ops/log'
 import { commanderActor, handleOpsControl, handleOpsRead } from '@/lib/agents/ops/api'
+import { buildPoolView } from '@/lib/agents/forge/poolView'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -11,7 +12,10 @@ export const maxDuration = 300
 export async function GET(req: Request) {
   const commander = await requireCommanderSession('Foundry')
   if (!commander.ok) return commander.response
-  const { status, body } = handleOpsRead(new URL(req.url), new AgentOpsLog(undefined, { readOnly: true }))
+  const url = new URL(req.url)
+  // read-only Local Specialist Pool view (asks the loopback runtime what is resident; loads nothing)
+  if (url.searchParams.get('section') === 'pool') return NextResponse.json({ generatedAt: new Date().toISOString(), data: await buildPoolView() })
+  const { status, body } = handleOpsRead(url, new AgentOpsLog(undefined, { readOnly: true }))
   return NextResponse.json(body, { status })
 }
 

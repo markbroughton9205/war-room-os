@@ -463,7 +463,7 @@ process.env.ENGINE_NODE_PARSE = '0'
     await new OllamaModelClient('m', undefined, '0').generate({ system: 's', prompt: 'p' })
   } finally { globalThis.fetch = realFetch }
   const e2e = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'e2eRealModel.ts'), 'utf8')
-  check('F106_the_builder_model_stays_loaded_while_helper_models_unload_right_after_use', seen.join() === '10m,0' && /const localClient = \(name: string\): ModelClient => \{ const c = new OllamaModelClient\(name, undefined, '0'\)/.test(e2e), seen.join())
+  check('F106_the_builder_model_stays_loaded_while_helper_models_unload_right_after_use', seen.join() === '10m,0' && /const localClient = \(name: string\): ModelClient => \{ const c: ModelClient = poolGov \? governedClientForRef\(poolGov, name, 'HELPER', 'TRANSIENT', '0', \[modelName\]\) : new OllamaModelClient\(name, undefined, '0'\)/.test(e2e), seen.join())
 }
 
 {
@@ -580,6 +580,11 @@ process.env.ENGINE_NODE_PARSE = '0'
   const rLazy = await runPreflight(mkApp(LAZY), ca)
   const rGood = await runPreflight(mkApp(GOOD), ca)
   check('F126_a_create_that_is_the_first_request_after_a_restart_is_caught_when_the_stored_data_is_only_loaded_lazily', LAZY !== GOOD && rLazy.findings.some((f) => f.check === 'PERSISTENCE.cold-create' && /first request after a restart/.test(f.fact)) && !rGood.findings.some((f) => f.check === 'PERSISTENCE.cold-create'), JSON.stringify(rLazy.findings.map((f) => f.check + ': ' + f.fact.slice(0, 120))))
+}
+
+{
+  const wf = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
+  check('F127_a_file_Foundry_generated_is_never_recorded_as_the_executor_and_its_traceability_names_the_generator', /if \(r\.executor\.provider !== 'foundry'\) executor = r\.executor/.test(wf) && /generated_by: tplan\?\.files\.find\(\(f\) => f\.path === file\)\?\.generated \? 'foundry:contract-test-generator'/.test(wf))
 }
 void deriveAssignments; void AgentOpsLog
 

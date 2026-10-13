@@ -171,7 +171,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const rescueFilesDone = new Set<string>()
   const rescueHeld = () => (rescueReleased ? { calls: 0, ms: 0 } : { calls: Math.max(0, rescue.reserved_calls - rescue.used_calls), ms: Math.max(0, rescue.reserved_time_ms - rescue.used_time_ms) })
   function traceability(): NonNullable<WorkflowResult['testTraceability']> {
-    return Object.entries(groundingByFile).flatMap(([file, gs]) => gs.map((g, i) => ({ test_id: `${file}#${i + 1}`, file, criterion_ids: g.criterion_id ? [g.criterion_id] : [], behavior: g.behavior, generated_by: g.source, reviewed_by: tplan ? ['foundry:deterministic-review', ...testReviews.filter((r) => r.file === file && r.reviewer !== 'foundry:deterministic-review').map((r) => r.reviewer)] : [], confidence: g.confidence })))
+    return Object.entries(groundingByFile).flatMap(([file, gs]) => gs.map((g, i) => ({ test_id: `${file}#${i + 1}`, file, criterion_ids: g.criterion_id ? [g.criterion_id] : [], behavior: g.behavior, generated_by: tplan?.files.find((f) => f.path === file)?.generated ? 'foundry:contract-test-generator' : g.source, reviewed_by: tplan ? ['foundry:deterministic-review', ...testReviews.filter((r) => r.file === file && r.reviewer !== 'foundry:deterministic-review').map((r) => r.reviewer)] : [], confidence: g.confidence })))
   }
   /** Deterministic status correction judges each assertion against the clause it proves: criteria that name several statuses are also offered as single-status clauses (contract-mode only; the whole criterion stays in the list, so an assertion that spans clauses is still refused). */
   const correctionList = tplan ? correctionAcceptance(req.acceptance) : { list: req.acceptance, parent: req.acceptance.map((_, i) => i) }
@@ -339,7 +339,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       note(kind, { call: callNo, attempt, outcome: 'RETRIED', waitedMs, detail: r.detail, purpose }); emit(kind === 'TIMEOUT' ? 'MODEL_TIMEOUT_RETRY' : 'MODEL_TRANSIENT_RETRY', `${purpose}: attempt ${attempt + 1} ${word} after ${Math.round(waitedMs / 1000)}s; retrying (${attempt + 1}/${MODEL_MAX_ATTEMPTS - 1})`)
     }
   }
-  const noteTokens = (r: ModelResult) => { if (r.ok) { executor = r.executor; tokens = tokens === 'UNKNOWN' || r.outputTokens === 'UNKNOWN' ? 'UNKNOWN' : tokens + r.outputTokens + (r.promptTokens === 'UNKNOWN' ? 0 : r.promptTokens); if (r.promptTokens === 'UNKNOWN') tokens = 'UNKNOWN' } }
+  const noteTokens = (r: ModelResult) => { if (r.ok) { if (r.executor.provider !== 'foundry') executor = r.executor; // a file Foundry generated from the contract is not a model call and must not become the recorded executor
+       tokens = tokens === 'UNKNOWN' || r.outputTokens === 'UNKNOWN' ? 'UNKNOWN' : tokens + r.outputTokens + (r.promptTokens === 'UNKNOWN' ? 0 : r.promptTokens); if (r.promptTokens === 'UNKNOWN') tokens = 'UNKNOWN' } }
   type Gate = { stop: WorkflowResult | null }
   const boundary = (): Gate => {
     const g = executionGate(log, assignmentId)

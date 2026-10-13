@@ -25,6 +25,9 @@ import { latestCheckpoint } from './continuity'
 import { deriveLedger, debugSummary } from './debugLedger'
 import { OllamaModelClient } from './runtime/ollamaModel'
 import { ForgeStore } from '@/lib/agents/forge/store'
+import { NodeRegistry } from '@/lib/agents/forge/node'
+import { ResidencyGovernor } from '@/lib/agents/forge/governor'
+import { governedClientForRef } from '@/lib/agents/forge/poolRuntime'
 import { gpuUsedMiB, ramUsedMiB } from '@/lib/agents/forge/profile'
 import { makeIndependentVerification } from './runtime/verifier'
 import { allLessons, lessonsFor, measureLessonEffect } from './lessons'
@@ -67,7 +70,9 @@ reg.transition(spec.id, 'APPROVED', C, 'acceptance bootstrap approval'); reg.tra
 const { assignment } = assign(log, { idempotencyKey: keyFor(FX.mission, 'feature_implementation', FX.feature.request), agentId: spec.id, parentMission: { id: FX.mission, title: FX.title }, taskClass: 'feature_implementation', capabilities: ['feature_implementation'], objective: FX.feature.request, expectedOutputs: ['working persistent sessions across storage, service, API and UI', 'passing tests'], completionConditions: ['independent verification passes', 'existing tests pass'], workspace: { id: 'chat-acceptance', root: wsRoot, kind: 'sandbox' }, tools: TOOLS, limits: { maxSteps: 40, maxRuntimeMs: Number(process.env.MAX_RUNTIME_MIN ?? 25) * 60_000, maxModelCalls: 60, maxRetries: Number(process.env.MAX_RETRIES ?? 5) }, dependencies: [] }, C)
 startAssignment(log, assignment.id, 'system:engineering-runner')
 
-const real = new OllamaModelClient(modelName)
+// SPECIALIST_POOL=1 (opt-in): every call of the builder and the helpers runs inside the node's residency governor (one generation at a time, helpers unload after use)
+const poolGov = process.env.SPECIALIST_POOL === '1' ? (() => { const r = new NodeRegistry().registerLocal(); return r.ok ? new ResidencyGovernor(r.node) : null })() : null
+const real: ModelClient = poolGov ? governedClientForRef(poolGov, modelName, 'BUILDER', 'RESIDENT', '10m', [modelName]) : new OllamaModelClient(modelName)
 const trace = path.join(outDir, `trace-${stamp}.jsonl`)
 const traced: ModelClient = {
   async generate(input): Promise<ModelResult> {
@@ -85,7 +90,7 @@ const escalation = escalationName ? { label: escalationName, model: ((): ModelCl
 //   TEST_WRITER_MODEL=<ollama model>        independent local test writer (builder != test writer); GROUND_TESTS=1 adds the contract-grounding reviewer
 //   TEST_CANDIDATE_MODELS=<m1,m2>           competing local test candidates, tried only after the first test file fails against the verified implementation
 //   FRONTIER_FAMILY=<claude|chatgpt|grok|gemini>  bounded outside assist; unavailable (reported, never faked) unless that provider is configured in this process
-const localClient = (name: string): ModelClient => { const c = new OllamaModelClient(name, undefined, '0'); return { async generate(input) { const t1 = Date.now(); const r = await c.generate(input); appendFileSync(trace, JSON.stringify({ at: new Date().toISOString(), ms: Date.now() - t1, model: name, promptChars: input.prompt.length, ok: r.ok, ...(r.ok ? { reply: r.text } : { detail: r.detail }) }) + '\n'); return r } } }
+const localClient = (name: string): ModelClient => { const c: ModelClient = poolGov ? governedClientForRef(poolGov, name, 'HELPER', 'TRANSIENT', '0', [modelName]) : new OllamaModelClient(name, undefined, '0'); return { async generate(input) { const t1 = Date.now(); const r = await c.generate(input); appendFileSync(trace, JSON.stringify({ at: new Date().toISOString(), ms: Date.now() - t1, model: name, promptChars: input.prompt.length, ok: r.ok, ...(r.ok ? { reply: r.text } : { detail: r.detail }) }) + '\n'); return r } } }
 const testWriter = process.env.TEST_WRITER_MODEL ? { label: process.env.TEST_WRITER_MODEL, model: localClient(process.env.TEST_WRITER_MODEL) } : undefined
 const testReviewer = process.env.TEST_REVIEWER_MODEL ? { label: process.env.TEST_REVIEWER_MODEL, model: localClient(process.env.TEST_REVIEWER_MODEL) } : undefined
 const testCandidates = (process.env.TEST_CANDIDATE_MODELS ?? '').split(',').map((x) => x.trim()).filter(Boolean).map((label) => ({ label, model: localClient(label) }))
@@ -119,6 +124,7 @@ const report = {
   independentVerificationNow: { exitCode: finalVerify.exitCode, summary: finalVerify.stdout.split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ') },
   checkpoint: latestCheckpoint(log, assignment.id)?.state.steps.map((s) => `${s.id} ${s.status} ${s.files[0] ?? ''}${s.note ? ' — ' + s.note : ''}`),
   lessons: { storeDir: lessonStoreDir ?? null, retrievedIds: lessonIds, retrievedTexts: lessonTexts, effect: lessonEffect },
+  specialistPool: poolGov ? { enabled: true, node: poolGov.node.id, decisions: poolGov.decisions() } : { enabled: false },
   eventCounts: evCount,
   debug: debugSummary(log, assignment.id), ledgerFailures: deriveLedger(log, assignment.id).failures.size,
 }
