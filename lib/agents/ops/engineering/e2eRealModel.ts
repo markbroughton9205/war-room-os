@@ -28,6 +28,9 @@ import { ForgeStore } from '@/lib/agents/forge/store'
 import { NodeRegistry } from '@/lib/agents/forge/node'
 import { ResidencyGovernor } from '@/lib/agents/forge/governor'
 import { governedClientForRef } from '@/lib/agents/forge/poolRuntime'
+import { probeLocalNode } from '@/lib/agents/forge/localNode'
+import { shadowDecisions } from '@/lib/agents/forge/computeShadow'
+import { FIRST_POOL } from '@/lib/agents/forge/registry'
 import { gpuUsedMiB, ramUsedMiB } from '@/lib/agents/forge/profile'
 import { makeIndependentVerification } from './runtime/verifier'
 import { allLessons, lessonsFor, measureLessonEffect } from './lessons'
@@ -72,6 +75,14 @@ startAssignment(log, assignment.id, 'system:engineering-runner')
 
 // SPECIALIST_POOL=1 (opt-in): every call of the builder and the helpers runs inside the node's residency governor (one generation at a time, helpers unload after use)
 const poolGov = process.env.SPECIALIST_POOL === '1' ? (() => { const r = new NodeRegistry().registerLocal(); return r.ok ? new ResidencyGovernor(r.node) : null })() : null
+// FOUNDRY_COMPUTE=1 (opt-in, SHADOW ONLY): the compute scheduler says what it would place for the roles this run uses; the harness still runs its own models.
+const computeShadow = process.env.FOUNDRY_COMPUTE === '1' ? await (async () => {
+  try {
+    const store = new ForgeStore(); const probe = await probeLocalNode(); const models = store.models().length ? store.models() : FIRST_POOL
+    const harness = [{ role: 'PRIMARY_BUILDER' as const, modelRef: modelName }, ...(process.env.TEST_REVIEWER_MODEL ? [{ role: 'ARCHITECT_REVIEWER' as const, modelRef: process.env.TEST_REVIEWER_MODEL }] : []), ...(process.env.TEST_WRITER_MODEL ? [{ role: 'DEBUGGER_TEST_SPECIALIST' as const, modelRef: process.env.TEST_WRITER_MODEL }] : [])]
+    return { enabled: true, mode: 'SHADOW', node: probe.record.nodeId, decisions: shadowDecisions({ node: probe.record, models, benchmarks: store.benchmarks(), profiles: store.resourceProfiles(), harness }) }
+  } catch (e) { return { enabled: true, mode: 'SHADOW', error: e instanceof Error ? e.message : String(e), decisions: [] } }
+})() : { enabled: false }
 const real: ModelClient = poolGov ? governedClientForRef(poolGov, modelName, 'BUILDER', 'RESIDENT', '10m', [modelName]) : new OllamaModelClient(modelName)
 const trace = path.join(outDir, `trace-${stamp}.jsonl`)
 const traced: ModelClient = {
@@ -124,6 +135,7 @@ const report = {
   independentVerificationNow: { exitCode: finalVerify.exitCode, summary: finalVerify.stdout.split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ') },
   checkpoint: latestCheckpoint(log, assignment.id)?.state.steps.map((s) => `${s.id} ${s.status} ${s.files[0] ?? ''}${s.note ? ' — ' + s.note : ''}`),
   lessons: { storeDir: lessonStoreDir ?? null, retrievedIds: lessonIds, retrievedTexts: lessonTexts, effect: lessonEffect },
+  compute: computeShadow,
   specialistPool: poolGov ? { enabled: true, node: poolGov.node.id, decisions: poolGov.decisions() } : { enabled: false },
   eventCounts: evCount,
   debug: debugSummary(log, assignment.id), ledgerFailures: deriveLedger(log, assignment.id).failures.size,

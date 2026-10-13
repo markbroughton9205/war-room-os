@@ -3,6 +3,7 @@ import { requireCommanderSession } from '@/lib/security/commanderSession'
 import { AgentOpsLog } from '@/lib/agents/ops/log'
 import { commanderActor, handleOpsControl, handleOpsRead } from '@/lib/agents/ops/api'
 import { buildPoolView } from '@/lib/agents/forge/poolView'
+import { buildComputeView } from '@/lib/agents/forge/computeView'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -14,6 +15,7 @@ export async function GET(req: Request) {
   if (!commander.ok) return commander.response
   const url = new URL(req.url)
   // read-only Local Specialist Pool view (asks the loopback runtime what is resident; loads nothing)
+  if (url.searchParams.get('section') === 'compute') return NextResponse.json({ generatedAt: new Date().toISOString(), data: await buildComputeView() })
   if (url.searchParams.get('section') === 'pool') return NextResponse.json({ generatedAt: new Date().toISOString(), data: await buildPoolView() })
   const { status, body } = handleOpsRead(url, new AgentOpsLog(undefined, { readOnly: true }))
   return NextResponse.json(body, { status })

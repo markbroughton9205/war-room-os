@@ -1,6 +1,6 @@
 # Foundry distributed compute architecture: plan (stage 0, pre-implementation)
 
-Status: PLAN; stage 1 (schemas, pure logic, simulated nodes, validators) is implemented and opt-in, see `lib/agents/forge/compute.validation.ts` (101 checks). Stages 2-6 are not. Governor per-GPU concurrency was deferred to stage 2 (no runtime change in stage 1). No model has been downloaded, the canonical launcher is unchanged.
+Status: PLAN; stage 1 (schemas, pure logic, simulated nodes, validators) is implemented and opt-in, see `lib/agents/forge/compute.validation.ts` (101 checks). Stage 2 (local node probe, measured profiles of the installed models, `section=compute` view, shadow scheduling in the harness) is implemented and opt-in, see section 17. Stages 3-6 are not. Per-GPU concurrency needed no governor change: the node record's `concurrency` is the GPU count (1 on Nebula) and the governor already serializes per node. No model has been downloaded, the canonical launcher is unchanged.
 Baseline that must stay intact: Foundry engine `d79a3037` (tree `9eb34b32d578`), gold round 10 + confirmation 18/18 CLEAN_LOCAL_ONLY. See `docs/phases/PHASE_10_FINAL_RECEIPT.md`.
 Builds on: `docs/phases/LOCAL_SPECIALIST_POOL.md` (pool, governor, rack seam).
 
@@ -51,7 +51,7 @@ A role is a job class with its own pass criteria, not a model property. A model 
 ## 4. Candidate evaluation (metadata only; sizes from Ollama library pages, nothing downloaded)
 | Role | Candidate | Quant / size | Ctx | Fit on Nebula (16 GB VRAM, ~20 GB free RAM) | Notes / risk |
 |---|---|---|---|---|---|
-| PRIMARY_BUILDER | Devstral Small 2 24B (installed, proven) | q4_K_M, 14 GB | 8192 used | FULL_GPU (measured) | Baseline. 18/18 on d79a3037. Must not be displaced. |
+| PRIMARY_BUILDER | Devstral Small 2 24B (installed, proven) | q4_K_M, 14 GB | 8192 used | PARTIAL_OFFLOAD (measured stage 2: 12.3 GB VRAM + 2.9 GB RAM, ~13 tok/s; an earlier draft of this table said FULL_GPU, which was wrong) | Baseline. 18/18 on d79a3037. Must not be displaced. |
 | PRIMARY_BUILDER / ARCHITECT | Qwen3-Coder-30B-A3B (`qwen3-coder:30b`) | q4_K_M, 19 GB | 256K | Does not fit VRAM alone; MoE 3B active so PARTIAL_OFFLOAD may still be usable, speed UNMEASURED | Ollama page does not say "Instruct"; verify the tag is the instruct build after pull. 19 GB + KV cache competes for RAM with swap nearly full. |
 | DEBUGGER / ARCHITECT alt | DeepSeek-Coder-V2-Lite-Instruct 16B (`deepseek-coder-v2:16b-lite-instruct-q4_K_M`) | 10 GB | 4K on this tag | FULL_GPU alone | 4K context limits it to small prompts; MoE (≈2.4B active) so fast. Older generation: expect weaker on structured edits. |
 | FAST_REPAIR_WORKER | Qwen2.5-Coder 7B (`qwen2.5-coder:7b`) | q4_K_M, 4.7 GB (q8_0 8.1 GB) | 32K | FULL_GPU, can co-reside with nothing else comfortably next to the 14 GB builder | Cheap pre-repair of trivial structural errors only. |
@@ -214,3 +214,15 @@ Not changed: engine files under `lib/agents/ops/engineering` (the workflow only 
 - `pool.ts`: roles are a closed union; the mapping layer avoids touching it.
 - `types.ts`: `BenchmarkRecord` lacks `role`/`nodeId`; both are optional additions.
 - Open questions flagged, not assumed: Qwen3-Coder tag is instruct; Ollama rerank support; usable tokens/s of the 30B MoE under partial offload; real PCIe link speed under load; whether swap exhaustion forbids the 30B on Nebula without freeing memory.
+
+## 17. Stage 2 results (2026-10-13, evidence `p10-evidence/compute-stage2/`)
+Measured on Nebula with nothing else resident (desktop holds ~2.3 GB VRAM), 8K context, one 160-token generation each, loaded and unloaded in turn:
+| Model | Quant | Residency | VRAM | RAM share | Load | Speed |
+|---|---|---|---|---|---|---|
+| Devstral Small 2 24B (builder) | Q4_K_M | PARTIAL_OFFLOAD | 12329 MiB | 2912 MiB | 17.3 s | 13.3 tok/s |
+| devstral-abliterated 24B | Q4_K_M | PARTIAL_OFFLOAD | 11956 MiB | 3285 MiB | 14.0 s | 11.8 tok/s |
+| qwen3-abliterated 14B | Q4_K_M | FULL_GPU | 9722 MiB | n/a | 11.3 s | 43.5 tok/s |
+| qwen2.5-coder 14B | Q4_K_M | FULL_GPU | 9803 MiB | n/a | 6.9 s | 42.5 tok/s |
+Consequences: the builder never fits wholly in VRAM here, so any larger model (Qwen3-Coder-30B, 19 GB) will offload more and its speed must be measured before it is considered; the 14B-class models are ~3x faster than the builder, which makes them the realistic fast helpers; any helper next to the builder forces an eviction on Nebula (12.3 + 9.7 GB > 16 GB), so the "builder stays resident" rule only pays off when helpers run on a second node.
+Live mission with `FOUNDRY_COMPUTE=1 SPECIALIST_POOL=1 FIRST_PASS=1 CONTRACT_TESTS=1` (chat fixture): CLEAN, verifier 12/12, 465 s, 9 governed calls. The shadow scheduler had no evidence in the fresh evidence store at mission start, so it correctly reported PRIMARY_BUILDER not placeable; replayed against the store after the run (1 clean run) it places the same builder on `local` as provisional evidence only, and the strict view still says not qualified (9 runs required). The harness path was not altered by the flag.
+Not done in stage 2: qualification of any role (needs the benchmark matrix and, for most roles, downloads), rack scheduling, real remote nodes.

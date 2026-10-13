@@ -15,6 +15,11 @@ import { SimNode, simRecord, SIM_EXECUTOR } from './simNode'
 import { runWithFailover, schedule, type PlacementOk, type World } from './scheduler'
 import { ForgeStore } from './store'
 import type { BenchmarkRecord, ModelEntry, ResourceProfile } from './types'
+import { readFileSync } from 'node:fs'
+import { probeLocalNode, type LocalProbeDeps } from './localNode'
+import { buildComputeView } from './computeView'
+import { computeViewModel } from './computeViewModel'
+import { shadowDecisions } from './computeShadow'
 
 let fails = 0
 const check = (n: string, ok: boolean, d = '') => { console.log(`${ok ? 'PASS' : 'FAIL'} ${n}${ok ? '' : ' ' + d}`); if (!ok) fails++ }
@@ -284,6 +289,62 @@ const makeDispatch = (rigs: Record<string, ReturnType<typeof mkRack>>, guard = n
   check('S39_a_private_key_in_a_node_record_is_refused', (() => { try { s.recordNode({ ...local, nodeId: 'leak', hostname: rackKey.privateKeyPem }); return false } catch { return true } })())
 }
 check('S40_legacy_assign_pool_is_unchanged_by_the_compute_modules', (() => { const a = assignPool(FIRST_POOL, []); return a.members.length === 5 && a.members[0].role === 'BUILDER' && a.members[0].modelRef === null && a.members[4].role === 'ESCALATION' })())
+
+
+// ------------------------------------------------------------------ stage 2: local node probe, view, shadow
+const calls: string[] = []
+const fakeFetch = (up: boolean): typeof fetch => (async (u: string | URL | Request, init?: RequestInit) => {
+  const url = String(u); calls.push(`${init?.method ?? 'GET'} ${url.replace('http://127.0.0.1:11434', '')}`)
+  if (!up) throw new Error('ECONNREFUSED')
+  if (url.endsWith('/api/tags')) return new Response(JSON.stringify({ models: [{ name: BUILD.ref, size: 14 * GiB, digest: 'abc', details: { quantization_level: 'Q4_K_M' } }, { name: REVIEW.ref, size: 9 * GiB, digest: 'def' }, { name: 'bad', digest: 'x' }] }))
+  if (url.endsWith('/api/ps')) return new Response(JSON.stringify({ models: [{ name: BUILD.ref, size: 15 * GiB, size_vram: 13 * GiB }] }))
+  if (url.endsWith('/api/version')) return new Response(JSON.stringify({ version: '0.34.2' }))
+  return new Response('', { status: 404 })
+}) as typeof fetch
+const pdeps = (up: boolean): LocalProbeDeps => ({ fetchImpl: fakeFetch(up), now: () => NOW, gpus: () => [{ model: 'RTX 5060 Ti', vramMiB: 16311, usedMiB: 2334, utilPct: 3 }], ram: () => ({ totalMiB: 30945, usedMiB: 11000 }), cpu: () => ({ model: 'x', cores: 8, threads: 16 }), disk: () => ({ totalBytes: 900 * GiB, freeBytes: 600 * GiB }), networkMbps: () => 100, hostname: () => 'nebula' })
+{
+  const up = await probeLocalNode({ deps: pdeps(true) })
+  check('T01_the_local_node_record_is_measured_from_the_machine_and_the_runtime', up.reachable && up.record.kind === 'LOCAL' && up.record.identity === null && up.record.gpu[0].vramMiB === 16311 && up.record.ramMiB === 30945 && up.record.load.vramUsedMiB === 2334 && up.record.installedModels.length === 2 && up.record.installedModels[0].digest === 'sha256:abc' && up.runtimeVersion === '0.34.2' && up.record.networkMbps === 100)
+  check('T02_models_without_a_size_are_not_invented_and_quantization_is_kept', !up.record.installedModels.some((m) => m.ref === 'bad') && up.quantizations[BUILD.ref] === 'Q4_K_M' && !(REVIEW.ref in up.quantizations))
+  check('T03_resident_models_come_from_the_runtime_with_measured_vram', up.record.resident[0]?.ref === BUILD.ref && up.record.resident[0].vramBytes === 13 * GiB && nodeHealth(up.record, NOW) === 'HEALTHY')
+  check('T04_probing_only_reads_never_posts', calls.every((c) => c.startsWith('GET ')) && calls.length === 3, calls.join())
+  const down = await probeLocalNode({ deps: pdeps(false) })
+  check('T05_an_unreachable_runtime_makes_the_node_unreachable_not_healthy', !down.reachable && nodeHealth(down.record, NOW) === 'UNREACHABLE' && down.record.installedModels.length === 0 && down.record.capabilities.runtimes.length === 0)
+  const sched = schedule({ jobId: 'x', role: 'PRIMARY_BUILDER' }, world({ nodes: [down.record] }))
+  check('T06_nothing_is_placed_on_an_unreachable_local_node', !sched.ok && sched.rejected.some((r) => r.code === 'NODE_UNHEALTHY'))
+  check('T07_the_probe_refuses_a_non_loopback_runtime_address', await probeLocalNode({ base: 'http://192.168.1.9:11434', deps: pdeps(true) }).then(() => false, () => true))
+}
+{
+  const dir = mkdtempSync(path.join(tmpdir(), 'compute-view-'))
+  const st = new ForgeStore(dir)
+  const view0 = await buildComputeView({ store: st, deps: pdeps(true), now: NOW })
+  const vm0 = computeViewModel(view0)
+  check('T08_with_no_evidence_every_role_is_not_placeable_and_says_so', view0.roles.length === 8 && view0.roles.every((r) => !r.placement.ok) && vm0.roles.every((r) => /not placeable/.test(r.title) && /no model has benchmark evidence|no model is qualified/.test(r.detail)))
+  check('T09_the_view_notes_say_estimates_and_declared_pool_when_nothing_is_stored', view0.notes.some((n) => /no resource profiles/.test(n)) && view0.notes.some((n) => /declared first pool/.test(n)))
+  for (const m of MODELS) st.registerModel(m)
+  for (const b of evidence) st.recordBenchmark(b)
+  st.recordResourceProfile(prof)
+  const rack = mkRack('r1').rec; st.recordNode(rack)
+  const view1 = await buildComputeView({ store: st, deps: pdeps(true), now: NOW })
+  const vm1 = computeViewModel(view1)
+  const pb = view1.roles.find((r) => r.role === 'PRIMARY_BUILDER')!.placement
+  check('T10_with_evidence_the_view_shows_a_would_place_decision_on_the_local_node', pb.ok && pb.nodeId === 'local' && /placeable|local/.test(vm1.roles[0].title))
+  check('T11_stored_rack_nodes_are_listed_labelled_simulated_and_receive_no_work', vm1.nodes.some((n) => /r1 \(rack, SIMULATED\)/.test(n.title)) && view1.roles.every((r) => !r.placement.ok || r.placement.nodeId === 'local') && view1.notes.some((n) => /not enabled/.test(n)))
+  check('T12_measured_profiles_are_shown_with_their_basis', vm1.profiles.length === 1 && /full gpu \(measured\)/.test(vm1.profiles[0].detail) && /13312 MiB/.test(vm1.profiles[0].detail))
+}
+{
+  const up = await probeLocalNode({ deps: pdeps(true) })
+  const sh = shadowDecisions({ node: up.record, models: MODELS, benchmarks: [...many(BUILD.ref, 'PRIMARY_BUILDER', 2)], profiles: [], harness: [{ role: 'PRIMARY_BUILDER', modelRef: BUILD.ref }, { role: 'ARCHITECT_REVIEWER', modelRef: REVIEW.ref }, { role: 'FAST_REPAIR_WORKER', modelRef: null }], now: NOW })
+  check('T13_shadow_agrees_with_the_harness_builder_using_provisional_evidence', sh[0].placement.ok && sh[0].agrees === true && /agrees/.test(sh[0].note))
+  check('T14_shadow_reports_disagreement_and_unplaceable_roles_instead_of_hiding_them', sh[1].agrees === null || sh[1].agrees === false ? !sh[1].placement.ok && /would not place/.test(sh[1].note) : false)
+  check('T15_shadow_without_a_harness_model_is_not_an_agreement', sh[2].agrees === null)
+}
+{
+  const src = readFileSync(path.join(process.cwd(), 'lib/agents/ops/engineering/e2eRealModel.ts'), 'utf8')
+  check('T16_the_harness_shadow_is_opt_in_and_never_replaces_the_builder_client', /process\.env\.FOUNDRY_COMPUTE === '1'/.test(src) && /mode: 'SHADOW'/.test(src) && /const real: ModelClient = poolGov \?/.test(src) && /compute: computeShadow/.test(src))
+  const route = readFileSync(path.join(process.cwd(), 'app/api/foundry/agents/ops/route.ts'), 'utf8')
+  check('T17_the_compute_section_is_behind_the_same_route_guard_as_pool', /section'\) === 'compute'/.test(route) && route.indexOf("=== 'compute'") > route.indexOf('export async function GET'))
+}
 
 console.log(`FORGE_COMPUTE_VALIDATION ${fails ? 'FAIL (' + fails + ')' : 'PASS'}`)
 process.exit(fails ? 1 : 0)
