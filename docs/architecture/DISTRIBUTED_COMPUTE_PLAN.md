@@ -1,6 +1,6 @@
 # Foundry distributed compute architecture: plan (stage 0, pre-implementation)
 
-Status: PLAN. Nothing in this document is implemented, no model has been downloaded, the canonical launcher is unchanged.
+Status: PLAN; stage 1 (schemas, pure logic, simulated nodes, validators) is implemented and opt-in, see `lib/agents/forge/compute.validation.ts` (101 checks). Stages 2-6 are not. Governor per-GPU concurrency was deferred to stage 2 (no runtime change in stage 1). No model has been downloaded, the canonical launcher is unchanged.
 Baseline that must stay intact: Foundry engine `d79a3037` (tree `9eb34b32d578`), gold round 10 + confirmation 18/18 CLEAN_LOCAL_ONLY. See `docs/phases/PHASE_10_FINAL_RECEIPT.md`.
 Builds on: `docs/phases/LOCAL_SPECIALIST_POOL.md` (pool, governor, rack seam).
 
