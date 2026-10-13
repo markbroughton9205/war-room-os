@@ -602,7 +602,10 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const contractClauses = (() => { const c = criteriaForFailures(out, req.acceptance); return c.length ? `\nTHE ACCEPTANCE CONTRACT SAYS (this is the authoritative expectation for the failing check; the check output shows only what was observed): ${c.map((x) => `"${x}"`).join(' | ')}` : '' })()
       for (const file of targets.slice(0, 2)) {
         const keepR = keepExportsFor(file)
-        const modeR = chooseMode(true, ws.read(file).split('\n').length, keepR)
+        // a model-written contract test file is repaired by edits (a few lines), not regenerated whole: a whole-file rewrite of 1500 tokens cost ~160 s per attempt and ate the run budget (gold-next-final alert 2);
+        // a reply that is not a usable edit still falls back to one whole-file rewrite below
+        const modelTestFile = !!tplan && tplan.files.some((f) => f.path === file && !f.generated)
+        const modeR = modelTestFile && ws.read(file).split('\n').length >= 40 ? 'edits' : chooseMode(true, ws.read(file).split('\n').length, keepR)
         const relatedN = depth === 1 ? 5 : 3, relatedCap = depth === 1 ? 9000 : 3000
         const related = [...cand.filter((c) => c !== file).map((c) => ({ path: c, text: ws.read(c) })), ...relatedFor(file, [...changed])].filter((r, i, a) => a.findIndex((x) => x.path === r.path) === i).slice(0, relatedN)
         const mk = (extra: string, mode: 'edits' | 'rewrite') => repairPrompt({ failureOutput: out, hypothesis: `${hypText}${contractClauses}${targets.length > 1 ? `\n(This fix spans ${targets.join(' and ')}; you are editing ${file} now${written.length ? `; already changed: ${written.join(', ')}` : ''}.)` : ''}${extra}`, file, current: ws.read(file), related, request: req.request, lessons: deps.lessons?.({ plan, request: req.request }) ?? [], mode, evidence: evidenceText, relatedCap, ...(fpOn && fpContract && !confine ? { firstPass: { contractText: renderContract(fpContract, 1300), recipeText: renderRecipes(fpContract, fpRecipes, state.steps.find((x) => x.files[0] === file)?.layer ?? 'domain', 1400, { path: file, text: ws.exists(file) ? ws.read(file) : '' }) } } : {}) })

@@ -586,6 +586,11 @@ process.env.ENGINE_NODE_PARSE = '0'
   const wf = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
   check('F127_a_file_Foundry_generated_is_never_recorded_as_the_executor_and_its_traceability_names_the_generator', /if \(r\.executor\.provider !== 'foundry'\) executor = r\.executor/.test(wf) && /generated_by: tplan\?\.files\.find\(\(f\) => f\.path === file\)\?\.generated \? 'foundry:contract-test-generator'/.test(wf))
 }
+
+{
+  const wf3 = readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'workflow.ts'), 'utf8')
+  check('F128_a_model_written_contract_test_file_is_repaired_by_edits_with_the_whole_file_rewrite_kept_as_the_fallback', /const modelTestFile = !!tplan && tplan\.files\.some\(\(f\) => f\.path === file && !f\.generated\)/.test(wf3) && /const modeR = modelTestFile && ws\.read\(file\)\.split\('\\n'\)\.length >= 40 \? 'edits' : chooseMode/.test(wf3) && /const rr2 = await call\(ENGINEER_REWRITE_SYSTEM/.test(wf3))
+}
 void deriveAssignments; void AgentOpsLog
 
 finish()
