@@ -60,3 +60,9 @@ The completion standard is 9/9 CLEAN_LOCAL_ONLY (chat x3, task x3, alert x3), th
 - Gold round 1 (01d2b639) 6/9, round 2 (dd215403) 8/9, round 3 (5a43796c) 7/9, round 4 (e24290f7) 6/9 (diagnostic only: source files were edited while it ran, though no run loaded them).
 - Causes found and fixed (each with a regression test, validate:agent-eng-firstpass): string ids inherited from the existing code (chat), edit result that does not parse falls back to a whole-file reply, routes written as string RegExp, list-filter tests generated from the contract, helper models unload after use, streamed generation with runaway-loop detection and a changed retry, content type passed to readFileSync as its encoding (3 of the 3 round-4 failures).
 - Known limits: generated code runs with the user's privileges and no OS-level isolation (same posture as the existing test runner); the assignment runtime ceiling is 30 minutes.
+
+## Phase 10 closure (2026-10-13)
+- 9/9 standard met on engine `d79a303707f1`: gold round 10 and the identical confirmation round were both 9/9 CLEAN_LOCAL_ONLY (18 of 18), frozen SHA and tree, clean tree, no mid-round edits. Two earlier SHAs reached 9/9 and failed confirmation (8/9) and were fixed.
+- Versioned installed runtime `war-room-os-0.2.0-d79a3037-phase10-gold`: sandbox enabled (`chrome-sandbox` root:root 4755), installed acceptance with stated limitations, mission-store hashes unchanged, canonical launcher not repointed.
+- Independent reviews: e842da06 REVIEW_FAIL (two blockers, fixed); d79a3037 and the installed evidence PHASE10_REVIEW_PASS_WITH_LIMITATIONS (no HIGH).
+- Full receipt, limitations and landing plan: `docs/phases/PHASE_10_FINAL_RECEIPT.md`. The engine runs through the CLI harness; the installed app is the control plane.
