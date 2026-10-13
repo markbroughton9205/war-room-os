@@ -395,6 +395,23 @@ export class LocalOwnershipStore {
     return { ok: true, auth, first_run }
   }
 
+  /**
+   * Pure, read-only liveness probe by session id (NO last_seen_at write, no token involved): true only while the session row exists,
+   * is not revoked, has not expired, belongs to this installation and its owner is still the Commander identity. Used by the
+   * blueprint auth bridge to detect revocation between a gate check and a later consequential step.
+   */
+  sessionIsLive(sessionId: string): boolean {
+    if (typeof sessionId !== 'string' || !/^lses_[a-f0-9]{32}$/.test(sessionId)) return false
+    const row = this.db
+      .prepare('SELECT owner_local_identity_id, installation_id, expires_at, revoked_at FROM local_session WHERE session_id = ?')
+      .get(sessionId) as { owner_local_identity_id: string; installation_id: string; expires_at: string; revoked_at: string | null } | undefined
+    if (!row || row.revoked_at) return false
+    if (new Date(row.expires_at).getTime() <= Date.now()) return false
+    if (row.installation_id !== this.getInstallationId()) return false
+    const identity = this.getCommanderPublic()
+    return !!identity && identity.id === row.owner_local_identity_id
+  }
+
   /** Always mints a fresh session id + token — never accepts client-supplied session ids. */
   issueSession(ownerId: string, installationId: string): LocalAuthSession {
     const token = newHighEntropyToken(32)

@@ -68,7 +68,7 @@ const strip = (t: string) => t.replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')
   const importers = execFileSync('grep', ['-rl', '--include=*.ts', '--include=*.tsx', '--exclude-dir=node_modules', '--exclude-dir=.next', '--exclude-dir=.war-room', '@/lib/agents/ops', 'app', 'lib', 'components', 'scripts', 'instrumentation.ts'], { encoding: 'utf8' }).split('\n').filter((f) => f && !f.startsWith('lib/agents/ops/')).sort()
   const forge = importers.filter((f) => f.startsWith('lib/agents/forge/'))
   const rest = importers.filter((f) => !f.startsWith('lib/agents/forge/'))
-  check('G09_only_sanctioned_dependents', rest.join() === ['app/api/foundry/agents/ops/route.ts', 'components/war-room/foundry/FoundryAgentOpsPanel.tsx', 'instrumentation.ts'].join(), importers.join(','))
+  check('G09_only_sanctioned_dependents', rest.join() === ['app/api/foundry/agents/ops/route.ts', 'components/war-room/foundry/FoundryAgentOpsPanel.tsx', 'instrumentation.ts', 'lib/native-builder/blueprint/blueprint.live.validation.ts', 'lib/native-builder/blueprint/liveMissions.ts', 'lib/native-builder/blueprint/testkit.ts'].join(), importers.join(','))
   // Model Forge is a sanctioned Foundry sibling (same data dir); its only network access is the loopback model endpoint
   const forgeNet = readdirSync('lib/agents/forge').filter((f) => f.endsWith('.ts') && !f.endsWith('.validation.ts')).map((f) => path.join('lib/agents/forge', f)).filter((f) => /\bfetch\(/.test(strip(src(f))))
   check('G10b_forge_network_use_is_loopback_only_and_forge_has_no_external_provider_imports', forgeNet.every((f) => /loopbackBaseUrl/.test(src(f))) && forge.every((f) => !/@\/lib\/(model-router|council|payments|deploy|security)\b/.test(src(f))) && forge.length > 0, forgeNet.join(','))

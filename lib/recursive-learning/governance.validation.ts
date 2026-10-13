@@ -86,7 +86,7 @@ const importers = execFileSync('grep', ['-rl', '--include=*.ts', '--include=*.ts
 const agentImporters = importers.filter((f) => f.startsWith('lib/agents/'))
 const outsideAgents = importers.filter((f) => !f.startsWith('lib/agents/'))
 const agentMisuse = agentImporters.filter((f) => !/validation\.ts$|testkit\.ts$/.test(f) && !['lib/agents/forge/phase9.ts', 'lib/agents/ops/builtinWorkers.ts'].includes(f) && /@\/lib\/recursive-learning\/(?!ingestion\/redact['"])/.test(readFileSync(f, 'utf8')))
-check('N09_only_sanctioned_outside_dependents', outsideAgents.join() === ['app/api/foundry/learning/route.ts', 'components/war-room/foundry/FoundryLearningPanel.tsx', 'lib/native-builder/foundryMissionStore.ts'].join() && agentMisuse.length === 0, importers.join(',') + ' misuse=' + agentMisuse.join(','))
+check('N09_only_sanctioned_outside_dependents', outsideAgents.join() === ['app/api/foundry/learning/route.ts', 'components/war-room/foundry/FoundryLearningPanel.tsx', 'lib/native-builder/blueprint/blueprint.live.validation.ts', 'lib/native-builder/blueprint/livePhase9.ts', 'lib/native-builder/foundryMissionStore.ts'].join() && agentMisuse.length === 0, importers.join(',') + ' misuse=' + agentMisuse.join(','))
 const forbiddenImports = prod.filter((f) => /from '@\/lib\/(native-builder|model-router|council|council-routing|payments|deploy|security)\b/.test(readFileSync(f, 'utf8')))
 const netOrSpend = prod.filter((f) => /\b(fetch\(|https?:\/\/|XMLHttpRequest|child_process|node:https?|node:net)/i.test(readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$/gm, '')))
 check('N10_layer_cannot_reach_routing_deploy_payments_network', forbiddenImports.length === 0 && netOrSpend.length === 0, `imports=${forbiddenImports.join(',')} net=${netOrSpend.join(',')}`)
