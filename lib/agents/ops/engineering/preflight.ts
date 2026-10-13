@@ -273,6 +273,23 @@ export async function runtimePreflight(root: string, c: ImplementationContract, 
             if (typeof nid === 'number' && nums.length === idsBefore.length && nid <= maxBefore) add('PERSISTENCE.ids-advance', c.persistence.criteria[0] ?? null, `after the restart a new item got id ${nid}, but ids up to ${maxBefore} were already issued`, 'ids keep increasing and are never reused', entry, 'MONOTONIC_IDS')
           }
           await b.stop()
+          // a COLD create: the first request after a restart creates (nothing lists the data first). Code that loads its stored data lazily, only when it is listed or changed,
+          // starts counting from 1 again here and overwrites what is stored.
+          if (idsBefore.length && !lost.length) {
+            const cold = await startServer(dir, entry, env)
+            if (!('error' in cold)) {
+              procs.push(cold)
+              const fresh = await http(cold, 'POST', create.sample, bodyFor())
+              const nid = obj(fresh.body)?.id
+              const listed = await http(cold, 'GET', list.path)
+              const idsNow = Array.isArray(listed.body) ? (listed.body as Record<string, unknown>[]).map((i) => i.id).filter((i): i is number | string => idOk(i)) : []
+              const numsBefore = idsBefore.filter((i): i is number => typeof i === 'number')
+              const reused = idsBefore.includes(nid as number | string) || (typeof nid === 'number' && numsBefore.length === idsBefore.length && nid <= Math.max(...numsBefore, 0))
+              const erased = idsBefore.filter((i) => !idsNow.includes(i))
+              if (fresh.status >= 200 && fresh.status < 300 && (reused || erased.length)) add('PERSISTENCE.cold-create', c.persistence.criteria[0] ?? null, `the first request after a restart was a create (${fmt(fresh)}) ${reused ? `and it got id ${String(nid)}, an id already issued before the restart` : 'and afterwards'}${erased.length ? ` the stored item(s) ${erased.slice(0, 5).join(', ')} were gone` : ''}: the stored data is only loaded when it is listed or changed, so a create that comes first starts from an empty list`, 'the stored data is loaded before ANY operation (at startup, or at the top of every function that reads or changes it, create included), so ids continue and nothing is overwritten', entry, 'MONOTONIC_IDS')
+              await cold.stop()
+            }
+          }
         }
       } else if (c.persistence.required) skipped.push('runtime: no list route; restart persistence skipped')
       // ---------- list semantics: a population with one item per feasible flag combination, read back through every filter value and the default view

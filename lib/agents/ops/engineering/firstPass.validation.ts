@@ -573,6 +573,14 @@ process.env.ENGINE_NODE_PARSE = '0'
   check('F124_the_generated_persistence_tests_fail_when_the_implementation_never_writes_its_file', Object.values(results).every((r) => r.bad))
   check('F125_nothing_is_generated_for_persistence_without_a_storage_variable_or_a_list_route_or_for_a_criterion_that_is_not_about_storage', generatePersistenceTests(5, { ...ct, persistence: { ...ct.persistence, envVar: null } }, ['CUSTOM_PATH']) === null && generatePersistenceTests(5, { ...ct, routes: ct.routes.filter((r) => r.method !== 'GET') }, ['PERSISTENCE']) === null && generatePersistenceTests(1, ct, ['PERSISTENCE']) === null && generatePersistenceTests(5, ct, []) === null)
 }
+
+{
+  const LAZY = GOOD.replace("let db = existsSync(file()) ? JSON.parse(readFileSync(file(), 'utf8')) : { items: [], nextId: 1 }", "let db = { items: [], nextId: 1 }\nlet loaded = false\nconst load = () => { if (loaded) return; loaded = true; if (existsSync(file())) db = JSON.parse(readFileSync(file(), 'utf8')) }")
+    .replace("if (req.method === 'GET' && pathname === '/api/alerts') {\n", "if (req.method === 'GET' && pathname === '/api/alerts') {\n    load()\n")
+  const rLazy = await runPreflight(mkApp(LAZY), ca)
+  const rGood = await runPreflight(mkApp(GOOD), ca)
+  check('F126_a_create_that_is_the_first_request_after_a_restart_is_caught_when_the_stored_data_is_only_loaded_lazily', LAZY !== GOOD && rLazy.findings.some((f) => f.check === 'PERSISTENCE.cold-create' && /first request after a restart/.test(f.fact)) && !rGood.findings.some((f) => f.check === 'PERSISTENCE.cold-create'), JSON.stringify(rLazy.findings.map((f) => f.check + ': ' + f.fact.slice(0, 120))))
+}
 void deriveAssignments; void AgentOpsLog
 
 finish()
