@@ -351,7 +351,87 @@ export function generateTransitionTests(id: number, c: ImplementationContract): 
   return lines.join('\n')
 }
 
-export function buildTestPlan(acceptance: string[], packageJson: string | null): TestPlan | null {
+/**
+ * A storage/persistence criterion is generated from the contract: the data file named by the storage variable exists (CUSTOM_PATH), the default location under the working directory
+ * exists when the variable is unset (DEFAULT_PATH), what was created (and moved along an allowed path, or flagged) is identical after a restart (PERSISTENCE), and the next id
+ * is not an id issued before the restart (IDS). The writer kept comparing the wrong things (a malformed deepStrictEqual against two bodies). Only the variants the criterion
+ * needs are generated; null when the contract lacks the facts (no storage variable, no create route, no list route).
+ */
+export function generatePersistenceTests(id: number, c: ImplementationContract, keys: string[]): string | null {
+  const pathOnly = keys.length > 0 && keys.every((k) => k === 'CUSTOM_PATH' || k === 'DEFAULT_PATH') // "the data file comes from VAR (default: ...)" names the location without saying "persist"
+  if ((!c.persistence.criteria.includes(id) && !pathOnly) || !keys.length) return null
+  const strip = (r: string) => r.replace(/^(?:GET|POST|PUT|PATCH|DELETE)\s+/, '')
+  const create = c.routes.find((r) => r.createsRecord)
+  const list = c.routes.find((r) => r.method === 'GET' && !r.params.length && !r.compat && !r.shape && r.path !== '/' && !/summary|count/i.test(r.path))
+  const envVar = c.persistence.envVar, def = c.persistence.defaultPath
+  if (!create || !list) return null
+  if ((keys.includes('CUSTOM_PATH') || keys.includes('DEFAULT_PATH')) && !envVar) return null
+  if (keys.includes('DEFAULT_PATH') && !def) return null
+  const textField = c.fields.find((f) => f.required && !f.values.length)?.name
+  const extra = c.fields.filter((f) => f.required && f.values.length).map((f) => `${JSON.stringify(f.name)}: ${JSON.stringify(f.values[0])}`)
+  const bodyJs = (label: string) => textField || extra.length ? `{ ${[textField ? `${JSON.stringify(textField)}: ${label}` : '', ...extra].filter(Boolean).join(', ')} }` : '{}'
+  // an allowed state change to make part of what must survive: a move along a transition, else a flag setter that blocks nothing
+  const move = c.routes.find((r) => r.method === 'PATCH' && r.bodyField && r.params.length === 1)
+  const edge = move ? c.transitions.find((t) => t.allowed) : undefined
+  const flag = !edge ? c.flags.find((f) => f.sets === true && [...f.route.matchAll(/:(\w+)/g)].length === 1 && !c.conflicts.some((x) => x.flag === f.name)) : undefined
+  let change = ''
+  if (move && edge) {
+    const field = c.fields.find((f) => f.name === move.bodyField)
+    if (field?.default && field.default !== edge.from) return null
+    change = `  const moved = await app.patch('${strip(move.path).replace(/:\w+/, "' + a.body.id + '")}', { ${JSON.stringify(move.bodyField)}: ${JSON.stringify(edge.to)} })\n  assert.ok(moved.status >= 200 && moved.status < 300, 'moving answered ' + moved.status)\n`
+  } else if (flag) {
+    change = `  const flagged = await app.post('${strip(flag.route).replace(/:\w+/, "' + a.body.id + '")}', {})\n  assert.ok(flagged.status >= 200 && flagged.status < 300, 'setting ' + ${JSON.stringify(flag.name)} + ' answered ' + flagged.status)\n`
+  }
+  const lines: string[] = [
+    "import test from 'node:test'",
+    "import assert from 'node:assert/strict'",
+    "import { existsSync } from 'node:fs'",
+    "import { withApp } from './support/harness.mjs'",
+    '',
+    `const CREATE = ${JSON.stringify(strip(create.path))}`,
+    `const LIST = ${JSON.stringify(strip(list.path))}`,
+    '',
+  ]
+  if (keys.includes('CUSTOM_PATH')) lines.push(
+    `test(${JSON.stringify(`[C${id}] CUSTOM_PATH: the file named by ${envVar} is written`)}, () => withApp(async (app) => {`,
+    `  const r = await app.post(CREATE, ${bodyJs("'item'")})`,
+    "  assert.ok(r.status >= 200 && r.status < 300, 'create answered ' + r.status)",
+    `  assert.ok(existsSync(app.storageFile(${JSON.stringify(envVar)})))`,
+    '}))', '')
+  if (keys.includes('DEFAULT_PATH')) lines.push(
+    `test(${JSON.stringify(`[C${id}] DEFAULT_PATH: the default file is written`)}, () => withApp(async (app) => {`,
+    `  const r = await app.post(CREATE, ${bodyJs("'item'")})`,
+    "  assert.ok(r.status >= 200 && r.status < 300, 'create answered ' + r.status)",
+    `  assert.ok(existsSync(app.cwd + ${JSON.stringify('/' + def)}))`,
+    '}, { defaultStorage: true }))', '')
+  if (keys.includes('PERSISTENCE')) lines.push(
+    `test(${JSON.stringify(`[C${id}] PERSISTENCE: the data is identical after a restart`)}, () => withApp(async (app) => {`,
+    `  const a = await app.post(CREATE, ${bodyJs("'first'")})`,
+    `  const b = await app.post(CREATE, ${bodyJs("'second'")})`,
+    "  assert.ok(a.status >= 200 && a.status < 300 && b.status >= 200 && b.status < 300, 'create answered ' + a.status + '/' + b.status)",
+    ...(change ? change.replace(/\n$/, '').split('\n') : []),
+    '  const before = await app.get(LIST)',
+    '  assert.equal(before.status, 200)',
+    '  assert.ok(Array.isArray(before.body) && before.body.length >= 2)',
+    '  await app.restart()',
+    '  const after = await app.get(LIST)',
+    '  assert.equal(after.status, 200)',
+    '  assert.deepStrictEqual(after.body, before.body)',
+    '}))', '')
+  if (keys.includes('IDS')) lines.push(
+    `test(${JSON.stringify(`[C${id}] IDS: an id is not reused after a restart`)}, () => withApp(async (app) => {`,
+    `  const a = await app.post(CREATE, ${bodyJs("'first'")})`,
+    '  await app.restart()',
+    `  const b = await app.post(CREATE, ${bodyJs("'second'")})`,
+    "  assert.ok(a.status >= 200 && a.status < 300 && b.status >= 200 && b.status < 300, 'create answered ' + a.status + '/' + b.status)",
+    '  assert.notEqual(String(b.body.id), String(a.body.id))',
+    '  if (typeof a.body.id === "number" && typeof b.body.id === "number") assert.ok(b.body.id > a.body.id)',
+    '}))', '')
+  return lines.join('\n')
+}
+
+export function buildTestPlan(acceptance: string[], packageJson: string | null, opts: { generate?: boolean } = {}): TestPlan | null {
+  const generateTests = opts.generate !== false // false: every criterion is written by the model (the fallback path, kept exercised by the workflow validator)
   const entry = startEntry(packageJson)
   if (!entry) return null
   const vars = storageEnvVars(acceptance)
@@ -366,9 +446,10 @@ export function buildTestPlan(acceptance: string[], packageJson: string | null):
     const envNamed = vars.filter((v) => a.includes(v))
     const defaultPath = /default:?\s*([\w./-]+\.\w+)/i.exec(a)?.[1]
     const recipe = envNamed.length ? `STORAGE LOCATION RECIPE: create data through the API, then assert.ok(existsSync(app.storageFile('${envNamed[0]}'))) (import { existsSync } from 'node:fs'). app.storageFile(VAR) is a path inside a temp directory and its file NAME is not the default name, so never assert anything about the name${defaultPath ? `. For the default location use withApp(async (app) => { ...create data through the API...; assert.ok(existsSync(app.cwd + '/${defaultPath}')) }, { defaultStorage: true })` : ''}` : ''
-    const gen = generateFilterTests(id, full) ?? generateCounterTests(id, full) ?? generateTransitionTests(id, full)
+    const baseVariants = variantsOf(a, envNamed[0], defaultPath, persists)
+    const gen = !generateTests ? null : generateFilterTests(id, full) ?? generateCounterTests(id, full) ?? generateTransitionTests(id, full) ?? generatePersistenceTests(id, full, baseVariants.map((v) => String(v.key)))
     if (gen) generated[id] = gen
-    const variants = [...variantsOf(a, envNamed[0], defaultPath, persists), ...(gen ? [] : filterVariantsOf(id, full))]
+    const variants = [...(gen ? [] : baseVariants), ...(gen || !generateTests ? [] : filterVariantsOf(id, full))]
     const state = [...(persists ? ['the data must be on disk: call app.restart() and read it back'] : []), ...envNamed.map((v) => `storage location comes from ${v}`)]
     return {
       criterion_id: id, behavior: a, level: 'HTTP',

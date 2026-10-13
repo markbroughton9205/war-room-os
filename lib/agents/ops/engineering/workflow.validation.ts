@@ -84,7 +84,7 @@ function makeWorld(over: { limits?: Partial<{ maxSteps: number; maxRuntimeMs: nu
   const verifierDir = tmp()
   return { ...w, agent, root, asg, ws: new Workspace(root), verification: makeIndependentVerification('independent chat-session verification', verifierDir, 'verify.mjs', CHAT_VERIFY_SCRIPT, root) }
 }
-const deps = (x: World, model: ScriptedModel, over: Partial<WorkflowDeps> = {}): WorkflowDeps => ({ log: x.log, assignmentId: x.asg.id, ws: x.ws, model, tools: TOOLS, finalVerification: x.verification, ...over })
+const deps = (x: World, model: ScriptedModel, over: Partial<WorkflowDeps> = {}): WorkflowDeps => ({ log: x.log, assignmentId: x.asg.id, ws: x.ws, model, tools: TOOLS, finalVerification: x.verification, generatedTests: false, ...over })
 const good = (ctx: ScriptCtx) => (ctx.kind === 'file' && ctx.path && SOLUTION[ctx.path] ? fenced(SOLUTION[ctx.path]) : null)
 process.env.ENGINE_NODE_PARSE = '0' // these scenarios inject syntax breaks that must reach the repair ledger; the node-parse gate has its own validator (reliability R41)
 const REQ = { request: CHAT_FEATURE.request, acceptance: CHAT_FEATURE.acceptance, hints: CHAT_FEATURE.hints }

@@ -18,7 +18,7 @@ import { OllamaModelClient, isRunaway } from './runtime/ollamaModel'
 import { classifyModelFailure } from './modelFailure'
 import { parseEditReply, fitPrompt, ENGINEER_STRUCT_SYSTEM } from './prompts'
 import { importProblems, runPreflight, staticPreflight, preflightTap, preflightHypotheses } from './preflight'
-import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateCounterTests, generateFilterTests, generateTransitionTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
+import { HARNESS_PATH, buildTestPlan, planPromptFor, filterVariantsOf, generateCounterTests, generateFilterTests, generateTransitionTests, generatePersistenceTests, harnessSource, repairDefaultStoragePath, reviewTestFile } from './testPlan'
 import { classifyLeftShift, criterionOfCheck, newFirstPassState, buildFirstPassReport } from './firstPass'
 import { runFeatureWorkflow, type WorkflowDeps } from './workflow'
 import { Workspace } from './runtime/workspaceFs'
@@ -543,6 +543,35 @@ process.env.ENGINE_NODE_PARSE = '0'
 
 {
   check('F121_a_model_server_error_reported_inside_the_stream_is_retried_like_an_http_5xx_and_a_malformed_reply_is_not', classifyModelFailure('model error: an error was encountered while running the model: CUDA error: the launch timed out and was terminated', false) === 'TRANSIENT' && classifyModelFailure('HTTP 503', false) === 'TRANSIENT' && classifyModelFailure('malformed response', false) === 'NO_RETRY' && classifyModelFailure('model error: x', true) === 'NO_RETRY')
+}
+
+{
+  const pkg = JSON.stringify({ type: 'module', scripts: { start: 'node server.mjs' } })
+  const cases: { name: string; acc: string[]; make: (root: string) => string; ref: Record<string, string>; vars: string[] }[] = [
+    { name: 'task', acc: TASK_FEATURE.acceptance, make: makeTaskApp, ref: TASK_REFERENCE, vars: ['TASKS_FILE'] },
+    { name: 'alert', acc: ALERT_FEATURE.acceptance, make: makeAlertApp, ref: ALERT_REFERENCE, vars: ['ALERTS_FILE'] },
+    { name: 'chat', acc: CHAT_FEATURE.acceptance, make: makeChatApp, ref: CHAT_REFERENCE, vars: ['CHAT_DATA_FILE'] },
+  ]
+  const results: Record<string, { files: string[]; ok: boolean; bad: boolean; detail: string }> = {}
+  for (const k of cases) {
+    const plan = buildTestPlan(k.acc, pkg)
+    const gens = (plan?.files ?? []).filter((f) => f.generated && /PERSISTENCE|CUSTOM_PATH|DEFAULT_PATH|IDS/.test(f.generated))
+    const build = (tag: string, mutate: boolean) => {
+      const dir = k.make(path.join(tmp(), `${k.name}-${tag}`))
+      for (const [rel, text] of Object.entries(k.ref)) { if (/^test\//.test(rel)) continue; mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); writeFileSync(path.join(dir, rel), mutate ? text.replace(/\bwriteFileSync\(/g, '(() => {})(') : text) }
+      mkdirSync(path.join(dir, 'test', 'support'), { recursive: true }); writeFileSync(path.join(dir, HARNESS_PATH), harnessSource('server.mjs', k.vars))
+      for (const g of gens) writeFileSync(path.join(dir, g.path), g.generated!)
+      return dir
+    }
+    const run = (d: string) => spawnSync('node', ['--test', ...gens.map((g) => g.path)], { cwd: d, encoding: 'utf8', timeout: 120_000, env: { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? '' } as unknown as NodeJS.ProcessEnv })
+    const good = gens.length ? run(build('ok', false)) : null
+    const bad = gens.length ? run(build('bug', true)) : null
+    results[k.name] = { files: gens.map((g) => g.path), ok: !!good && good.status === 0 && /(?:# |ℹ )fail 0/.test(good.stdout), bad: !!bad && bad.status !== 0, detail: `${good?.status} ${good?.stdout.slice(-350)} ${good?.stderr.slice(-200)}` }
+  }
+  check('F122_the_storage_criteria_of_the_task_alert_and_chat_contracts_are_covered_by_generated_persistence_files', Object.values(results).every((r) => r.files.length >= 1), JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, v]) => [k, v.files]))))
+  check('F123_the_generated_persistence_tests_pass_against_the_task_alert_and_chat_reference_implementations', Object.values(results).every((r) => r.ok), JSON.stringify(Object.fromEntries(Object.entries(results).map(([k, v]) => [k, v.detail]))))
+  check('F124_the_generated_persistence_tests_fail_when_the_implementation_never_writes_its_file', Object.values(results).every((r) => r.bad))
+  check('F125_nothing_is_generated_for_persistence_without_a_storage_variable_or_a_list_route_or_for_a_criterion_that_is_not_about_storage', generatePersistenceTests(5, { ...ct, persistence: { ...ct.persistence, envVar: null } }, ['CUSTOM_PATH']) === null && generatePersistenceTests(5, { ...ct, routes: ct.routes.filter((r) => r.method !== 'GET') }, ['PERSISTENCE']) === null && generatePersistenceTests(1, ct, ['PERSISTENCE']) === null && generatePersistenceTests(5, ct, []) === null)
 }
 void deriveAssignments; void AgentOpsLog
 

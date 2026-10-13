@@ -69,6 +69,8 @@ export type WorkflowDeps = {
   rescueReserve?: { calls?: number; ms?: number }
   /** Contract-first test authoring: a structured test plan, a Foundry-owned isolation harness, a pre-execution review, and quarantine only as the last fallback. */
   contractTests?: boolean
+  /** contract tests Foundry can generate from the contract (filters, counts, transitions, storage) are generated, not model-written; false keeps every criterion model-written (fallback path) */
+  generatedTests?: boolean
   /** A separate local model that reviews each generated test file against its plan row BEFORE it runs (builder and reviewer are different roles). */
   testReviewer?: { label: string; model: ModelClient }
   /** Replay: the implementation already in the workspace is independently verified and reused; only the test-authoring steps run. */
@@ -158,7 +160,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   const testReviews: NonNullable<WorkflowResult['testReviews']> = []
   const testDefects: NonNullable<WorkflowResult['testDefects']> = []
   let orderIndependent: boolean | null = null
-  const tplan: TestPlan | null = deps.contractTests ? buildTestPlan(req.acceptance, ws.exists('package.json') ? ws.read('package.json') : null) : null
+  const tplan: TestPlan | null = deps.contractTests ? buildTestPlan(req.acceptance, ws.exists('package.json') ? ws.read('package.json') : null, { generate: deps.generatedTests !== false }) : null
   // reserved test-rescue budget (contract mode with a candidate model only): held back from all other activity, capped well inside the global hard limits
   const rescue: RescueBudget = { reserved_calls: 0, reserved_time_ms: 0, used_calls: 0, used_time_ms: 0, rescue_attempted: false, rescue_skipped_reason: null }
   if (tplan && deps.testCandidates?.length) {
