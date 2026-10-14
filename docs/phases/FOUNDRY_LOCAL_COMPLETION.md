@@ -1,0 +1,29 @@
+# Foundry local completion: installed UI -> real engineering engine
+
+Status: implemented and validated (`pnpm run validate:foundry-missions`, 70+ checks, plus the engine suites). Results of the real installed-runtime proof are in section 7.
+
+## 1. What was wrong
+The Phase 10 engine ran only from a CLI harness (`e2eRealModel.ts`). Nothing in the installed app imported it: the Agent Ops UI could show assignments but not start work, a dead worker left an assignment `RUNNING` forever (nothing called `recoverInterruptedAssignments`), and a symlinked directory inside a workspace could make the runtime preflight delete outside its copy (known open MEDIUM, Phase 10 limitation 1).
+
+## 2. The bridge (smallest robust connection)
+`Installed UI (Agent Ops page, "Engineering missions")` -> `POST /api/foundry/engineering/missions` (Commander session + `x-wr-agent-ops` header) -> `missions/service.ts` -> `runner.ts` runs `runFeatureWorkflow` **inside the app's server process** with the real Forge line-up (`lineup.ts`: builder by evidence route, test reviewer and competing test candidate by pool policy; loopback Ollama only; retrieval/research/fast-repair stay OFF).
+- One mission at a time (one GPU, one resident builder).
+- The repository a mission may use comes from server configuration (`WAR_ROOM_ENGINEERING_REPO` or `<agent-foundry>/engineering-config.json`), never from the request.
+- A mission works in an **isolated workspace** seeded from named repository paths (symlinks and secret-shaped files are never copied). Changes reach the repository only through **integration**: applied to a git worktree branch `foundry/<mission>` cut from the commit the workspace was seeded from, restricted to the declared write scope, the repository's type check (and declared validators) must pass, then one commit with an explicit file list. A bounded gate-repair loop (max 3 rounds) sends compiler errors in the mission's own files back to the builder, then re-runs the independent verifier and the workspace tests.
+- **Install** (only when the creator ticks the approval box): merge the branch into the repository's current branch (clean tree required, merge aborted on conflict), build a new versioned runtime from the clean tree, stamp it, move (not copy) the packaged output so a root-owned sandbox helper keeps its ownership. Earlier installs and the launcher are untouched.
+- `targets`: the Commander may name the files a feature is built in; they replace the planner's file selection.
+
+## 3. Reliability
+- **Isolation** (`runtime/safeFs.ts`, `workspaceFs.ts`): lstat-based path walk (dangling symlinks refused), no-link copies for every engine copy (hermetic tests, preflight, startup probe), contained removal that deletes a link rather than its target.
+- **Dead-run detection** (`liveness.ts`, `reconcile.ts`, `supervisor.ts`): a mission is believed only with a lease whose process is alive (pid + start time), heartbeat fresh (5 s beat, 45 s lease) and, for this process, a runner actually registered. A dead run becomes `INTERRUPTED` (never `COMPLETED`), its assignment is interrupted in the log, the lease is retired as evidence, interruption evidence is written once, and a recovery record says whether it can resume. Checked at boot, every 10 s, and on every read. A live worker with no progress for 12 minutes shows `STALLED`. The log lock is stolen at once from a dead holder.
+- **Recovery** (`resumeMission`): the assignment takes a new `RECOVERED` event and the same assignment, mission id and checkpoint continue; completed steps and effects are not repeated; attempts are numbered; receipts are write-once per attempt.
+- **Provenance** (`provenance.ts`): every write names its author (model as provider/model, or a deterministic Foundry tool), role resolved from the configuration recorded at start, attempt and whether the recovery worker wrote it; a file changed outside Foundry is `UNATTRIBUTED`.
+- **Change receipt** (`receipt.ts`): computed from the seed snapshot vs the final filesystem and the ledger: created/modified/deleted with hashes, tests added/changed, deterministic repairs, model-generated edits, verifier result, integration (branch, commit, tree, gates), install result, tree and receipt hashes. `verifyReceipt` re-derives it from disk; the UI shows whether it matches.
+- A mission is `COMPLETED` only after: the engine finished, the independent verifier passes on the final workspace, integration gates pass, install (if requested) succeeded, and the receipt verifies against the filesystem.
+- Engine fix found by the real runs: model-written imports that point at nothing (`../../lib/x.js` for `lib/x.mjs`, `@/lib/x` for an `.mjs`) are rewritten deterministically when exactly one file matches (`importFix.ts`), and recorded as an autofix.
+
+## 4. Not changed
+No security setting, auth policy, Commander gate, sandbox mode or service exposure was changed. Retrieval, research and fast-repair stay off; Devstral remains the primary builder; no gate was lowered.
+
+## 5. Operator notes
+Electron needs the packaged `chrome-sandbox` to be `root:root 4755` (needs `sudo`; not done by Foundry). Install results and the launcher are unchanged until the verified runtime is promoted.

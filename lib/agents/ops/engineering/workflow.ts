@@ -11,6 +11,7 @@ import { runCommand, runHermetic } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
 import { collisionFacts, isCollisionProblem } from './collision'
+import { addMissingMjsExtension, fixImports } from './importFix'
 import { quarantineTests, quarantineAssertions, correctContractAssertions, type ContractCorrection } from './testContract'
 import { completionClass, type CompletionClass } from './completionClass'
 import { classifyModelFailure, MODEL_MAX_ATTEMPTS } from './modelFailure'
@@ -503,6 +504,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       const fl = runRecipeChecks(fpFilesWith(path, content), fpContract, fpRecipes).filter((f) => f.file === path)
       const fx = fl.length ? autofix(path, content, fl, fpContract) : null
       if (fx) { content = fx.content; autofixed = true; fpm.deterministic_structural_edits += fx.notes.length; emit('STRUCTURAL_AUTOFIX', `${path}: ${fx.notes.join('; ')} (on write)`) }
+    }
+    // a specifier that points at no workspace file but has exactly one match is rewritten to it (deterministic, recorded as an autofix on the write)
+    if (tag === '' && !by && /\.(m?js|cjs|[jt]sx?)$/.test(path)) {
+      const all = ws.list()
+      const a = fixImports(path, content, all); if (a) { content = a.content; autofixed = true; emit('IMPORT_PATH_FIX', `${path}: ${a.fixes.map((f) => `${f.from} -> ${f.to}`).join('; ')}`) }
+      const b = addMissingMjsExtension(content, all); if (b) { content = b.content; autofixed = true; emit('IMPORT_PATH_FIX', `${path}: ${b.fixes.map((f) => `${f.from} -> ${f.to}`).join('; ')}`) }
     }
     const key = `write:${path}:${sha256(content).slice(0, 12)}${tag}`
     const before = ws.hash(path)
