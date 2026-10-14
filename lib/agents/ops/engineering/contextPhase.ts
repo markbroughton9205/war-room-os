@@ -7,7 +7,7 @@
  */
 export type RetrievalMethod = 'EXACT' | 'DEFINITION' | 'EMBEDDING'
 export type RetrievedItem = { path: string; text: string; method: RetrievalMethod; why: string; score: number }
-export type ResearchBrief = { id: string; topic: string; text: string; model: string; sources: string[]; relevance: { relevant: boolean; reason: string }; ms: number }
+export type ResearchBrief = { id: string; topic: string; text: string; model: string; sources: string[]; relevance: { relevant: boolean; reason: string }; ms: number; /** file citations the model wrote that no supplied file backs (they are stripped and the true sources attached by Foundry) */ inventedCitations?: number }
 /** `known`: files the deterministic context (import graph + files changed in earlier steps) already gives the builder for this step, so retrieval does not spend slots on them */
 export type ContextStep = { id: string; path: string; layer: string; title: string; note: string; known?: string[] }
 export type ContextPhaseInput = { request: string; acceptance: string[]; steps: ContextStep[]; files: Record<string, string> }

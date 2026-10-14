@@ -74,6 +74,11 @@ These apply to every small HTTP service in this repository.
 `,
 }
 
+/** The same conventions as docs/CONVENTIONS.md, but buried in a long platform guide (about 3.6 KB): documentation too long to hand over whole, which is when a research brief is worth its two model swaps. */
+const GUIDE_A = 'Office and facilities. The office is open from 08:00 to 18:00 on working days. Visitors register at the front desk and wear a badge. Meeting rooms are booked through the shared calendar and released when unused for fifteen minutes. Parking spaces are assigned by seniority. The kitchen is cleaned every evening and shared food is thrown away on Fridays.\n\nBranch naming. Feature branches start with feature/, fixes with fix/, and releases with release/. Commit messages are written in the imperative mood and stay under seventy-two characters on the first line. Pull requests need one approval. Squash merging is preferred for small changes and merge commits for long-running branches.\n\nBackups. Database backups run nightly at 02:30 and are kept for thirty days; weekly backups are kept for a year. Restores are rehearsed once per quarter by the operations team. Backup encryption keys are rotated every twelve months and stored in the hardware vault.\n\n'
+const GUIDE_B = '\n\nIncident communication. During an incident the on-call engineer opens a channel, posts a summary every thirty minutes, and writes a short review within five working days. Customers are informed through the status page. Severity levels are numbered one to four. The review template lists timeline, impact, causes and follow-up tasks.\n\nTraining. New staff complete security awareness training in their first two weeks and refresh it every year. Optional workshops on testing, accessibility and documentation run monthly. Certificates are paid by the company when the topic is relevant to the role.\n\nProcurement. Software purchases above a fixed amount need a second signature. Open-source dependencies are reviewed for licence terms before adoption. Vendor contracts are renewed in January and the list of vendors is kept by the finance team.\n\nAccessibility. Every page must be usable with a keyboard only, images carry text alternatives, and colour is never the only carrier of meaning. Automated checks run on every release and a manual review is done twice a year with assistive technology. Findings are tracked in the shared board and closed within two sprints.\n\nTravel. Journeys are booked through the approved agency, expenses are filed within thirty days, and receipts are attached to each claim. Long-haul flights in economy class are the default; exceptions need approval from a department head.\n'
+export const PAD_RELEVANT_LONGGUIDE = ['src/lib/jsonFile.mjs', 'src/lib/ids.mjs', 'src/lib/validate.mjs', 'src/http/respond.mjs', 'docs/PLATFORM_GUIDE.md'] as const
+
 const D = (name: string, body: string): [string, string] => [name, body]
 const DISTRACTORS: [string, string][] = [
   D('src/billing/invoice.mjs', `export function invoiceTotal(lines) {\n  return lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0)\n}\n\nexport function invoiceNumber(year, counter) {\n  return 'INV-' + year + '-' + String(counter).padStart(5, '0')\n}\n`),
@@ -108,10 +113,11 @@ const DISTRACTORS: [string, string][] = [
   D('test/units.test.mjs', `import test from 'node:test'\nimport assert from 'node:assert'\nimport { kmToMiles } from '../src/units/convert.mjs'\ntest('kmToMiles', () => { assert.ok(Math.abs(kmToMiles(10) - 6.21371) < 1e-6) })\n`),
 ]
 
-export function padWorkspace(root: string): { added: string[]; relevant: string[] } {
+export function padWorkspace(root: string, opts: { longGuide?: boolean } = {}): { added: string[]; relevant: string[] } {
   const added: string[] = []
-  for (const [rel, body] of [...Object.entries(RELEVANT), ...DISTRACTORS]) {
+  const relevant: Record<string, string> = opts.longGuide ? Object.fromEntries(Object.entries(RELEVANT).filter(([k]) => k !== 'docs/CONVENTIONS.md').concat([['docs/PLATFORM_GUIDE.md', GUIDE_A + '# Service conventions\n\n' + RELEVANT['docs/CONVENTIONS.md'].replace(/^# Service conventions\n\n/, '') + GUIDE_B]])) : RELEVANT
+  for (const [rel, body] of [...Object.entries(relevant), ...DISTRACTORS]) {
     mkdirSync(path.dirname(path.join(root, rel)), { recursive: true }); writeFileSync(path.join(root, rel), body); added.push(rel)
   }
-  return { added, relevant: [...PAD_RELEVANT] }
+  return { added, relevant: [...(opts.longGuide ? PAD_RELEVANT_LONGGUIDE : PAD_RELEVANT)] }
 }

@@ -67,7 +67,7 @@ if (replayFrom) { cpSync(replayFrom, wsRoot, { recursive: true, filter: (src) =>
   const pristine = path.join(os.tmpdir(), `replay-base-${Date.now()}`); FX.make(pristine); cpSync(path.join(pristine, 'test'), path.join(wsRoot, 'test'), { recursive: true }); rmSync(pristine, { recursive: true, force: true })
 } else FX.make(wsRoot)
 // PAD_WORKSPACE=1 (opt-in): a larger existing codebase around the fixture app (reusable helpers + conventions doc + unrelated modules), for measuring context retrieval
-const padded = process.env.PAD_WORKSPACE === '1' ? padWorkspace(wsRoot) : null
+const padded = process.env.PAD_WORKSPACE === '1' ? padWorkspace(wsRoot, { longGuide: process.env.PAD_LONGDOC === '1' }) : null
 const dataDir = path.join(outDir, `agent-ops-${stamp}`)
 const log = new AgentOpsLog(dataDir)
 const reg = new AgentRegistry(log)
