@@ -30,7 +30,7 @@ const sha = (s: string) => createHash('sha256').update(s).digest('hex').slice(0,
 export function chunkFiles(files: Record<string, string>, lines = 45): { file: string; text: string }[] {
   const out: { file: string; text: string }[] = []
   for (const [p, t] of Object.entries(files).sort(([a], [b]) => (a < b ? -1 : 1))) {
-    if (!CODE_FILE.test(p) || SKIP_PATH.test(p) || p === 'package-lock.json' || t.length > 200_000) continue
+    if (!CODE_FILE.test(p) || SKIP_PATH.test(p) || p === 'package-lock.json' || t.length > 200_000 || /^[0-9a-f]{64}$/.test(t.trim())) continue // a lone 64-hex string is a content hash, never file text
     const ls = t.split('\n')
     for (let i = 0; i < ls.length; i += lines) { const text = ls.slice(i, i + lines).join('\n').slice(0, 2400); if (text.trim().length > 30) out.push({ file: p, text: `// file: ${p}\n${text}` }) }
   }

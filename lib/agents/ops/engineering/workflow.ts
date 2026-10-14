@@ -767,12 +767,18 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   // ---- context phase (opt-in): ONE batched retrieval (+ optional research) before the builder's first call
   if (deps.contextPhase && !deps.reuseImplementation) {
     const t0c = Date.now()
+    /** file CONTENTS for the context phase (ws.snapshot() maps paths to HASHES, which is what the retrieval layer must never be fed) */
+    const textFiles = (): Record<string, string> => {
+      const out: Record<string, string> = {}
+      for (const f of ws.list()) { if (/(^|\/)(node_modules|\.git)\//.test(f)) continue; try { const t = ws.read(f); if (typeof t === 'string' && t.length <= 200_000) out[f] = t } catch { /* unreadable file: skipped */ } }
+      return out
+    }
     const ctxSteps = () => {
       const idx = buildWorkspaceIndex(ws.root); const earlier: string[] = []
       return state.steps.filter((x) => x.files.length).map((x) => { const known = [...(idx.files[x.files[0]]?.imports.map((i) => i.resolved).filter((r): r is string => !!r) ?? []), ...earlier]; earlier.push(x.files[0]); return { id: x.id, path: x.files[0], layer: x.layer ?? '', title: x.title, note: x.note ?? '', known } })
     }
     try {
-      ctxPhase = await deps.contextPhase.prepare({ request: req.request, acceptance: req.acceptance, steps: ctxSteps(), files: ws.snapshot() })
+      ctxPhase = await deps.contextPhase.prepare({ request: req.request, acceptance: req.acceptance, steps: ctxSteps(), files: textFiles() })
       emit('CONTEXT_PHASE', `retrieval for ${Object.keys(ctxPhase.packages).length} file step(s), ${Object.values(ctxPhase.packages).reduce((a, p) => a + p.length, 0)} item(s), research brief ${ctxPhase.brief ? (ctxPhase.brief.relevance.relevant ? 'used' : 'withheld: ' + ctxPhase.brief.relevance.reason) : 'not needed'}, ${Date.now() - t0c} ms`)
     } catch (e) { ctxPhase = null; emit('CONTEXT_PHASE_FAILED', `${e instanceof Error ? e.message : e}; the builder proceeds with the deterministic context only`) }
   }

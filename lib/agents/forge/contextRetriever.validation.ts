@@ -31,6 +31,7 @@ const FILES: Record<string, string> = {
   const c = chunkFiles(FILES)
   check('R01_chunking_skips_dependencies_data_and_lock_files_and_prefixes_the_path', !c.some((x) => /node_modules|data\/|package-lock/.test(x.file)) && c.every((x) => x.text.startsWith(`// file: ${x.file}`)) && c.some((x) => x.file === 'src/billing/tax.mjs'))
   const long = { 'a.mjs': Array.from({ length: 100 }, (_, i) => `const v${i} = ${i}`).join('\n') }
+  check('R01b_content_hashes_are_never_chunked_as_if_they_were_file_text', chunkFiles({ 'a.mjs': 'a'.repeat(64).replace(/a/g, 'f'), 'b.mjs': 'export const x = 1\n'.repeat(5) }).every((c) => c.file === 'b.mjs'))
   check('R02_a_long_file_is_split_into_45_line_chunks', chunkFiles(long).length === 3)
   const t = exactTerms('Add persistent sessions', ['POST /api/sessions creates one', 'the data file path comes from the CHAT_DATA_FILE environment variable', 'keep `listMessages` working', 'update public/app.js'])
   check('R03_exact_terms_find_routes_env_vars_quoted_names_and_files', t.includes('/api/sessions') && t.includes('CHAT_DATA_FILE') && t.includes('listMessages') && t.includes('app.js'), t.join(','))

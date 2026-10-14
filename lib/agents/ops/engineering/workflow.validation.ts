@@ -7,6 +7,7 @@ import { CHAT_FEATURE, CHAT_REFERENCE, CHAT_VERIFY_SCRIPT, makeChatApp } from '.
 import { runFeatureWorkflow, type WorkflowDeps } from './workflow'
 import { Workspace } from './runtime/workspaceFs'
 import { makeIndependentVerification } from './runtime/verifier'
+import { HybridContextPhase } from '@/lib/agents/forge/contextRetriever'
 import { ScriptedModel, fenced, type ScriptCtx } from './scriptedModel'
 import { checkpointHistory, effectStatus, latestCheckpoint } from './continuity'
 import { deriveLedger } from './debugLedger'
@@ -986,8 +987,8 @@ void deriveAssignments; void AgentRegistry
   const P = 'src/chatService.mjs'
   const item = { path: 'src/lib/jsonFile.mjs', text: 'export function readJsonFile(file, fallback) { return fallback }', method: 'DEFINITION' as const, why: 'defines readJsonFile', score: 2000 }
   const brief = (relevant: boolean) => ({ id: 'rb-1', topic: 't', text: '- Ids are numeric strings [docs/CONVENTIONS.md]', model: 'ollama:qwen2.5-coder:7b', sources: ['docs/CONVENTIONS.md'], relevance: { relevant, reason: relevant ? 'on topic' : 'UNSUPPORTED_CLAIMS: x' }, ms: 5 })
-  const seenInputs: { steps: { path: string; known?: string[] }[] }[] = []
-  const phase = (relevant: boolean, packages: Record<string, typeof item[]> = { [P]: [item] }) => ({ async prepare(inp: { steps: { path: string; known?: string[] }[] }) { seenInputs.push(inp); return { packages, brief: brief(relevant), report: { marker: 'ctx-report' } } } })
+  const seenInputs: { steps: { path: string; known?: string[] }[]; files?: Record<string, string> }[] = []
+  const phase = (relevant: boolean, packages: Record<string, typeof item[]> = { [P]: [item] }) => ({ async prepare(inp: { steps: { path: string; known?: string[] }[]; files?: Record<string, string> }) { seenInputs.push(inp); return { packages, brief: brief(relevant), report: { marker: 'ctx-report' } } } })
   const prompts: string[] = []
   const rec = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === P) prompts.push(c.prompt); return good(c) })
   const cp1 = makeWorld(); const evc: string[] = []
@@ -1009,6 +1010,15 @@ void deriveAssignments; void AgentRegistry
   const prompts5: string[] = []
   const rc5 = await runFeatureWorkflow(deps(cp5, new ScriptedModel((c) => { if (c.kind === 'file' && c.path === P) prompts5.push(c.prompt); return good(c) }), { contextPhase: phase(true, { [P]: [dupe] }) }), REQ)
   check('CP06_an_item_the_deterministic_context_already_supplies_is_not_duplicated', rc5.status === 'COMPLETED' && prompts5.every((p) => (p.match(/--- src\/messageStore\.mjs/g) ?? []).length <= 1), JSON.stringify(prompts5.map((p) => (p.match(/--- src\/messageStore\.mjs/g) ?? []).length)))
+  check('CP08_the_context_phase_receives_file_CONTENTS_not_hashes', seenInputs.length >= 1 && Object.keys(seenInputs[0].files ?? {}).length > 3 && Object.entries(seenInputs[0].files ?? {}).every(([, t]) => typeof t === 'string' && !/^[0-9a-f]{64}$/.test(t.trim()) && t.length > 20) && /import /.test(seenInputs[0].files!['server.mjs'] ?? '') && /export function/.test(seenInputs[0].files!['src/chatService.mjs'] ?? ''), JSON.stringify(Object.entries(seenInputs[0]?.files ?? {}).slice(0, 2).map(([f, t]) => [f, t.slice(0, 40)])))
+  // end to end with the REAL hybrid retriever (deterministic fake embedder): what the builder reads must be the retrieved file's TEXT
+  {
+    const real = makeWorld(); const pr: string[] = []
+    const topic = (t: string) => [/(message|chat|session)/i.test(t) ? 1 : 0.1, /(route|http|server)/i.test(t) ? 1 : 0.1, 0.2]
+    const rr = await runFeatureWorkflow(deps(real, new ScriptedModel((c) => { if (c.kind === 'file') pr.push(c.prompt); return good(c) }), { contextPhase: new HybridContextPhase({ embed: async (x) => x.map(topic) }) }), REQ)
+    const blocks = pr.flatMap((p) => [...p.matchAll(/--- ([^\n]+) \(retrieved by[^\n]*\) ---\n([^\n]*)/g)].map((m) => ({ path: m[1], first: m[2] })))
+    check('CP09_with_the_real_retriever_the_builder_receives_retrieved_file_text_never_a_hash', rr.status === 'COMPLETED' && blocks.length > 0 && blocks.every((b) => !/^[0-9a-f]{64}$/.test(b.first.trim()) && b.first.trim().length > 0), JSON.stringify(blocks.slice(0, 3)))
+  }
   check('CP07_each_step_is_told_which_files_the_deterministic_context_already_gives_it', seenInputs.length >= 1 && seenInputs[0].steps.length > 1 && seenInputs[0].steps.every((st, i) => Array.isArray(st.known) && seenInputs[0].steps.slice(0, i).every((e) => st.known!.includes(e.path))))
 }
 
