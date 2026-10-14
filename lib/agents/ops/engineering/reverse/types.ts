@@ -32,7 +32,7 @@ export type StateInfo = {
   assignments: { file: string; line: number; field: string; value: string; evidence: string[] }[]
   storage: { file: string; line: number; op: 'create' | 'change' | 'read' | 'delete' | 'ui-state' | 'browser-storage' | 'db' | 'env'; api: string; target: string; evidence: string[] }[]
 }
-export type TestCoverage = { relevant: { path: string; why: string; basis: Basis; evidence: string[] }[]; missing: Claim[] }
+export type TestCoverage = { relevant: { path: string; owner?: string; why: string; basis: Basis; evidence: string[] }[]; missing: Claim[] }
 export type ChangeImpact = {
   perOwner: { file: string; directDependents: number; transitiveDependents: number; routesAffected: string[]; uiAffected: string[]; testsToRun: string[]; risk: 'LOW' | 'MEDIUM' | 'HIGH'; riskRule: string }[]
   summary: Claim[]

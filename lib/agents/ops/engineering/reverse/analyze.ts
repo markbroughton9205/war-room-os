@@ -72,7 +72,16 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
   // ---- route table (every route handler in the snapshot) -------------------------------------------------------------------------------------------------------
   const routeFiles = listed.filter((r) => ROUTE_RE.test(r))
   const routeRe = new Map(routeFiles.map((r) => [r, urlToRegex(routePathOf(r)!)]))
-  const routeForUrl = (u: string): string | null => { const n = normUrl(u); if (!n.startsWith('/')) return null; return routeFiles.find((r) => routeRe.get(r)!.test(n)) ?? null }
+  const routeMethods = new Map<string, Set<string>>()
+  const methodsOf = (r: string) => { let m = routeMethods.get(r); if (!m) { m = new Set(sig(r).methods.map((x) => x.method)); routeMethods.set(r, m) } return m }
+  const dynCount = (r: string) => (r.match(/\[/g) ?? []).length
+  /** Static routes win over dynamic ones; when the HTTP method is known the route must export it. */
+  const routeForUrl = (u: string, method?: string): string | null => {
+    const n = normUrl(u); if (!n.startsWith('/')) return null
+    const hits = routeFiles.filter((r) => routeRe.get(r)!.test(n)).sort((a, b) => dynCount(a) - dynCount(b) || a.localeCompare(b))
+    const ok = method && method !== 'UNKNOWN' ? hits.filter((r) => { const m = methodsOf(r); return m.size === 0 || m.has(method) }) : hits
+    return ok[0] ?? null
+  }
 
   // ---- 1. resolve the target -----------------------------------------------------------------------------------------------------------------------------------
   const target = resolveTarget(req.target, listed, index, P.owners, book, symbolsInspected)
@@ -106,7 +115,7 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
   const fetchEdges: { from: string; to: string; call: FetchCall }[] = []
   for (const f of fetchFiles) {
     for (const c of sig(f).fetches) {
-      const r = c.url === '(non-literal)' ? null : routeForUrl(c.url)
+      const r = c.url === '(non-literal)' ? null : routeForUrl(c.url, c.method)
       if (!r) continue
       fetchEdges.push({ from: f, to: r, call: c })
       const a = callersOf.get(r) ?? []; a.push({ file: f, call: c }); callersOf.set(r, a)
@@ -187,15 +196,16 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
     const m = s.methods.map((x) => x.method).join('/')
     let label = path.posix.basename(file)
     let line: number | undefined
+    let viaGraph = false
     if (l === 'API' && m) { label = `${routePathOf(file)} [${m}]`; line = s.methods[0].line; routesInspected.add(routePathOf(file)!) }
     else if (l === 'UI' && s.ui.length) {
       const all = surfacesOf(file)
-      const hit = (nextRoute && all.find((x) => x.reaches.some((r) => routeForUrl(r.split(' ').slice(1).join(' ')) === nextRoute))) || all.find((x) => x.reaches.length) || all[0]
-      const u = hit.u; label = `${path.posix.basename(file)} - "${u.label}" ${u.event}${u.handler ? ' -> ' + u.handler : ''}`; line = u.line
+      const hit = (nextRoute && all.find((x) => x.reaches.some((r) => routeForUrl(r.split(' ').slice(1).join(' '), r.split(' ')[0]) === nextRoute))) || all.find((x) => x.reaches.length) || all[0]
+      const u = hit.u; viaGraph = Boolean(hit.reaches.length); label = `${path.posix.basename(file)} - "${u.label}" ${u.event}${u.handler ? ' -> ' + u.handler : ''}`; line = u.line
     }
     else if ((l === 'STORE' || l === 'SERVICE') && pers) { label = `${path.posix.basename(file)} - ${pers.api}(${pers.target.slice(0, 40)})`; line = pers.line }
     const ev = [...edgeEv, book.add(l === 'API' ? 'route' : l === 'UI' ? 'ui' : l === 'STORE' ? 'persistence' : 'file', file, `${l} layer: ${label}`, line)]
-    return { n: 0, layer: l, file, line, label, via, basis, evidence: ev }
+    return { n: 0, layer: l, file, line, label, via, basis: viaGraph && basis === 'FACT' ? 'INFERENCE' : basis, evidence: ev }
   }
   const upChain = [...up] // dependent -> owner order from owner upward; reverse for display
   // bfsUp returns edges from the UI end (goal) back toward the owner: chain[0].from is the entry, each edge.to is the next step down
@@ -267,31 +277,34 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
 
   // ---- 11. tests -----------------------------------------------------------------------------------------------------------------------------------------------
   const relevantTests: TestCoverage['relevant'] = []
-  const addTest = (p: string, why: string, basis: Basis, ev: string[]) => { if (!relevantTests.some((t) => t.path === p)) relevantTests.push({ path: p, why, basis, evidence: ev }) }
+  const addTest = (p: string, why: string, basis: Basis, ev: string[], owner?: string) => { if (!relevantTests.some((t) => t.path === p && t.owner === owner)) relevantTests.push({ path: p, owner, why, basis, evidence: ev }) }
   const testFiles = listed.filter(isTestFile)
   for (const f of owners) {
-    for (const t of lookupDependents(index, f)) if (isTestFile(t)) addTest(t, `imports ${f}`, 'FACT', [importEv(t, f)])
-    for (const t of index.tests[f] ?? []) if (isTestFile(t)) addTest(t, `named as a test sibling of ${f} (naming convention, not proven to exercise it)`, 'INFERENCE', [book.add('test', t, `sibling test of ${f} by file name`)])
+    for (const t of lookupDependents(index, f)) if (isTestFile(t)) addTest(t, `imports ${f}`, 'FACT', [importEv(t, f)], f)
+    for (const t of index.tests[f] ?? []) if (isTestFile(t)) addTest(t, `named as a test sibling of ${f} (naming convention, not proven to exercise it)`, 'INFERENCE', [book.add('test', t, `sibling test of ${f} by file name`)], f)
   }
   for (const r of routes) for (const t of testFiles) {
     const c = snap.files.get(t) ?? ''
-    if (c.includes(r.path)) { const ln = c.split('\n').findIndex((l) => l.includes(r.path)) + 1; addTest(t, `mentions route ${r.path}`, 'FACT', [book.add('test', t, `mentions ${r.path}`, ln)]) }
+    const re = new RegExp(r.path.replace(/[.*+?^${}()|\\[\]]/g, '\\$&') + '(?![\\w/\\[-])')
+    const ln = c.split('\n').findIndex((l) => re.test(l)) + 1
+    if (ln) addTest(t, `mentions route ${r.path}`, 'FACT', [book.add('test', t, `mentions ${r.path}`, ln)], r.path)
   }
+  const incomplete = snap.truncated || snap.skipped.some((x) => x.reason.startsWith('larger'))
   const missing: Claim[] = []
   for (const f of owners.filter((o) => !isTestFile(o))) {
-    const covered = relevantTests.some((t) => t.why.includes(f))
+    const covered = relevantTests.some((t) => t.owner === f)
     if (!covered) missing.push({ text: `No test file in the snapshot imports ${f} or is named as its sibling. It may still be covered indirectly (a test that exercises a caller) or by a script; Foundry did not run tests.`, basis: 'FACT', evidence: [book.add('search', f, `no importing/sibling test found among ${testFiles.length} test-like files`)] })
   }
-  for (const r of routes) if (!relevantTests.some((t) => t.why.includes(r.path))) missing.push({ text: `No test file mentions the route ${r.path}.`, basis: 'FACT', evidence: [book.add('search', r.file, `searched ${testFiles.length} test-like files for "${r.path}"`)] })
+  for (const r of routes) if (!relevantTests.some((t) => t.owner === r.path)) missing.push({ text: `No test file mentions the route ${r.path}.`, basis: incomplete ? 'INFERENCE' : 'FACT', evidence: [book.add('search', r.file, `searched ${testFiles.length} test-like files for "${r.path}"`)] })
   const tests: TestCoverage = { relevant: relevantTests.slice(0, P.listCap * 2), missing: missing.slice(0, P.listCap) }
   relevantTests.forEach((t) => touch(t.path))
 
   // ---- 12. change impact ---------------------------------------------------------------------------------------------------------------------------------------
   const perOwner: ChangeImpact['perOwner'] = owners.filter((o) => !isTestFile(o)).map((f) => {
-    const { dist } = reverseBfs(f, 30); const all = [...dist.keys()].filter((k) => k !== f)
+    const { dist } = reverseBfs(f, 30); const everything = [...dist.keys()].filter((k) => k !== f); const all = everything.filter((k) => !isTestFile(k))
     const routesAffected = [...new Set(all.filter((k) => ROUTE_RE.test(k)).map((k) => routePathOf(k)!))].slice(0, P.listCap)
     const uiAffected = all.filter((k) => layerOf(k) === 'UI').slice(0, P.listCap)
-    const testsToRun = all.filter(isTestFile).slice(0, P.listCap)
+    const testsToRun = everything.filter(isTestFile).slice(0, P.listCap)
     const persists = writesState(f) || all.some((k) => !isTestFile(k) && writesState(k))
     const high = all.length >= 20 || (routesAffected.length > 0 && persists)
     const med = all.length >= 5 || routesAffected.length > 0 || uiAffected.length > 0
@@ -311,6 +324,7 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
   const nonLit = [...inspected].flatMap((f) => (snap.files.has(f) ? sig(f).fetches.filter((c) => c.url === '(non-literal)').map((c) => ({ f, c })) : []))
   if (nonLit.length) risks.push({ text: `${nonLit.length} fetch() call(s) in inspected files use a URL that is not a literal; the routes they reach cannot be established statically.`, basis: 'UNKNOWN', evidence: nonLit.slice(0, 5).map((x) => book.add('fetch', x.f, 'fetch with a non-literal URL', x.c.line)) })
   if (target.kind === 'feature') risks.push({ text: 'The target was a natural-language description; the owning files were chosen because they contain its significant terms in paths, symbols, string literals or bindings. Treat the owner set as INFERENCE and confirm it before relying on it.', basis: 'INFERENCE', evidence: [book.add('search', '(index)', `ranked ownership for "${req.target.slice(0, 80)}"`)] })
+  if (steps.some((x) => x.layer === 'UI' && x.basis === 'INFERENCE')) risks.push({ text: 'The link from a UI button to its API call follows an intra-file, name-based call graph (a handler is matched to functions of the same name); it is INFERENCE, not a proven execution path.', basis: 'INFERENCE', evidence: steps.filter((x) => x.layer === 'UI').flatMap((x) => x.evidence).slice(0, 3) })
   risks.push({ text: 'Static analysis only: runtime wiring (dependency injection, reflection, feature flags, event buses, string-built URLs), generated code and anything outside the snapshot are not visible. No code was executed and no model was consulted.', basis: 'UNKNOWN', evidence: [book.add('config', '(analysis)', 'deterministic static analysis; no commands run')] })
 
   // ---- 14. summary ---------------------------------------------------------------------------------------------------------------------------------------------
@@ -333,7 +347,7 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
   const flowText = steps.map((s, i) => `${i ? `   ↓ ${s.via}${s.basis !== 'FACT' ? ' (inferred)' : ''}\n` : ''}[${s.layer}] ${s.label}\n       ${s.file}${s.line ? ':' + s.line : ''}`).join('\n')
   const flowMap: MapView | null = steps.length > 0 ? { title: 'Data / call flow (shortest evidenced chain)', nodes: flowNodes, edges: flowEdges, text: flowText, truncated: false } : null
 
-  const treeMap = (title: string, roots: string[], next: (f: string) => string[], cap: number, hops: number): MapView => {
+  const treeMap = (title: string, roots: string[], next: (f: string) => string[], cap: number, hops: number, reverse = false): MapView => {
     const nodes = new Map<string, MapNode>(), edges: MapEdge[] = [], lines: string[] = []; let truncated = false
     const visit = (f: string, depth: number, seen: Set<string>) => {
       if (!nodes.has(f)) { if (nodes.size >= cap) { truncated = true; return } nodes.set(f, mkNode(f)) }
@@ -342,7 +356,10 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
         if (seen.has(n)) continue
         if (nodes.size >= cap && !nodes.has(n)) { truncated = true; lines.push(`${'  '.repeat(depth + 1)}… (more, capped at ${cap} nodes)`); return }
         nodes.set(n, nodes.get(n) ?? mkNode(n))
-        edges.push({ from: f, to: n, kind: 'import', basis: 'FACT', evidence: [lookupDependents(index, n).includes(f) || (index.files[f]?.imports ?? []).includes(n) ? importEv(f, n) : book.add('fetch', n, `fetch() of ${routePathOf(f) ?? f}`)] })
+        // reverse trees list dependents: the dependent n imports (or fetches) f, so the edge is drawn n -> f
+        if (!reverse) edges.push({ from: f, to: n, kind: 'import', basis: 'FACT', evidence: [importEv(f, n)] })
+        else if ((index.files[n]?.imports ?? []).includes(f)) edges.push({ from: n, to: f, kind: 'import', basis: 'FACT', evidence: [importEv(n, f)] })
+        else { const c = (callersOf.get(f) ?? []).find((x) => x.file === n); edges.push({ from: n, to: f, kind: 'fetch', basis: 'FACT', evidence: [book.add('fetch', n, `fetch() of ${routePathOf(f) ?? f}`, c?.call.line)] }) }
         lines.push(`${'  '.repeat(depth + 1)}${f === n ? '' : '└ '}${n}`)
         visit(n, depth + 1, new Set([...seen, n]))
       }
@@ -351,7 +368,7 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
     return { title, nodes: [...nodes.values()], edges, text: lines.join('\n'), truncated }
   }
   const importsMap = treeMap('Imports (what the target depends on)', owners.slice(0, 3), (f) => (index.files[f]?.imports ?? []).filter((i) => index.files[i]), P.mapNodes, Math.min(P.reverseHops, 3))
-  const reverseMap = treeMap('Reverse dependencies (what depends on the target)', owners.slice(0, 3), (f) => dependentsOf(f), P.mapNodes, P.reverseHops)
+  const reverseMap = treeMap('Reverse dependencies (what depends on the target)', owners.slice(0, 3), (f) => dependentsOf(f), P.mapNodes, P.reverseHops, true)
   // reverse edges point dependent -> owner; relabel text direction for readability
   const statesMap: MapView | null = state.states.length ? (() => {
     const nodes: MapNode[] = [], edges: MapEdge[] = []; const vals = new Set<string>()
@@ -391,10 +408,12 @@ export function analyzeSnapshot(snap: Snapshot, req: AnalysisRequest): AnalysisO
     ].filter(Boolean),
   }
   for (const s of steps) symbolsInspected.add(s.label.split(' ')[0])
+  const result: AnalysisResult = { summary, entryPoints, flow: steps, dependencies, reverseDependents, state, routes, ui, tests, changeImpact, risks, maps: { flow: flowMap, imports: importsMap, reverse: reverseMap, states: statesMap } }
+  const cited = new Set(JSON.stringify(result).match(/"E\d+"/g)?.map((x) => x.slice(1, -1)) ?? [])
   return {
     target,
     result: { summary, entryPoints, flow: steps, dependencies, reverseDependents, state, routes, ui, tests, changeImpact, risks, maps: { flow: flowMap, imports: importsMap, reverse: reverseMap, states: statesMap } },
-    evidence: book.list,
+    evidence: book.list.filter((e) => cited.has(e.id)),
     provenance: { filesInspected: [...inspected].sort(), symbolsInspected: [...symbolsInspected].slice(0, 80), routesInspected: [...routesInspected].sort(), methods, deterministicTools: ['typescript compiler API (AST)', 'foundryCodeIntelligence index', 'in-memory import graph', 'sha256 snapshot fingerprint'] },
     handoff,
   }
@@ -418,14 +437,14 @@ export function resolveTarget(input: string, listed: string[], index: FoundryCod
   const lineSuffix = (t: string) => t.replace(/:\d+(:\d+)?$/, '')
   // 1. an exact file path (whole input or a token inside a sentence)
   const paths = [...new Set([text, ...tokens].map((t) => norm(lineSuffix(t))).filter((t) => fileSet.has(t)))]
-  if (paths.length) { book.add('file', paths[0], `target names this file`); return { input, kind: 'file', owners: paths.slice(0, ownersCap), how: 'exact file path', basis: 'FACT', candidates: [] } }
+  if (paths.length) { const whole = norm(lineSuffix(text)) === paths[0]; book.add('file', paths[0], `target names this file`); return { input, kind: 'file', owners: paths.slice(0, ownersCap), how: whole ? 'exact file path' : 'file path mentioned inside a description', basis: whole ? 'FACT' : 'INFERENCE', candidates: [] } }
   // 2. a directory prefix
   const dirTok = [text, ...tokens].map((t) => norm(t).replace(/\/+$/, '')).find((t) => t.includes('/') && !t.startsWith('api/') && listed.some((f) => f.startsWith(t + '/')))
   if (dirTok) {
     const members = listed.filter((f) => f.startsWith(dirTok + '/') && !isTestFile(f))
     const ranked = members.map((f) => ({ f, n: (index.dependents[f] ?? []).length })).sort((a, b) => b.n - a.n || a.f.localeCompare(b.f)).slice(0, Math.max(ownersCap * 3, 8)).map((x) => x.f)
     book.add('file', dirTok, `directory with ${members.length} source file(s)`)
-    return { input, kind: 'group', owners: ranked, how: `directory ${dirTok} (${members.length} files; the ${ranked.length} most-depended-on are the owners)`, basis: 'FACT', candidates: [] }
+    return { input, kind: 'group', owners: ranked, how: `directory ${dirTok} (${members.length} files; the ${ranked.length} most-depended-on are the owners)`, basis: norm(text).replace(/\/+$/, '') === dirTok ? 'FACT' : 'INFERENCE', candidates: [] }
   }
   // 3. an API route (/api/...)
   const routeTok = [text, ...tokens].find((t) => /^\/api\/[\w\-./\[\]]+$/.test(t))

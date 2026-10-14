@@ -98,7 +98,7 @@ export async function startFromApi(deps: RunnerDeps, body: Record<string, unknow
       try { a = runAnalysis({ target, depth: 'standard', outputs: ['all'] }, actor, { log: deps.log }) } catch (e) { throw new MissionError(e instanceof AnalysisError && e.code === 'SCOPE' ? 'SCOPE' : 'INVALID', e instanceof Error ? e.message : String(e)) }
     }
     analysisId = a.id
-    const d = buildDraftFromAnalysis(a, { request, paths, write, targets })
+    const d = buildDraftFromAnalysis(a, { request, paths, write, targets }, { derivedFromProse: body.fromAnalysis === undefined && !targets.some((t) => t.path) })
     request = d.request; paths = d.paths; write = d.write; targets = d.targets
   }
   const repo = paths.length ? engineeringRepo(deps.log) : null

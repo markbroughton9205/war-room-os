@@ -91,6 +91,14 @@ export function saveMission(m: Mission): void { writeFileSync(FILE, JSON.stringi
   for (let i = 1; i <= 6; i++) w(root, `lib/chain/c${i}.ts`, i === 1 ? `export const c1 = 1\n` : `import { c${i - 1} } from './c${i - 1}'\nexport const c${i} = c${i - 1} + 1\n`)
   // a client that fetches a URL it cannot resolve statically
   w(root, 'lib/client/dynamic.ts', `export async function go(u: string) { return fetch(u) }\n`)
+  w(root, 'lib/client/pinger.ts', `import { writeFileSync } from 'node:fs'
+export async function ping() { return fetch('https://svc.test/a?api_key=SECRET123XYZ', { method: 'POST' }) }
+export function keep(t: string) { writeFileSync('/home/u/.secret_token_file', t) }
+export function rename(x: string) { return x }
+export function useIt() { return rename('a') }
+`)
+  w(root, 'app/api/missions/new/route.ts', `import { NextResponse } from 'next/server'\nexport async function POST() { return NextResponse.json({}, { status: 201 }) }\n`)
+  w(root, 'lib/client/newcall.ts', `export const go = () => fetch('/api/missions/new', { method: 'POST' })\n`)
   w(root, 'generated/copy.ts', `export const GENERATED_MARKER_9911 = 1\n`)
   w(root, 'node_modules/pkg/index.js', `module.exports = 1\n`)
   symlinkSync(outside, path.join(root, 'lib', 'linked-outside'))
@@ -190,6 +198,16 @@ try {
   const tiny = takeSnapshot(fx.root, { maxFiles: 3, maxFileBytes: 180_000, maxDepth: 14 })
   ok('a truncated snapshot is declared UNKNOWN', tiny.truncated && analyzeSnapshot(tiny, { target: 'lib/missions/service.ts', depth: 'quick', outputs: ['all'] }).result.risks.some((c) => c.basis === 'UNKNOWN' && /file cap/.test(c.text)))
 
+  console.log('review-driven honesty fixes')
+  const rv = run('lib/missions/store.ts').result.maps.reverse!
+  ok('reverse map edges run dependent -> owner and cite the dependent\'s import', rv.edges.length > 0 && rv.edges.every((e) => { const ev = run('lib/missions/store.ts').evidence.find((x) => x.id === e.evidence[0]); return !!ev && ev.file === e.from && /imports|fetch/.test(ev.note) }))
+  const pinger = JSON.stringify(run('lib/client/pinger.ts'))
+  ok('query-string secrets and secret-looking targets are not recorded', !/SECRET123XYZ|api_key|secret_token_file/.test(pinger))
+  ok('a local function named like an fs call is not persistence', !run('lib/client/pinger.ts').result.state.storage.some((x) => x.api === 'rename'))
+  ok('a static route wins over a dynamic one and the method is honoured', run('lib/client/newcall.ts').result.routes.some((r) => r.file === 'app/api/missions/new/route.ts'))
+  const prose = run('please edit lib/missions/service.ts and do not touch lib/missions/store.ts')
+  ok('a path inside prose is INFERENCE, not FACT', prose.target.kind === 'file' && prose.target.basis === 'INFERENCE')
+  ok('only the whole input being a path is FACT', run('lib/missions/service.ts').target.basis === 'FACT')
   console.log('read-only behaviour')
   ok('fixture tree byte-identical after all analyses', treeHash(fx.base) === before)
   const logDir = mkdtempSync(path.join(os.tmpdir(), 're-log-'))
@@ -234,6 +252,10 @@ try {
   const hd = buildDraftFromAnalysis(fileRec, draftIn)
   ok('FACT target seeds paths, write scope and targets', hd.paths.includes('lib/missions/service.ts') && hd.paths.includes('lib/missions/store.ts') && hd.write.join() === 'lib/missions/service.ts' && hd.targets[0]?.path === 'lib/missions/service.ts')
   ok('analysis context rides in the request, within the request limit', /REVERSE ENGINEER CONTEXT/.test(hd.request) && hd.request.length <= 2000 && hd.request.startsWith('Make cancelling'))
+  const proseRec = runAnalysis({ target: 'please edit lib/missions/service.ts today' }, 'commander:test', { log, repo: fx.root })
+  const hp = buildDraftFromAnalysis(proseRec, draftIn)
+  ok('scope is not derived from a path mentioned in prose', hp.write.length === 0 && hp.targets.length === 0)
+  ok('derivedFromProse suppresses scope even for a FACT analysis', buildDraftFromAnalysis(fileRec, draftIn, { derivedFromProse: true }).write.length === 0)
   const nlRec = runAnalysis({ target: 'how a mission is cancelled' }, 'commander:test', { log, repo: fx.root })
   const hn = buildDraftFromAnalysis(nlRec, draftIn)
   ok('INFERENCE target seeds context only: no write scope or targets are invented', hn.write.length === 0 && hn.targets.length === 0)

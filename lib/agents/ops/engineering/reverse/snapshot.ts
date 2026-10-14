@@ -31,7 +31,8 @@ export function ignoredDirMatchers(root: string): ((rel: string) => boolean)[] {
     let l = raw.trim()
     if (!l || l.startsWith('#') || l.startsWith('!')) continue
     const anchored = l.startsWith('/') || l.replace(/\/$/, '').includes('/')
-    l = l.replace(/^\//, '').replace(/\/$/, '')
+    l = l.replace(/^\//, '').replace(/\/$/, '').replace(/\*+/g, '*')
+    if (l.length > 200) continue
     if (!l || /[?\[]/.test(l)) continue
     // a pattern with an extension-like glob (*.log) names files, not directories
     if (/^\*\./.test(l)) continue
@@ -46,6 +47,7 @@ export function readHead(root: string): string | null {
     const head = readFileSync(path.join(root, '.git', 'HEAD'), 'utf8').trim()
     if (!head.startsWith('ref:')) return head
     const ref = head.slice(4).trim()
+    if (!ref.startsWith('refs/') || ref.split('/').includes('..')) return null
     const loose = path.join(root, '.git', ref)
     if (existsSync(loose)) return readFileSync(loose, 'utf8').trim()
     const packed = readFileSync(path.join(root, '.git', 'packed-refs'), 'utf8').split('\n').find((l) => l.endsWith(' ' + ref))

@@ -33,6 +33,12 @@ const STATE_NAME = /(state|status|phase|stage|mode|kind)$/i
 const STATE_FIELD = /^(state|status|phase|stage)$/i
 const DB_CALL = /^(from|insert|upsert|update|delete|select|rpc)$/
 
+const SECRETISH = /(key|token|secret|passw|credential|bearer|auth)/i
+/** Persisted evidence must not carry secrets: drop query strings and credentials from URLs, and mask secret-looking targets. */
+const cleanUrl = (u: string) => u.replace(/\/\/[^/@\s]+@/, '//').split('?')[0].split('#')[0]
+const cleanTarget = (t: string) => (SECRETISH.test(t) ? '[redacted]' : t.replace(/\/\/[^/@\s]+@/, '//').split('?')[0]).slice(0, 60)
+const FS_MODULES = new Set(['fs', 'node:fs', 'fs/promises', 'node:fs/promises'])
+
 const kindFor = (rel: string) => (rel.endsWith('.tsx') ? ts.ScriptKind.TSX : rel.endsWith('.jsx') ? ts.ScriptKind.JSX : rel.endsWith('.ts') ? ts.ScriptKind.TS : ts.ScriptKind.JS)
 
 function litText(n: ts.Node | undefined, src: ts.SourceFile): { text: string; dynamic: boolean } | null {
@@ -49,6 +55,7 @@ function litText(n: ts.Node | undefined, src: ts.SourceFile): { text: string; dy
 
 export function scanSignals(rel: string, content: string): FileSignals {
   const src = ts.createSourceFile(rel, content, ts.ScriptTarget.Latest, true, kindFor(rel))
+  const fsNames = new Set<string>(), fsNs = new Set<string>()
   const out: FileSignals = { methods: [], statuses: [], actions: [], fetches: [], persist: [], unions: [], assigns: [], ui: [], testIds: [], calls: Object.create(null) as Record<string, string[]>, external: [], dynamicImports: 0 }
   const line = (n: ts.Node) => src.getLineAndCharacterOfPosition(n.getStart(src)).line + 1
   const isRoute = /(^|\/)route\.(t|j)sx?$/.test(rel)
@@ -75,6 +82,12 @@ export function scanSignals(rel: string, content: string): FileSignals {
 
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const s = node.moduleSpecifier.text
+      if (FS_MODULES.has(s) && node.importClause?.namedBindings) {
+        const nb = node.importClause.namedBindings
+        if (ts.isNamespaceImport(nb)) fsNs.add(nb.name.text)
+        else for (const el of nb.elements) fsNames.add((el.propertyName ?? el.name).text === el.name.text ? el.name.text : el.name.text)
+      }
+      if (FS_MODULES.has(s) && node.importClause?.name) fsNs.add(node.importClause.name.text)
       if (!s.startsWith('.') && !s.startsWith('@/') && !out.external.includes(s)) out.external.push(s)
     }
     if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) out.dynamicImports += 1
@@ -99,7 +112,7 @@ export function scanSignals(rel: string, content: string): FileSignals {
       let method = 'GET'
       const opts = node.arguments[1]
       if (opts && ts.isObjectLiteralExpression(opts)) for (const p of opts.properties) if (ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === 'method') method = litText(p.initializer, src)?.text.toUpperCase() ?? 'UNKNOWN'
-      if (u) out.fetches.push({ url: u.text, method, line: line(node), enclosing: enclosing(), dynamic: u.dynamic })
+      if (u) out.fetches.push({ url: cleanUrl(u.text), method, line: line(node), enclosing: enclosing(), dynamic: u.dynamic })
       else out.fetches.push({ url: '(non-literal)', method, line: line(node), enclosing: enclosing(), dynamic: true })
     }
     // calls
@@ -110,15 +123,17 @@ export function scanSignals(rel: string, content: string): FileSignals {
       if (name && ts.isPropertyAccessExpression(node.expression)) {
         const arg0 = litText(node.arguments[0], src)?.text ?? ''
         const api = `${root}.${name}`
-        if (FS_WRITE.has(name) && /^(fs|fsp|promises|fsPromises)$/.test(root) || (FS_WRITE.has(name) && root === '')) out.persist.push({ api, op: /^(mkdir|rename|copy)/.test(name) ? 'change' : name.startsWith('append') ? 'change' : 'create', target: arg0 || node.arguments[0]?.getText(src).slice(0, 60) || '', line: line(node), enclosing: enclosing() })
-        else if (FS_DELETE.has(name) && /^(fs|fsp|promises|fsPromises)$/.test(root)) out.persist.push({ api, op: 'delete', target: node.arguments[0]?.getText(src).slice(0, 60) ?? '', line: line(node), enclosing: enclosing() })
-        else if (FS_READ.has(name) && /^(fs|fsp|promises|fsPromises)$/.test(root)) out.persist.push({ api, op: 'read', target: node.arguments[0]?.getText(src).slice(0, 60) ?? '', line: line(node), enclosing: enclosing() })
-        else if ((root === 'localStorage' || root === 'sessionStorage') && /^(setItem|removeItem|getItem)$/.test(name)) out.persist.push({ api, op: 'browser-storage', target: arg0, line: line(node), enclosing: enclosing() })
-        else if (DB_CALL.test(name) && /supabase|db|client|prisma|admin/i.test(root)) out.persist.push({ api, op: 'db', target: arg0, line: line(node), enclosing: enclosing() })
+        const isFs = fsNs.has(root) || /^(fs|fsp|promises|fsPromises)$/.test(root) && (fsNs.size > 0 || fsNames.size > 0 || true)
+        if (FS_WRITE.has(name) && isFs) out.persist.push({ api, op: /^(mkdir|rename|copy)/.test(name) ? 'change' : name.startsWith('append') ? 'change' : 'create', target: cleanTarget(arg0 || node.arguments[0]?.getText(src) || ''), line: line(node), enclosing: enclosing() })
+        else if (FS_DELETE.has(name) && isFs) out.persist.push({ api, op: 'delete', target: cleanTarget(node.arguments[0]?.getText(src) ?? ''), line: line(node), enclosing: enclosing() })
+        else if (FS_READ.has(name) && isFs) out.persist.push({ api, op: 'read', target: cleanTarget(node.arguments[0]?.getText(src) ?? ''), line: line(node), enclosing: enclosing() })
+        else if ((root === 'localStorage' || root === 'sessionStorage') && /^(setItem|removeItem|getItem)$/.test(name)) out.persist.push({ api, op: 'browser-storage', target: cleanTarget(arg0), line: line(node), enclosing: enclosing() })
+        else if (DB_CALL.test(name) && /^(supabase\w*|prisma|db|sb)$/i.test(root)) out.persist.push({ api, op: 'db', target: cleanTarget(arg0), line: line(node), enclosing: enclosing() })
       } else if (name && ts.isIdentifier(node.expression)) {
-        if (FS_WRITE.has(name)) out.persist.push({ api: name, op: /^(mkdir|rename|copy)/.test(name) ? 'change' : name.startsWith('append') ? 'change' : 'create', target: node.arguments[0]?.getText(src).slice(0, 60) ?? '', line: line(node), enclosing: enclosing() })
-        else if (FS_DELETE.has(name)) out.persist.push({ api: name, op: 'delete', target: node.arguments[0]?.getText(src).slice(0, 60) ?? '', line: line(node), enclosing: enclosing() })
-        else if (FS_READ.has(name)) out.persist.push({ api: name, op: 'read', target: node.arguments[0]?.getText(src).slice(0, 60) ?? '', line: line(node), enclosing: enclosing() })
+        if (!fsNames.has(name) && (FS_WRITE.has(name) || FS_DELETE.has(name) || FS_READ.has(name))) { /* a local function that merely shares an fs name is not persistence */ }
+        else if (FS_WRITE.has(name)) out.persist.push({ api: name, op: /^(mkdir|rename|copy)/.test(name) ? 'change' : name.startsWith('append') ? 'change' : 'create', target: cleanTarget(node.arguments[0]?.getText(src) ?? ''), line: line(node), enclosing: enclosing() })
+        else if (FS_DELETE.has(name)) out.persist.push({ api: name, op: 'delete', target: cleanTarget(node.arguments[0]?.getText(src) ?? ''), line: line(node), enclosing: enclosing() })
+        else if (FS_READ.has(name)) out.persist.push({ api: name, op: 'read', target: cleanTarget(node.arguments[0]?.getText(src) ?? ''), line: line(node), enclosing: enclosing() })
         else if (name === 'useState' || name === 'useReducer') {
           const decl = node.parent
           const nm = ts.isVariableDeclaration(decl) && ts.isArrayBindingPattern(decl.name) && decl.name.elements[0] && ts.isBindingElement(decl.name.elements[0]) ? decl.name.elements[0].name.getText(src) : ''
