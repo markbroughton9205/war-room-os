@@ -16,6 +16,11 @@ import { runWithFailover, schedule, type PlacementOk, type World } from './sched
 import { ForgeStore } from './store'
 import type { BenchmarkRecord, ModelEntry, ResourceProfile } from './types'
 import { readFileSync } from 'node:fs'
+import { qualification, classRates } from './rank'
+import { SPECIALIST_CANDIDATES, promoteFromEvidence, earnedRoles } from './specialists'
+import { CLASS_GATES } from './roles'
+import { recommendResidency } from './resourceProfile'
+import { INTENT_ROLE, ROLE_FALLBACK, routeTask, routingTable } from './roleRouting'
 import { probeLocalNode, type LocalProbeDeps } from './localNode'
 import { buildComputeView } from './computeView'
 import { computeViewModel } from './computeViewModel'
@@ -46,8 +51,10 @@ const many = (ref: string, role: ModelRole, wins: number, losses = 0) => [...Arr
 check('C01_there_are_eight_compute_roles_each_with_a_gate', MODEL_ROLES.length === 8 && MODEL_ROLES.every((r) => ROLE_GATES[r].minRuns > 0 && ROLE_GATES[r].minRate > 0))
 check('C02_every_legacy_pool_role_maps_and_escalation_maps_to_nothing', LEGACY_TO_MODEL_ROLE.BUILDER === 'PRIMARY_BUILDER' && LEGACY_TO_MODEL_ROLE.TEST_REVIEWER === 'ARCHITECT_REVIEWER' && LEGACY_TO_MODEL_ROLE.ESCALATION === null && Object.keys(LEGACY_TO_MODEL_ROLE).length === 5)
 
+/** reviewer runs carry fixture classes (7 flawed, 3 clean per 10); losses are placed on flawed fixtures so the 90% clean gate still holds */
+const archRuns = (ref: string, wins: number, losses = 0): BenchmarkRecord[] => [...Array(losses)].map(() => run(ref, 'ARCHITECT_REVIEWER', false)).concat([...Array(wins)].map(() => run(ref, 'ARCHITECT_REVIEWER', true))).map((b, i) => ({ ...b, fixtureClass: i % 10 < 7 ? 'flawed' : 'clean' }))
 // ------------------------------------------------------------------ ranking by role
-const rb = [...many(BUILD.ref, 'PRIMARY_BUILDER', 9), ...many(REVIEW.ref, 'ARCHITECT_REVIEWER', 9, 1), ...many(FAST.ref, 'FAST_REPAIR_WORKER', 5)]
+const rb = [...many(BUILD.ref, 'PRIMARY_BUILDER', 9), ...archRuns(REVIEW.ref, 9, 1), ...many(FAST.ref, 'FAST_REPAIR_WORKER', 5)]
 const rBuilder = rankForRole('PRIMARY_BUILDER', MODELS, rb)
 check('C03_a_model_with_a_full_gate_is_qualified_for_its_role', rBuilder.ranked[0]?.ref === BUILD.ref && rBuilder.ranked[0].qualified && rBuilder.basis === 'EVIDENCE')
 check('C04_evidence_for_one_role_gives_no_credit_in_another', rankForRole('RESEARCH_GENERALIST', MODELS, rb).basis === 'NO_EVIDENCE' && !rankForRole('ARCHITECT_REVIEWER', MODELS, rb).ranked.some((r) => r.ref === BUILD.ref))
@@ -163,7 +170,7 @@ const dArgs = (r: ReturnType<typeof mkRack>, o: Partial<Parameters<typeof dispat
 
 // ------------------------------------------------------------------ scheduler
 const profs: ModelResourceProfile[] = []
-const evidence = [...many(BUILD.ref, 'PRIMARY_BUILDER', 9), ...many(REVIEW.ref, 'ARCHITECT_REVIEWER', 10), ...many(FAST.ref, 'FAST_REPAIR_WORKER', 10)]
+const evidence = [...many(BUILD.ref, 'PRIMARY_BUILDER', 9), ...archRuns(REVIEW.ref, 10), ...many(FAST.ref, 'FAST_REPAIR_WORKER', 10)]
 const world = (o: Partial<World> = {}): World => ({ nodes: [local], models: MODELS, benchmarks: evidence, profiles: profs, now: NOW, ...o })
 const ok = (p: ReturnType<typeof schedule>): PlacementOk => { if (!p.ok) throw new Error('expected placement: ' + p.reason); return p }
 check('S01_no_evidence_for_a_role_means_no_placement_and_nothing_is_defaulted', (() => { const p = schedule({ jobId: 'a', role: 'SECURITY_REVIEWER' }, world()); return !p.ok && p.code === 'NO_QUALIFIED_MODEL' })())
@@ -344,6 +351,90 @@ const pdeps = (up: boolean): LocalProbeDeps => ({ fetchImpl: fakeFetch(up), now:
   check('T16_the_harness_shadow_is_opt_in_and_never_replaces_the_builder_client', /process\.env\.FOUNDRY_COMPUTE === '1'/.test(src) && /mode: 'SHADOW'/.test(src) && /const real: ModelClient = poolGov \?/.test(src) && /compute: computeShadow/.test(src))
   const route = readFileSync(path.join(process.cwd(), 'app/api/foundry/agents/ops/route.ts'), 'utf8')
   check('T17_the_compute_section_is_behind_the_same_route_guard_as_pool', /section'\) === 'compute'/.test(route) && route.indexOf("=== 'compute'") > route.indexOf('export async function GET'))
+}
+
+// ------------------------------------------------------------------ stage 3: class gates and evidence-based promotion
+const cls = (ref: string, role: ModelRole, klass: string, wins: number, losses: number): BenchmarkRecord[] => [...Array(wins)].map(() => run(ref, role, true, { fixtureClass: klass })).concat([...Array(losses)].map(() => run(ref, role, false, { fixtureClass: klass })))
+{
+  const SEC = mk('sec:7b')
+  const flagsEverything = [...cls(SEC.ref, 'SECURITY_REVIEWER', 'vulnerable', 10, 0), ...cls(SEC.ref, 'SECURITY_REVIEWER', 'safe', 5, 2)]
+  const q1 = qualification(SEC.ref, 'SECURITY_REVIEWER', flagsEverything)
+  check('U01_a_security_model_that_flags_safe_code_fails_the_class_gate_despite_a_high_overall_rate', !q1.qualified && q1.evidence.rate >= 0.8 && q1.problems.some((p) => /safe .* class gate/.test(p)), JSON.stringify(q1.problems))
+  const good = [...cls(SEC.ref, 'SECURITY_REVIEWER', 'vulnerable', 9, 1), ...cls(SEC.ref, 'SECURITY_REVIEWER', 'safe', 7, 0)]
+  check('U02_detection_and_a_clean_false_positive_record_qualify', qualification(SEC.ref, 'SECURITY_REVIEWER', good).qualified)
+  check('U03_a_missing_class_counts_against_the_model', !qualification(SEC.ref, 'SECURITY_REVIEWER', cls(SEC.ref, 'SECURITY_REVIEWER', 'vulnerable', 12, 0)).qualified && qualification(SEC.ref, 'SECURITY_REVIEWER', cls(SEC.ref, 'SECURITY_REVIEWER', 'vulnerable', 12, 0)).problems.some((p) => /no safe runs/.test(p)))
+  check('U04_roles_without_class_gates_need_only_the_overall_gate', qualification(FAST.ref, 'FAST_REPAIR_WORKER', many(FAST.ref, 'FAST_REPAIR_WORKER', 19, 1)).qualified && !CLASS_GATES.FAST_REPAIR_WORKER)
+  check('U05_class_rates_are_computed_per_class_for_one_role_only', (() => { const r = classRates(SEC.ref, 'SECURITY_REVIEWER', [...good, ...cls(SEC.ref, 'ARCHITECT_REVIEWER', 'safe', 5, 0)]); return r.vulnerable.n === 10 && r.safe.n === 7 && r.safe.rate === 1 })())
+  check('U06_rank_for_role_uses_the_class_gates', (() => { const r = rankForRole('SECURITY_REVIEWER', [SEC], flagsEverything).ranked[0]; return !r.qualified && /class gate/.test(r.reason) })())
+  const cand = SPECIALIST_CANDIDATES.find((c) => c.ref === 'qwen2.5-coder:7b')!
+  const none = promoteFromEvidence(cand, [])
+  check('U07_a_specialist_with_no_evidence_stays_a_candidate_and_ineligible', none.entry.status === 'CANDIDATE' && !none.entry.routing.eligible && none.earned.length === 0 && none.entry.roles.length === 0)
+  const proof = promoteFromEvidence(cand, many(cand.ref, 'FAST_REPAIR_WORKER', 20), 'sha256:abc', 4 * GiB)
+  check('U08_clearing_one_gate_promotes_to_active_with_only_that_role_and_pins_the_digest', proof.entry.status === 'ACTIVE' && proof.entry.routing.eligible && proof.earned.join() === 'FAST_REPAIR_WORKER' && proof.entry.digest === 'sha256:abc' && proof.entry.artifactBytes === 4 * GiB)
+  check('U09_a_promoted_model_is_still_no_evidence_for_every_other_role', rankForRole('ARCHITECT_REVIEWER', [proof.entry], many(cand.ref, 'FAST_REPAIR_WORKER', 20)).basis === 'NO_EVIDENCE' && rankForRole('PRIMARY_BUILDER', [proof.entry], many(cand.ref, 'FAST_REPAIR_WORKER', 20)).basis === 'NO_EVIDENCE')
+  check('U10_failing_a_role_gate_is_recorded_as_not_qualified_with_the_counts', (() => { const e = earnedRoles(cand.ref, many(cand.ref, 'DEBUGGER_TEST_SPECIALIST', 6, 14)); return e.earned.length === 0 && /6\/20/.test(e.evidence.DEBUGGER_TEST_SPECIALIST ?? '') && /not qualified/.test(e.evidence.DEBUGGER_TEST_SPECIALIST ?? '') })())
+  check('U11_the_candidate_list_names_the_five_planned_models_with_licence_statements_and_none_is_eligible', SPECIALIST_CANDIDATES.length === 5 && SPECIALIST_CANDIDATES.every((c) => c.status === 'CANDIDATE' && !c.routing.eligible && c.license.statement.length > 10))
+  check('U12_a_promoted_specialist_does_not_displace_the_builder_route', (() => { const a = assignPool([BUILD, proof.entry], [...many(BUILD.ref, 'PRIMARY_BUILDER', 2), ...many(cand.ref, 'FAST_REPAIR_WORKER', 20)].map((b) => ({ ...b, taskClass: 'complete_feature' as const, role: undefined })).slice(0, 2)); return a.members[0].modelRef === BUILD.ref })())
+}
+
+// ------------------------------------------------------------------ stage 3: routing by role with explicit fallback
+{
+  const fastEv = many(FAST.ref, 'FAST_REPAIR_WORKER', 20)
+  const w = (o: Partial<World> = {}): World => world({ benchmarks: [...evidence, ...fastEv], ...o })
+  const bw = (o: Partial<World> = {}): World => world({ benchmarks: many(BUILD.ref, 'PRIMARY_BUILDER', 9), ...o }) // only the builder has evidence
+  const syn = routeTask('syntax_import_repair', w())
+  check('V01_a_qualified_fast_repair_model_gets_syntax_and_import_repair', syn.via === 'SPECIALIST' && syn.modelRef === FAST.ref && syn.role === 'FAST_REPAIR_WORKER')
+  check('V02_feature_builds_go_to_the_primary_builder_not_the_specialist', routeTask('feature_build', w()).modelRef === BUILD.ref && routeTask('feature_build', w()).via === 'PRIMARY_BUILDER')
+  check('V03_small_implementation_stays_with_the_builder_because_the_suite_measures_edits_not_new_code', INTENT_ROLE.small_implementation === 'PRIMARY_BUILDER' && routeTask('small_implementation', w()).modelRef === BUILD.ref)
+  const noFast = routeTask('syntax_import_repair', bw())
+  check('V04_without_a_qualified_repair_model_the_builder_does_the_repair_and_the_route_says_so', noFast.via === 'FALLBACK_BUILDER' && noFast.modelRef === BUILD.ref && /builder does it itself/.test(noFast.reason) && ROLE_FALLBACK.FAST_REPAIR_WORKER === 'BUILDER')
+  const rev = routeTask('contract_review', bw())
+  check('V05_an_independent_review_is_never_done_by_the_builder', rev.via === 'UNAVAILABLE' && rev.modelRef === null && ROLE_FALLBACK.ARCHITECT_REVIEWER === 'NONE' && /no substitute/.test(rev.reason))
+  const sec = routeTask('security_review', bw())
+  check('V06_security_review_has_no_substitute_when_no_model_is_qualified', sec.via === 'UNAVAILABLE' && ROLE_FALLBACK.SECURITY_REVIEWER === 'NONE')
+  const ret = routeTask('repo_context_search', bw())
+  check('V07_retrieval_and_rerank_fall_back_to_deterministic_methods', ret.via === 'FALLBACK_DETERMINISTIC' && routeTask('rerank_candidates', bw()).via === 'FALLBACK_DETERMINISTIC')
+  check('V08_when_the_builder_cannot_be_placed_a_repair_is_unavailable_not_invented', routeTask('syntax_import_repair', bw({ nodes: [{ ...local, lastHeartbeat: ago(60_000).toISOString() }] })).via === 'UNAVAILABLE')
+  const tbl = routingTable(w())
+  check('V09_the_table_covers_every_intent_once_and_every_role_has_a_fallback_rule', tbl.length === Object.keys(INTENT_ROLE).length && new Set(tbl.map((r) => r.intent)).size === tbl.length && MODEL_ROLES.every((r) => r in ROLE_FALLBACK))
+  const dbg = routeTask('failure_diagnosis', w({ benchmarks: [...evidence, ...fastEv] }))
+  check('V10_a_model_qualified_only_for_repair_is_not_used_for_diagnosis', dbg.via === 'FALLBACK_BUILDER' && dbg.modelRef === BUILD.ref)
+}
+// workflow hook: opt-in, bounded to the first retry of a bounded problem, never fails the step
+{
+  const wf = readFileSync(path.join(process.cwd(), 'lib/agents/ops/engineering/workflow.ts'), 'utf8')
+  check('V11_the_fast_repair_hook_is_opt_in_first_retry_only_and_excludes_tests_and_route_conflicts', /fastRepair\?: \{ label: string; model: ModelClient \}/.test(wf) && /const useFastRepair = !!deps\.fastRepair && rej === 0 && job\.role !== 'test' && !contractFile/.test(wf) && /!\/\^route conflict/.test(wf))
+  check('V12_a_failed_specialist_call_falls_back_to_the_builder_in_the_same_retry', /if \(!reply\.ok\) \{ fastStats\.failedCalls \+= 1; fastPending = false; reply = await askFile\(rejNotes, rej \+ 1\) \}/.test(wf))
+  check('V13_the_result_reports_fast_repair_usage_only_when_configured', /\.\.\.\(deps\.fastRepair \? \{ fastRepair: \{ \.\.\.fastStats \} \} : \{\}\)/.test(wf))
+}
+
+// ------------------------------------------------------------------ stage 3: the designated primary builder
+{
+  const history = [...many(BUILD.ref, 'PRIMARY_BUILDER', 9, 3)]
+  const noDesignation = schedule({ jobId: 'd1', role: 'PRIMARY_BUILDER' }, world({ benchmarks: history }))
+  check('W01_without_a_designation_a_builder_with_failures_in_its_history_is_not_qualified', !noDesignation.ok)
+  const designated = schedule({ jobId: 'd2', role: 'PRIMARY_BUILDER' }, world({ benchmarks: history, designatedBuilder: BUILD.ref }))
+  check('W02_the_designated_builder_is_placed_on_its_proven_history_and_the_decision_says_so', designated.ok && designated.modelRef === BUILD.ref && /designated primary builder/.test(designated.reason))
+  const rival = mk('rival:30b', { artifactBytes: 6 * GiB }); const rivalNode = { ...local, installedModels: [...local.installedModels, { ref: rival.ref, digest: 'd', sizeBytes: 6 * GiB }] }
+  const better = schedule({ jobId: 'd3', role: 'PRIMARY_BUILDER' }, world({ models: [BUILD, rival], nodes: [rivalNode], benchmarks: [...history, ...many(rival.ref, 'PRIMARY_BUILDER', 20)], designatedBuilder: BUILD.ref }))
+  check('W03_a_better_scoring_rival_never_replaces_the_designated_builder_by_the_scheduler', better.ok && better.modelRef === BUILD.ref)
+  const missing = schedule({ jobId: 'd4', role: 'PRIMARY_BUILDER' }, world({ benchmarks: history, designatedBuilder: 'ghost:1b' }))
+  check('W04_a_designated_builder_that_is_not_registered_or_not_installed_is_not_placed_and_nothing_takes_its_place', !missing.ok)
+  const other = schedule({ jobId: 'd5', role: 'FAST_REPAIR_WORKER' }, world({ benchmarks: [...history, ...many(FAST.ref, 'FAST_REPAIR_WORKER', 20)], designatedBuilder: BUILD.ref }))
+  check('W05_the_designation_only_affects_the_builder_role', other.ok && other.modelRef === FAST.ref)
+  const resident = { ...local, resident: [{ ref: BUILD.ref, sizeBytes: 14 * GiB, vramBytes: 12 * GiB }], load: { ...load, vramUsedMiB: 14800 } }
+  const bothQualified = schedule({ jobId: 'd6', role: 'FAST_REPAIR_WORKER' }, world({ nodes: [resident], benchmarks: [...many(BUILD.ref, 'FAST_REPAIR_WORKER', 20), ...many(FAST.ref, 'FAST_REPAIR_WORKER', 20)], keep: [BUILD.ref], designatedBuilder: BUILD.ref }))
+  check('W06_when_the_builder_is_resident_and_also_qualified_for_repair_the_repair_stays_on_it_avoiding_a_swap', bothQualified.ok && bothQualified.modelRef === BUILD.ref && bothQualified.evict.length === 0)
+}
+
+// ------------------------------------------------------------------ stage 3: residency recommendation from measured numbers
+{
+  const ctx = { builderVramMiB: 12329, gpuTotalMiB: 16311, desktopIdleMiB: 2339 }
+  check('X01_the_designated_builder_is_resident_with_a_ten_minute_keep_alive', (() => { const r = recommendResidency({ isBuilder: true, vramMiB: 12329, cpuOffloadMiB: 2912, loadMs: 14477 }, ctx); return r.recommendation === 'RESIDENT' && r.keepAlive === '10m' })())
+  check('X02_a_helper_that_does_not_fit_next_to_the_builder_is_transient_with_keep_alive_zero_even_a_small_embedder', (() => { const r = recommendResidency({ isBuilder: false, vramMiB: 2029, cpuOffloadMiB: 0, loadMs: 1900 }, ctx); return r.recommendation === 'TRANSIENT' && r.keepAlive === '0' && /does not fit next to the builder/.test(r.reason) })())
+  check('X03_a_model_that_needs_cpu_offload_is_on_demand_only', (() => { const r = recommendResidency({ isBuilder: false, vramMiB: 12290, cpuOffloadMiB: 6409, loadMs: 16182 }, ctx); return r.recommendation === 'ON_DEMAND_ONLY' })())
+  check('X04_coexistence_is_recommended_only_when_the_measured_sizes_fit_with_the_desktops_use', (() => { const r = recommendResidency({ isBuilder: false, vramMiB: 800, cpuOffloadMiB: 0, loadMs: 900 }, { ...ctx, builderVramMiB: 9000 }); return r.recommendation === 'COEXIST_OK' && r.keepAlive === '5m' })())
+  check('X05_an_unmeasured_model_is_unknown_and_unloads_at_once', (() => { const r = recommendResidency({ isBuilder: false, vramMiB: 'UNKNOWN', cpuOffloadMiB: 'UNKNOWN', loadMs: 'UNKNOWN' }, ctx); return r.recommendation === 'UNKNOWN' && r.keepAlive === '0' })())
 }
 
 console.log(`FORGE_COMPUTE_VALIDATION ${fails ? 'FAIL (' + fails + ')' : 'PASS'}`)

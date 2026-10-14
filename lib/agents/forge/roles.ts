@@ -37,3 +37,14 @@ export const ROLE_GATES: Record<ModelRole, RoleGate> = {
   RERANKER: { minRuns: 10, minRate: 0.9 },
   SECURITY_REVIEWER: { minRuns: 10, minRate: 0.8 },
 }
+
+/**
+ * Per-class gates for roles whose suites mix fixture classes. A role needs BOTH the overall gate and every class gate, so a model that passes by
+ * flagging everything (or nothing) cannot qualify: security needs detection AND a low false-positive rate, the reviewer needs detection AND a low
+ * false-rejection rate, research needs grounded answers AND declining what the passage does not say.
+ */
+export const CLASS_GATES: Partial<Record<ModelRole, Record<string, number>>> = {
+  SECURITY_REVIEWER: { vulnerable: 0.8, safe: 0.85 },
+  ARCHITECT_REVIEWER: { flawed: 0.8, clean: 0.9 },
+  RESEARCH_GENERALIST: { answerable: 0.8, unanswerable: 0.8 },
+}

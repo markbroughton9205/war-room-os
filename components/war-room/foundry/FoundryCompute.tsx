@@ -24,6 +24,8 @@ export function FoundryCompute() {
       {vm.nodes.map((n) => (<div key={n.id} className="mb-2 text-sm"><div className="font-medium">{n.title}</div><div className="text-gray-300 text-xs">{n.detail}</div></div>))}
       <h3 className="text-sm mt-3 mb-1">Role placement (would-place)</h3>
       {vm.roles.map((r) => (<div key={r.id} className="mb-1 text-sm"><div className="font-medium">{r.title}</div><div className="text-gray-300 text-xs">{r.detail}</div></div>))}
+      <h3 className="text-sm mt-3 mb-1">Task routing (by role, with explicit fallback)</h3>
+      {vm.routing.map((r) => (<div key={r.id} className="mb-1 text-sm"><div className="font-medium">{r.title}</div><div className="text-gray-300 text-xs">{r.detail}</div></div>))}
       <h3 className="text-sm mt-3 mb-1">Measured resource profiles</h3>
       {vm.profiles.length ? vm.profiles.map((p) => (<div key={p.id} className="mb-1 text-sm"><div className="font-medium">{p.title}</div><div className="text-gray-300 text-xs">{p.detail}</div></div>)) : <div className="text-xs text-gray-400">none stored yet</div>}
       {vm.notes.map((n) => (<div key={n} className="text-xs text-amber-300">{n}</div>))}

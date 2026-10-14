@@ -947,4 +947,38 @@ void deriveAssignments; void AgentRegistry
   check('P46_without_contractTests_the_legacy_flow_is_unchanged_no_plan_no_harness_no_contract_files', rl.status === 'COMPLETED' && rl.testPlan === null && !lg.ws.exists(HARNESS_PATH) && !lg.ws.exists(F1) && (rl.cleanBlockers ?? []).length === 0)
 }
 
+// ---- FAST_REPAIR specialist (opt-in): the first retry of an implementation file rejected for a bounded syntax problem; the builder takes anything further
+{
+  const P = 'src/chatService.mjs'
+  const brokenOnce = () => { let n = 0; return (c: ScriptCtx) => (c.kind === 'file' && c.path === P && n++ === 0 ? fenced(SOLUTION[P] + '\n}}}\n') : good(c)) }
+  const isRepairAsk = (c: ScriptCtx) => c.kind === 'file' && c.path === P
+  const fx1 = makeWorld(); const evf1: string[] = []
+  const b1 = new ScriptedModel(brokenOnce()), f1 = new ScriptedModel((c) => (isRepairAsk(c) ? fenced(SOLUTION[P]) : null))
+  const rf1 = await runFeatureWorkflow(deps(fx1, b1, { fastRepair: { label: 'fast-model', model: f1 }, onEvent: (e) => evf1.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('FR01_the_fast_worker_takes_the_first_retry_of_a_bounded_syntax_rejection_and_its_accepted_reply_completes_the_build', rf1.status === 'COMPLETED' && rf1.fastRepair?.calls === 1 && rf1.fastRepair.accepted === 1 && rf1.fastRepair.escalated === 0 && b1.calls.filter((c) => c.path === P).length === 1 && f1.calls.length === 1 && evf1.some((e) => e.startsWith('FAST_REPAIR ')) && evf1.some((e) => e.startsWith('FAST_REPAIR_ACCEPTED')), JSON.stringify({ s: rf1.status, fr: rf1.fastRepair, b: b1.calls.filter((c) => c.path === P).length, f: f1.calls.length }))
+  const fx2 = makeWorld(); const evf2: string[] = []
+  const b2 = new ScriptedModel(brokenOnce()), f2 = new ScriptedModel((c) => (isRepairAsk(c) ? fenced(SOLUTION[P] + '\n}}}\n') : null))
+  const rf2 = await runFeatureWorkflow(deps(fx2, b2, { fastRepair: { label: 'fast-model', model: f2 }, onEvent: (e) => evf2.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('FR02_a_fast_reply_that_still_fails_is_escalated_to_the_builder_for_the_next_retry', rf2.status === 'COMPLETED' && rf2.fastRepair?.calls === 1 && rf2.fastRepair.accepted === 0 && rf2.fastRepair.escalated === 1 && b2.calls.filter((c) => c.path === P).length === 2 && evf2.some((e) => e.startsWith('FAST_REPAIR_ESCALATED')), JSON.stringify({ s: rf2.status, fr: rf2.fastRepair }))
+  const fx3 = makeWorld()
+  const b3 = new ScriptedModel(brokenOnce()), f3 = new ScriptedModel(() => null)
+  const rf3 = await runFeatureWorkflow(deps(fx3, b3, { fastRepair: { label: 'fast-model', model: f3 } }), REQ)
+  check('FR03_a_failed_fast_worker_call_never_fails_the_step_the_builder_takes_the_same_retry', rf3.status === 'COMPLETED' && rf3.fastRepair?.failedCalls === 1 && rf3.fastRepair.accepted === 0 && b3.calls.filter((c) => c.path === P).length === 2, JSON.stringify({ s: rf3.status, fr: rf3.fastRepair }))
+  const fx4 = makeWorld()
+  const b4 = new ScriptedModel(brokenOnce())
+  const rf4 = await runFeatureWorkflow(deps(fx4, b4), REQ)
+  check('FR04_without_a_fast_worker_the_builder_takes_every_retry_and_the_result_has_no_fast_repair_section', rf4.status === 'COMPLETED' && rf4.fastRepair === undefined && b4.calls.filter((c) => c.path === P).length === 2)
+  const fx5 = makeWorld()
+  const PS = 'src/messageStore.mjs'
+  let importAsks = 0
+  const b5 = new ScriptedModel((c) => (c.kind === 'file' && c.path === P && importAsks++ === 0 ? fenced("import { nopeExport } from './messageStore.mjs'\n" + SOLUTION[P]) : good(c)))
+  const f5 = new ScriptedModel((c) => (isRepairAsk(c) ? fenced(SOLUTION[P]) : null))
+  const rf5 = await runFeatureWorkflow(deps(fx5, b5, { fastRepair: { label: 'fast-model', model: f5 } }), REQ)
+  check('FR05_an_import_of_a_name_that_does_not_exist_is_a_bounded_problem_for_the_fast_worker', rf5.status === 'COMPLETED' && rf5.fastRepair?.calls === 1 && rf5.fastRepair.accepted === 1 && PS.length > 0, JSON.stringify({ s: rf5.status, fr: rf5.fastRepair }))
+  const fx6 = makeWorld()
+  const b6 = new ScriptedModel(good), f6 = new ScriptedModel(() => fenced('never used'))
+  const rf6 = await runFeatureWorkflow(deps(fx6, b6, { fastRepair: { label: 'fast-model', model: f6 } }), REQ)
+  check('FR06_when_nothing_is_rejected_the_fast_worker_is_never_called', rf6.status === 'COMPLETED' && f6.calls.length === 0 && rf6.fastRepair?.calls === 0)
+}
+
 finish()

@@ -6,7 +6,7 @@ export type Basis = 'MEASURED' | 'ESTIMATED' | 'UNKNOWN'
 import type { ModelRole } from './roles'
 import type { ModelResourceProfile } from './resourceProfile'
 import type { NodeRecord } from './nodeRecord'
-export type TaskClass = 'complete_feature' | 'multi_file_implementation' | 'debugging' | 'review' | 'light_implementation' | 'structured_output'
+export type TaskClass = 'role_benchmark' | 'complete_feature' | 'multi_file_implementation' | 'debugging' | 'review' | 'light_implementation' | 'structured_output'
 
 export type ModelEntry = {
   id: string
@@ -73,6 +73,8 @@ export type BenchmarkRecord = {
   /** Compute stage: the role this run is evidence for, and the node it ran on. Absent on pre-compute records (task class is then the only role evidence). */
   role?: ModelRole
   nodeId?: string
+  /** class of the fixture inside the role suite (e.g. vulnerable / safe); drives the per-class gates */
+  fixtureClass?: string
 }
 export type ForgeRecord =
   | ({ type: 'model'; rid: string; at: string } & ModelEntry)

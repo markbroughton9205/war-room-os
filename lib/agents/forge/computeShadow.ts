@@ -1,4 +1,5 @@
 import type { NodeRecord } from './nodeRecord'
+import { assignPool } from './pool'
 import { schedule, type Placement } from './scheduler'
 import type { ModelResourceProfile } from './resourceProfile'
 import type { ModelRole } from './roles'
@@ -15,7 +16,7 @@ export function shadowDecisions(a: { node: NodeRecord; models: ModelEntry[]; ben
   const now = a.now ?? new Date()
   return a.harness.map((h, i) => {
     // legacy parity: one clean run is enough for the builder here (routeFor's rule), so the shadow allows provisional evidence and says so
-    const placement = schedule({ jobId: `shadow-${i}-${h.role}`, role: h.role }, { nodes: [a.node], models: a.models, benchmarks: a.benchmarks, profiles: a.profiles, now, allowProvisional: true, keep: a.keep ?? (h.role === 'PRIMARY_BUILDER' && h.modelRef ? [h.modelRef] : []) })
+    const placement = schedule({ jobId: `shadow-${i}-${h.role}`, role: h.role }, { nodes: [a.node], models: a.models, benchmarks: a.benchmarks, profiles: a.profiles, now, allowProvisional: true, designatedBuilder: assignPool(a.models, a.benchmarks).members[0].modelRef ?? undefined, keep: a.keep ?? (h.role === 'PRIMARY_BUILDER' && h.modelRef ? [h.modelRef] : []) })
     const agrees = placement.ok && h.modelRef ? placement.modelRef === h.modelRef : null
     const note = !placement.ok ? `scheduler would not place this role: ${placement.reason}` : agrees === null ? 'harness named no model for this role' : agrees ? 'scheduler agrees with the harness' : `scheduler prefers ${placement.modelRef}, harness ran ${h.modelRef}`
     return { role: h.role, harnessModel: h.modelRef, placement, agrees, note }

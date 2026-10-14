@@ -34,6 +34,8 @@ export type World = {
   allowUnknownRequirement?: boolean
   /** benchmark mode: model refs allowed without role qualification (never FUTURE_HEAVY / RETIRED) */
   allowUnqualified?: string[]
+  /** the designated primary builder (policy + proven history, e.g. the legacy evidence route). When set, PRIMARY_BUILDER jobs are placed ONLY on this model; replacing it is a decision, not something the scheduler does from a leaderboard. */
+  designatedBuilder?: string
   /** refs to keep resident when possible (the builder) */
   keep?: string[]
   excluded?: { nodeId: string; modelRef?: string }[]
@@ -77,18 +79,20 @@ export function schedule(job: Job, w: World): Placement {
 
   type Cand = { model: ModelEntry; tier: number }
   const cands: Cand[] = []
-  for (const r of ranking.ranked) {
+  const designated = job.role === 'PRIMARY_BUILDER' && w.designatedBuilder ? w.models.find((m) => m.ref === w.designatedBuilder && m.status !== 'FUTURE_HEAVY' && m.status !== 'RETIRED') : undefined
+  if (designated) cands.push({ model: designated, tier: 100 })
+  for (const r of designated ? [] : ranking.ranked) {
     const model = w.models.find((m) => m.ref === r.ref)!
     if (r.qualified) cands.push({ model, tier: 100 + Math.floor(r.evidence.rate * 20) })
     else if (r.provisional && w.allowProvisional) cands.push({ model, tier: Math.floor(r.evidence.rate * 20) })
     else if (allow.has(r.ref)) cands.push({ model, tier: 0 })
     else rejected.push({ nodeId: '*', modelRef: r.ref, code: 'NOT_QUALIFIED', detail: r.reason })
   }
-  for (const ref of allow) {
+  for (const ref of designated ? [] : allow) {
     const model = w.models.find((m) => m.ref === ref)
     if (model && model.status !== 'FUTURE_HEAVY' && model.status !== 'RETIRED' && !cands.some((c) => c.model.ref === ref)) cands.push({ model, tier: 0 })
   }
-  for (const ref of ranking.noEvidence) if (!allow.has(ref)) rejected.push({ nodeId: '*', modelRef: ref, code: 'NOT_QUALIFIED', detail: `no benchmark evidence for ${job.role}` })
+  for (const ref of designated ? [] : ranking.noEvidence) if (!allow.has(ref)) rejected.push({ nodeId: '*', modelRef: ref, code: 'NOT_QUALIFIED', detail: `no benchmark evidence for ${job.role}` })
   if (!cands.length) return { ok: false, jobId: job.jobId, role: job.role, code: 'NO_QUALIFIED_MODEL', reason: `no model is qualified for ${job.role}; nothing is defaulted`, rejected, snapshot }
 
   type Opt = { key: Key; node: NodeRecord; model: ModelEntry; digest?: string; adm: ReturnType<typeof planAdmission>; needsPrepare: boolean; evictsKeep: boolean; resident: boolean }
@@ -137,7 +141,7 @@ export function schedule(job: Job, w: World): Placement {
   if (!opts.length) return { ok: false, jobId: job.jobId, role: job.role, code: 'NO_NODE_FITS', reason: `no node can run a qualified ${job.role} model right now`, rejected, snapshot }
   opts.sort((a, b) => cmp(a.key, b.key))
   const best = opts[0]
-  const why = [`${best.model.ref} on ${best.node.nodeId}`, best.resident ? 'already resident' : 'not resident', best.adm.reason, best.evictsKeep ? 'evicts a kept resident (no alternative)' : '', best.node.simulated ? 'SIMULATED node' : ''].filter(Boolean).join('; ')
+  const why = [`${best.model.ref} on ${best.node.nodeId}`, designated && best.model.ref === designated.ref ? 'designated primary builder' : '', best.resident ? 'already resident' : 'not resident', best.adm.reason, best.evictsKeep ? 'evicts a kept resident (no alternative)' : '', best.node.simulated ? 'SIMULATED node' : ''].filter(Boolean).join('; ')
   for (const o of opts.slice(1)) rejected.push({ nodeId: o.node.nodeId, modelRef: o.model.ref, code: 'NOT_QUALIFIED', detail: 'ranked below the chosen placement' })
   return { ok: true, jobId: job.jobId, role: job.role, nodeId: best.node.nodeId, modelRef: best.model.ref, digest: best.digest, action: best.adm.action === 'REFUSE' ? 'ADMIT' : best.adm.action, evict: best.adm.evict, basis: best.adm.basis, needsPrepare: best.needsPrepare, simulated: !!best.node.simulated, reason: why, rejected, snapshot }
 }

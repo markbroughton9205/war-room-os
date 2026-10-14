@@ -5,6 +5,8 @@ import { rankForRole, type RoleRanking } from './rank'
 import { nodeHealth, type NodeHealth, type NodeRecord } from './nodeRecord'
 import { probeLocalNode, type LocalProbeDeps } from './localNode'
 import { schedule, type Placement } from './scheduler'
+import { assignPool } from './pool'
+import { routingTable, type RouteOutcome } from './roleRouting'
 import type { ModelResourceProfile } from './resourceProfile'
 
 /**
@@ -16,6 +18,8 @@ export type ComputeView = {
   nodes: { record: NodeRecord; health: NodeHealth; runtimeVersion?: string }[]
   profiles: ModelResourceProfile[]
   roles: { role: ModelRole; ranking: RoleRanking; placement: Placement }[]
+  /** what each kind of work would be routed to now, with the explicit fallback when a role has no qualified model */
+  routing: RouteOutcome[]
   notes: string[]
 }
 
@@ -26,6 +30,8 @@ export async function buildComputeView(opts: { store?: ForgeStore; base?: string
   const models = registered.length ? registered : FIRST_POOL
   const benchmarks = store.benchmarks()
   const profiles = store.resourceProfiles()
+  // the designated builder is the legacy evidence route (unchanged Phase 10 policy); undefined when the history proves none
+  const designatedBuilder = assignPool(models, benchmarks).members[0].modelRef ?? undefined
   const local = await probeLocalNode({ base: opts.base, deps: { ...opts.deps, now: () => now } })
   const stored = store.nodes().filter((n) => n.nodeId !== local.record.nodeId && n.kind === 'RACK')
   const all = [local.record, ...stored]
@@ -38,7 +44,8 @@ export async function buildComputeView(opts: { store?: ForgeStore; base?: string
     generatedAt: now.toISOString(),
     nodes: all.map((record) => ({ record, health: nodeHealth(record, now), ...(record.kind === 'LOCAL' ? { runtimeVersion: String(local.runtimeVersion) } : {}) })),
     profiles,
-    roles: MODEL_ROLES.map((role) => ({ role, ranking: rankForRole(role, models, benchmarks), placement: schedule({ jobId: `view-${role}`, role }, { nodes: all, models, benchmarks, profiles, now }) })),
+    roles: MODEL_ROLES.map((role) => ({ role, ranking: rankForRole(role, models, benchmarks), placement: schedule({ jobId: `view-${role}`, role }, { nodes: all, models, benchmarks, profiles, now, designatedBuilder }) })),
+    routing: routingTable({ nodes: all, models, benchmarks, profiles, now, designatedBuilder }),
     notes,
   }
 }
