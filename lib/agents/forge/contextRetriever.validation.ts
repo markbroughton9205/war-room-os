@@ -113,7 +113,7 @@ const fake = async (inputs: string[]) => { calls.push(inputs); return inputs.map
 // ---- context formatting + stats
 {
   const rel = asRelated([{ path: 'a.mjs', text: 'x'.repeat(5000), method: 'EXACT', why: 'contains /api/x', score: 1 }])
-  check('R31_retrieved_items_are_labelled_and_truncated_inside_related_code', /retrieved by exact search: contains \/api\/x/.test(rel[0].path) && rel[0].text.length === 1800 && emptyContextStats().builderPromptCalls === 0)
+  check('R31_retrieved_items_are_labelled_and_truncated_inside_related_code', /retrieved by exact search: contains \/api\/x; advisory, the acceptance criteria win/.test(rel[0].path) && rel[0].text.length === 1800 && emptyContextStats().builderPromptCalls === 0)
 }
 // ---- the padded workspace
 {
@@ -128,7 +128,7 @@ const fake = async (inputs: string[]) => { calls.push(inputs); return inputs.map
   }
   const g = mkdtempSync(path.join(tmpdir(), 'pad-g-')); const lg = padWorkspace(g, { longGuide: true })
   const guide = readFileSync(path.join(g, 'docs/PLATFORM_GUIDE.md'), 'utf8')
-  check('R43_the_long_guide_variant_swaps_the_short_conventions_for_a_long_guide_that_still_holds_them', lg.added.length === 35 && !lg.added.includes('docs/CONVENTIONS.md') && guide.length > 3000 && /nextNumericId/.test(guide) && lg.relevant.includes('docs/PLATFORM_GUIDE.md'), String(guide.length))
+  check('R43_the_long_guide_variant_swaps_the_short_conventions_for_a_long_guide_that_still_holds_them', lg.added.length === 35 && !lg.added.includes('docs/CONVENTIONS.md') && guide.length > 3000 && /nextNumericId/.test(guide) && !/numeric strings/.test(guide) && lg.relevant.includes('docs/PLATFORM_GUIDE.md'), String(guide.length))
   const trig = researchTrigger('Add persisted records with ids', ['ids are numeric strings', 'error responses are json', 'data is written to a file'], { 'docs/PLATFORM_GUIDE.md': guide })
   check('R44_the_long_guide_triggers_research_and_the_short_conventions_do_not', trig.fire && trig.sources.includes('docs/PLATFORM_GUIDE.md'))
   rmSync(g, { recursive: true, force: true })

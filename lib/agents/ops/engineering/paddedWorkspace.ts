@@ -26,14 +26,14 @@ export function writeJsonAtomic(file, value) {
   renameSync(tmp, file)
 }
 `,
-  'src/lib/ids.mjs': `/** Next numeric id (as a string) for a list of records that each carry a string id. Ids are never reused: the maximum existing id plus one. */
+  'src/lib/ids.mjs': `/** Next positive integer id for a list of records that carry numeric ids (numbers or numeric strings). Ids are never reused: the maximum existing id plus one. Returns a number; convert it if an API contract wants another form. */
 export function nextNumericId(records) {
   let max = 0
   for (const r of records) {
     const n = Number(r.id)
     if (Number.isFinite(n) && n > max) max = n
   }
-  return String(max + 1)
+  return max + 1
 }
 `,
   'src/lib/validate.mjs': `/** A trimmed non-empty string, or throws an Error with the given message (callers map it to HTTP 400). */
@@ -67,7 +67,7 @@ These apply to every small HTTP service in this repository.
 
 - Error responses are JSON objects shaped { "error": "<reason>" }. A request for an unknown id answers 404, invalid input answers 400, a successful creation answers 201.
 - Data kept on disk is JSON. Read it with readJsonFile and write it with writeJsonAtomic from src/lib/jsonFile.mjs, which creates the directory and never leaves a half-written file. The file location comes from an environment variable named in the feature description, with a default under ./data in the working directory.
-- Record ids are numeric strings produced by nextNumericId in src/lib/ids.mjs. Ids are never reused.
+- New record ids come from nextNumericId in src/lib/ids.mjs (a positive integer; the feature's own contract decides how an id is shown). Ids are never reused.
 - Validate user input with requireText and requireOneOf from src/lib/validate.mjs and let the HTTP layer turn the thrown Error into a 400.
 - HTTP handlers use sendJson and readJsonBody from src/http/respond.mjs.
 - Tests use node:test and node:assert, import the functions from src/ directly, and cover one behaviour per test.

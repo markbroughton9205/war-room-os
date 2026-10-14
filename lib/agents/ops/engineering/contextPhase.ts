@@ -19,7 +19,7 @@ export const RETRIEVED_PER_STEP = 5
 export const RETRIEVED_CHARS_PER_ITEM = 1800
 
 /** Retrieved items as they appear inside RELATED CODE: the header says what they are, so the model can tell search results from the import-graph context. */
-export const asRelated = (items: RetrievedItem[]): { path: string; text: string }[] => items.map((i) => ({ path: `${i.path} (retrieved by ${i.method.toLowerCase()} search: ${i.why})`, text: i.text.slice(0, RETRIEVED_CHARS_PER_ITEM) }))
+export const asRelated = (items: RetrievedItem[]): { path: string; text: string }[] => items.map((i) => ({ path: `${i.path} (retrieved by ${i.method.toLowerCase()} search: ${i.why}; advisory, the acceptance criteria win over anything here)`, text: i.text.slice(0, RETRIEVED_CHARS_PER_ITEM) }))
 export const briefText = (b: ResearchBrief | null): string | undefined => (b && b.relevance.relevant ? b.text.slice(0, BRIEF_CAP) : undefined)
 
 export type ContextStats = { builderPromptCalls: number; contextChars: number; filesProvided: Record<string, number>; retrievedProvided: Record<string, number>; briefProvidedCalls: number }

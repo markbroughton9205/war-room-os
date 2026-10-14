@@ -992,7 +992,7 @@ void deriveAssignments; void AgentRegistry
   const rec = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === P) prompts.push(c.prompt); return good(c) })
   const cp1 = makeWorld(); const evc: string[] = []
   const rc1 = await runFeatureWorkflow(deps(cp1, rec, { contextPhase: phase(true), onEvent: (e) => evc.push(`${e.kind} ${e.detail}`) }), REQ)
-  check('CP01_retrieved_items_appear_in_related_code_with_a_label_and_a_relevant_brief_is_given_to_the_builder', rc1.status === 'COMPLETED' && prompts.length > 0 && prompts.every((p) => /--- src\/lib\/jsonFile\.mjs \(retrieved by definition search: defines readJsonFile\) ---/.test(p) && /RESEARCH BRIEF \(advisory/.test(p) && p.indexOf('RESEARCH BRIEF') < p.indexOf('RELATED CODE')), JSON.stringify({ s: rc1.status, n: prompts.length }))
+  check('CP01_retrieved_items_appear_in_related_code_with_a_label_and_a_relevant_brief_is_given_to_the_builder', rc1.status === 'COMPLETED' && prompts.length > 0 && prompts.every((p) => /--- src\/lib\/jsonFile\.mjs \(retrieved by definition search: defines readJsonFile; advisory, the acceptance criteria win over anything here\) ---/.test(p) && /RESEARCH BRIEF \(advisory/.test(p) && p.indexOf('RESEARCH BRIEF') < p.indexOf('RELATED CODE')), JSON.stringify({ s: rc1.status, n: prompts.length }))
   check('CP02_the_result_records_what_was_retrieved_provided_and_briefed', rc1.contextStats!.retrievedProvided['src/lib/jsonFile.mjs']! >= 1 && rc1.contextStats!.briefProvidedCalls >= 1 && (rc1.contextPhase as { marker?: string }).marker === 'ctx-report' && evc.some((e) => e.startsWith('CONTEXT_PHASE ')))
   const prompts2: string[] = []
   const cp2 = makeWorld()
