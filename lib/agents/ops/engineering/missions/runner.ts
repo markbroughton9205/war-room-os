@@ -9,10 +9,13 @@ import { NEED_CRITERIA, type Actor, type EngineeringTool } from '../../types'
 import { assign, deriveAssignments, keyFor, pauseAssignment, recoverAssignment, requestCancel, resumeAssignment, startAssignment } from '../assignments'
 import { latestCheckpoint } from '../continuity'
 import { makeIndependentVerification } from '../runtime/verifier'
+import { runHermetic } from '../runtime/commandRunner'
+import { storageEnvVars } from '../persistenceContract'
 import { Workspace } from '../runtime/workspaceFs'
 import { runFeatureWorkflow, type FinalVerification, type WorkflowResult } from '../workflow'
 import type { ModelClient } from '../runtime/ports'
 import { integrate, planApply, type GateSpec, DEFAULT_GATES } from './apply'
+import { GATE_REPAIR_ROUNDS, GATE_REPAIR_SYSTEM, extractCorrected, gateRepairPrompt, splitErrors, tscErrorsByFile } from './gateRepair'
 import { fileProvenance, roleOf, type LedgerDelivery, type LedgerWrite } from './provenance'
 import { buildReceipt, verifyReceipt } from './receipt'
 import { localRunners, realFacts, reconcileMissions, resumability } from './reconcile'
@@ -39,13 +42,13 @@ export type RunnerDeps = {
   engine?: { crashAfterSteps?: number; firstPass?: boolean; contractTests?: boolean }
   now?: () => Date
 }
-export type MissionDraft = { title: string; request: string; acceptance: string[]; hints?: string[]; scope?: Partial<ScopeSpec>; install?: boolean; verifyScript?: string }
+export type MissionDraft = { title: string; request: string; acceptance: string[]; hints?: string[]; targets?: { path: string; action: 'create' | 'modify' }[]; scope?: Partial<ScopeSpec>; install?: boolean; verifyScript?: string }
 
 const C_SYSTEM: Actor = 'system:engineering-runner'
 const clip = (s: string, n: number) => s.trim().slice(0, n)
 
 /** Validation of everything the operator typed. Fails closed with a precise reason. */
-export function validateDraft(d: MissionDraft): { title: string; request: string; acceptance: string[]; hints: string[]; scope: ScopeSpec; install: boolean; verifyScript: string | null } {
+export function validateDraft(d: MissionDraft): { title: string; request: string; acceptance: string[]; hints: string[]; targets: { path: string; action: 'create' | 'modify' }[]; scope: ScopeSpec; install: boolean; verifyScript: string | null } {
   const title = clip(String(d.title ?? ''), 120), request = clip(String(d.request ?? ''), 2000)
   if (!title) throw new MissionError('INVALID', 'a title is required')
   if (request.length < 20) throw new MissionError('INVALID', 'the request must describe the feature (at least 20 characters)')
@@ -63,9 +66,15 @@ export function validateDraft(d: MissionDraft): { title: string; request: string
     try { source = { repo, paths: paths.map((p) => checkSeedPath(repo, p)) } } catch (e) { throw new MissionError('SCOPE', e instanceof SeedError ? e.message : String(e)) }
     if (write.length === 0) throw new MissionError('SCOPE', 'a mission that works on a repository must declare where its changes may be applied (write scope)')
   }
+  const targets = (Array.isArray(d.targets) ? d.targets : []).map((t) => ({ path: String(t?.path ?? '').replace(/\\/g, '/'), action: t?.action === 'create' ? ('create' as const) : ('modify' as const) }))
+  if (targets.length > 12) throw new MissionError('SCOPE', 'at most 12 target files')
+  for (const t of targets) {
+    if (!t.path || t.path.startsWith('/') || t.path.split('/').includes('..') || !write.some((w) => t.path === w || t.path.startsWith(w + '/'))) throw new MissionError('SCOPE', `target ${t.path || '(empty)'} is outside the declared write scope`)
+    if (t.action === 'modify' && source && !existsSync(path.join(source.repo, t.path))) throw new MissionError('SCOPE', `target ${t.path} is to be modified but does not exist in the repository`)
+  }
   const verifyScript = d.verifyScript ? String(d.verifyScript) : null
   if (verifyScript && verifyScript.length > 40_000) throw new MissionError('INVALID', 'the independent verifier script is too large')
-  return { title, request, acceptance, hints, scope: { ...(source ? { source } : {}), write }, install: d.install === true, verifyScript }
+  return { title, request, acceptance, hints, targets, scope: { ...(source ? { source } : {}), write }, install: d.install === true, verifyScript }
 }
 
 function ensureAgent(log: AgentOpsLog, by: Actor): string {
@@ -81,7 +90,7 @@ function ensureAgent(log: AgentOpsLog, by: Actor): string {
   return spec.id
 }
 
-const genericVerifier = `// Foundry generic verifier: runs the workspace test suite in a fresh copy and requires every file to parse.
+export const GENERIC_VERIFIER = `// Foundry generic verifier: runs the workspace test suite in a fresh copy and requires every file to parse.
 import { cpSync, mkdtempSync, rmSync, readdirSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
@@ -91,7 +100,10 @@ const tmp = mkdtempSync(path.join(tmpdir(), 'wr-verify-'))
 let bad = 0
 try {
   cpSync(root, tmp, { recursive: true, dereference: false, filter: (s) => !/node_modules|\\.git(\\/|$)/.test(s) })
-  const r = spawnSync(process.execPath, ['--test', 'test/'], { cwd: tmp, encoding: 'utf8', timeout: 100000 })
+  const found = []
+const walk = (d) => { for (const n of readdirSync(path.join(tmp, d))) { const r = d ? d + '/' + n : n; if (statSync(path.join(tmp, r)).isDirectory()) { if (n !== 'node_modules') walk(r) } else if (/\\.(test|spec)\\.[cm]?js$/.test(n)) found.push(r) } }
+walk('')
+const r = found.length ? spawnSync(process.execPath, ['--test', ...found], { cwd: tmp, encoding: 'utf8', timeout: 100000 }) : { status: 0, stdout: 'no test files\\n', stderr: '' }
   process.stdout.write(r.stdout || ''); process.stderr.write(r.stderr || '')
   if (r.status !== 0) bad++
 } finally { rmSync(tmp, { recursive: true, force: true }) }
@@ -121,16 +133,16 @@ export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: A
     limits: { maxSteps: 40, maxRuntimeMs: 30 * 60_000, maxModelCalls: 60, maxRetries: 5 }, dependencies: [],
   }, by)
   const rec: MissionRecord = {
-    schema: 1, id, title: v.title, request: v.request, acceptance: v.acceptance, hints: v.hints, scope: v.scope, install: v.install, createdAt: now.toISOString(), createdBy: by,
+    schema: 1, id, title: v.title, request: v.request, acceptance: v.acceptance, hints: v.hints, targets: v.targets, scope: v.scope, install: v.install, createdAt: now.toISOString(), createdBy: by,
     state: 'QUEUED', stateReason: 'queued', stateAt: now.toISOString(), workspace: { root, seeded: seeded.seeded, seedTreeSha256: seeded.treeSha256, ...(baseCommit ? { baseCommit } : {}) },
     assignmentId: assignment.id, agentId, lease: null, attempts: [], recoveries: [],
-    config: { builder: lineup.builder.label, testReviewer: lineup.testReviewer?.label ?? null, testCandidates: lineup.testCandidates.map((c) => c.label), escalation: lineup.escalation?.label ?? null, flags: { simulated: lineup.simulated, firstPass: deps.engine?.firstPass !== false, contractTests: deps.engine?.contractTests !== false, retrieval: false, research: false, fastRepair: false } },
+    config: { builder: lineup.builder.label, testReviewer: lineup.testReviewer?.label ?? null, testCandidates: lineup.testCandidates.map((c) => c.label), escalation: lineup.escalation?.label ?? null, flags: { simulated: lineup.simulated, firstPass: deps.engine?.firstPass !== false, contractTests: deps.engine?.contractTests !== false && !v.targets.length, retrieval: false, research: false, fastRepair: false } },
     progress: { stepsDone: 0, stepsTotal: 0, modelCalls: 0, repairs: 0, filesChanged: [], lastEvent: 'queued' }, result: null, receipt: null,
   }
   deps.store.create(rec)
   const p = missionPaths(deps, id)
   writeFileSync(p.seed, JSON.stringify(seeded.snapshot))
-  mkdirSync(p.verifier, { recursive: true }); writeFileSync(path.join(p.verifier, 'verify.mjs'), v.verifyScript ?? genericVerifier)
+  mkdirSync(p.verifier, { recursive: true }); writeFileSync(path.join(p.verifier, 'verify.mjs'), v.verifyScript ?? GENERIC_VERIFIER)
   deps.store.event(id, { kind: 'CREATED', detail: `${v.title}; workspace ${root}; ${seeded.seeded.length} seeded file(s); builder ${lineup.builder.label}${lineup.simulated ? ' (SIMULATED)' : ''}`, attempt: 0 })
   return rec
 }
@@ -197,7 +209,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     const result: WorkflowResult = await runFeatureWorkflow({
       log, assignmentId: m0.assignmentId, ws, model: lineup.builder.model, tools: TOOLS, finalVerification: verification, missionId: id,
       ...(lineup.testReviewer ? { testReviewer: lineup.testReviewer } : {}), ...(lineup.testCandidates.length ? { testCandidates: lineup.testCandidates } : {}), ...(lineup.escalation ? { escalation: lineup.escalation } : {}),
-      ...(deps.engine?.contractTests !== false ? { contractTests: true } : {}), ...(deps.engine?.firstPass !== false ? { firstPass: { runtime: true } } : {}),
+      ...(deps.engine?.contractTests !== false && !m0.targets?.length ? { contractTests: true } : {}), ...(deps.engine?.firstPass !== false ? { firstPass: { runtime: true } } : {}),
       ...(deps.engine?.crashAfterSteps !== undefined ? { crashAfterSteps: deps.engine.crashAfterSteps } : {}), groundTests: false,
       onWrite: (w) => {
         const role = roleOf(w.author, cfg)
@@ -213,7 +225,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
         store.event(id, { at: ev.at, kind: ev.kind, detail: ev.detail, attempt: attemptNo }); progressNote = `${ev.kind}: ${ev.detail}`.slice(0, 160); beat(progressNote, true)
         if (Date.now() - lastProg > 1500) { lastProg = Date.now(); try { progress() } catch { /* progress is a view; never fatal */ } }
       },
-    }, { request: m0.request, acceptance: m0.acceptance, hints: m0.hints })
+    }, { request: m0.request, acceptance: m0.acceptance, hints: m0.hints, ...(m0.targets?.length ? { targets: m0.targets } : {}) })
     try { progress() } catch { /* view only */ }
     if (result.status === 'CRASHED') return // simulated process death (tests only): the lease is left to expire and the reconciler must notice
     const finishAs = async (state: MissionState, reason: string, integration: ChangeReceipt['integration'], install: ChangeReceipt['install'], verifier: ChangeReceipt['verifier']) => {
@@ -238,15 +250,51 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     // ---- independent verification, run now against the final workspace
     setState(deps, id, workerId, 'VERIFYING', 'running the independent verifier against the final workspace'); beat('independent verification', true)
     const fv = await verification.run()
-    const verifier: ChangeReceipt['verifier'] = { label: verification.label, exitCode: fv.exitCode ?? -1, summary: (fv.stdout + '\n' + fv.stderr).trim().split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ').slice(0, 400) || 'no summary', at: clock().toISOString() }
+    let verifier: ChangeReceipt['verifier'] = { label: verification.label, exitCode: fv.exitCode ?? -1, summary: (fv.stdout + '\n' + fv.stderr).trim().split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ').slice(0, 400) || 'no summary', at: clock().toISOString() }
     if (fv.exitCode !== 0) { await finishAs('FAILED', 'the independent verifier failed on the final workspace', noInt, noInst, verifier); return }
     // ---- integration into the repository branch (only for repository missions)
     let integration = noInt
     if (m0.scope.source) {
       setState(deps, id, workerId, 'APPLYING', 'applying the verified changes to the integration branch and running the repository gates'); beat('integration gates', true)
       const final = ws.snapshot()
-      const created = Object.keys(final).filter((p) => !(p in seed)), modified = Object.keys(final).filter((p) => p in seed && seed[p] !== final[p]), deleted = Object.keys(seed).filter((p) => !(p in final))
+      const created = Object.keys(final).filter((p) => !(p in seed)); const modified = Object.keys(final).filter((p) => p in seed && seed[p] !== final[p]); const deleted = Object.keys(seed).filter((p) => !(p in final))
       integration = await integrate(store.read(id)!, ws, created, modified, deleted, { integrationRoot: deps.integrationRoot, now: clock }, deps.gates ?? DEFAULT_GATES)
+      // A repository gate that fails on the mission's own files gets a bounded repair: the compiler's errors go back to the builder for exactly those files, then the
+      // independent verifier and the workspace tests run again before the gates do. Errors outside the mission's files are not the mission's to fix.
+      for (let round = 1; round <= GATE_REPAIR_ROUNDS && integration.state === 'GATES_FAILED'; round++) {
+        const tsc = integration.gates.find((g) => g.name.startsWith('typecheck') && g.exitCode !== 0)
+        if (!tsc?.detail || integration.gates.some((g) => g.exitCode !== 0 && g !== tsc)) break
+        const missionFiles = [...created, ...modified]
+        const { mine, others } = splitErrors(tscErrorsByFile(tsc.detail), missionFiles)
+        if (!mine.size || others.length) { store.event(id, { kind: 'GATE_REPAIR_SKIPPED', detail: mine.size ? `errors outside the mission's files: ${others.slice(0, 2).join('; ')}` : 'no error is in a file the mission wrote', attempt: attemptNo }); break }
+        setState(deps, id, workerId, 'RUNNING', `repairing repository gate failures (round ${round}) in ${[...mine.keys()].join(', ')}`); beat('gate repair', true)
+        let wrote = 0
+        for (const [file, errs] of mine) {
+          const related = missionFiles.filter((f) => f !== file && /\.(m?js|ts)$/.test(f) && ws.exists(f)).map((f) => ({ path: f, text: ws.read(f) }))
+          const cur = ws.read(file)
+          const r = await lineup.builder.model.generate({ system: GATE_REPAIR_SYSTEM, prompt: gateRepairPrompt(file, cur, errs, related), maxTokens: 6000, timeoutMs: 300_000 })
+          if (!r.ok) { store.event(id, { kind: 'GATE_REPAIR_FAILED', detail: `${file}: ${r.detail}`, attempt: attemptNo }); continue }
+          const author = `${r.executor.provider}/${r.executor.model}`
+          deliveries.push({ type: 'delivery', model: r.executor.model, provider: r.executor.provider, role: roleOf(author, cfg), attempt: attemptNo, recovered, latencyMs: r.latencyMs, outputTokens: r.outputTokens, at: clock().toISOString() }); store.ledgerAppend(id, deliveries[deliveries.length - 1])
+          const fixed = extractCorrected(r.text, cur)
+          if (!fixed || fixed === cur) { store.event(id, { kind: 'GATE_REPAIR_NOOP', detail: `${file}: the reply changed nothing usable`, attempt: attemptNo }); continue }
+          const w = ws.write(file, fixed)
+          const e: LedgerWrite = { type: 'write', path: file, stepId: `gate-repair-${round}`, tag: ':gate-repair', author, role: roleOf(author, cfg), deterministic: false, autofixed: false, attempt: attemptNo, recovered, workerId, beforeHash: w.beforeHash, afterHash: w.afterHash, at: clock().toISOString() }
+          writes.push(e); store.ledgerAppend(id, e); wrote++
+          store.event(id, { kind: 'GATE_REPAIR', detail: `round ${round}: ${file} rewritten against ${errs.length} compiler error(s)`, attempt: attemptNo })
+        }
+        if (!wrote) break
+        const re = await verification.run()
+        const unitFiles = ws.list().filter((f) => /(^|\/)test\/.*\.(test|spec)\.[cm]?js$/.test(f))
+        const unit = unitFiles.length ? await runHermetic(ws.root, ['node', '--test', ...unitFiles], TOOLS, { timeoutMs: 90_000, isolateEnv: storageEnvVars(m0.acceptance) }) : { exitCode: 0, stdout: '', stderr: '' }
+        verifier = { ...verifier, exitCode: re.exitCode ?? -1, at: clock().toISOString(), summary: `after gate repair: ${(re.stdout + '\n' + re.stderr).trim().split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ').slice(0, 300)}` }
+        if (re.exitCode !== 0 || unit.exitCode !== 0) { store.event(id, { kind: 'GATE_REPAIR_REGRESSED', detail: `after the repair the ${re.exitCode !== 0 ? 'independent verifier' : 'workspace tests'} failed; the mission stops here${unit.exitCode !== 0 ? ` (${(unit.stdout + unit.stderr).split('\n').filter((l) => /^not ok|Error|# fail/.test(l.trim())).slice(0, 4).join(' | ').slice(0, 300)})` : ''}`, attempt: attemptNo }); break }
+        const fin2 = ws.snapshot()
+        const cr2 = Object.keys(fin2).filter((p) => !(p in seed)), mo2 = Object.keys(fin2).filter((p) => p in seed && seed[p] !== fin2[p]), de2 = Object.keys(seed).filter((p) => !(p in fin2))
+        created.splice(0, created.length, ...cr2); modified.splice(0, modified.length, ...mo2)
+        setState(deps, id, workerId, 'APPLYING', `re-running the repository gates after repair round ${round}`)
+        integration = await integrate(store.read(id)!, ws, cr2, mo2, de2, { integrationRoot: deps.integrationRoot, now: clock }, deps.gates ?? DEFAULT_GATES)
+      }
       if (integration.state !== 'APPLIED') { await finishAs('FAILED', integration.state === 'REFUSED' ? `integration refused: ${integration.refused.join('; ')}` : `integration gates failed: ${integration.gates.filter((g) => g.exitCode !== 0).map((g) => g.name).join(', ')}`, integration, noInst, verifier); return }
     }
     // ---- install (only when the Commander asked for it at creation)

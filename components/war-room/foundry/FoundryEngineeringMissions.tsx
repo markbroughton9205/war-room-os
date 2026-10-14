@@ -15,7 +15,7 @@ export function FoundryEngineeringMissions() {
   const [open, setOpen] = useState<string | null>(null)
   const [detail, setDetail] = useState<MissionView | null>(null)
   const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState({ title: '', request: '', acceptance: '', paths: '', write: '', install: false, verify: '' })
+  const [form, setForm] = useState({ title: '', request: '', acceptance: '', paths: '', write: '', targets: '', install: false, verify: '' })
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async () => {
@@ -45,7 +45,7 @@ export function FoundryEngineeringMissions() {
     } catch (e) { setNotice(`${label} failed: ${e instanceof Error ? e.message : 'error'}`) }
     setBusy(false); void load()
   }
-  const start = () => post({ action: 'start', title: form.title, request: form.request, acceptance: lines(form.acceptance), scope: { paths: lines(form.paths), write: lines(form.write) }, install: form.install, ...(form.verify.trim() ? { verifyScript: form.verify } : {}) }, 'Start mission')
+  const start = () => post({ action: 'start', title: form.title, request: form.request, acceptance: lines(form.acceptance), scope: { paths: lines(form.paths), write: lines(form.write) }, targets: lines(form.targets).map((l) => { const m = /^(create|modify)\s+(\S+)$/i.exec(l); return m ? { action: m[1].toLowerCase(), path: m[2] } : { action: 'modify', path: l } }), install: form.install, ...(form.verify.trim() ? { verifyScript: form.verify } : {}) }, 'Start mission')
 
   return (
     <section data-testid="agentops-missions" className="mb-8">
@@ -56,6 +56,7 @@ export function FoundryEngineeringMissions() {
         <textarea data-testid="mission-request" className="bg-gray-800 p-1" rows={3} placeholder="Request: describe the feature (at least 20 characters)" value={form.request} onChange={(e) => setForm({ ...form, request: e.target.value })} />
         <textarea data-testid="mission-acceptance" className="bg-gray-800 p-1" rows={4} placeholder="Acceptance criteria, one per line (each a testable statement)" value={form.acceptance} onChange={(e) => setForm({ ...form, acceptance: e.target.value })} />
         <textarea data-testid="mission-paths" className="bg-gray-800 p-1" rows={2} placeholder="Repository paths to work from, one per line (files or folders; the repository itself is configured on the server)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} />
+        <textarea data-testid="mission-targets" className="bg-gray-800 p-1" rows={3} placeholder="Files to build, one per line: 'create path' or 'modify path' (optional; when empty Foundry plans the files itself)" value={form.targets} onChange={(e) => setForm({ ...form, targets: e.target.value })} />
         <textarea data-testid="mission-write" className="bg-gray-800 p-1" rows={2} placeholder="Where changes may be applied, one folder or file prefix per line (anything else is refused)" value={form.write} onChange={(e) => setForm({ ...form, write: e.target.value })} />
         <details><summary className="text-xs text-gray-400 cursor-pointer">Independent verifier (optional Node script; receives the workspace path as its first argument; hidden from the builder)</summary>
           <textarea data-testid="mission-verify" className="bg-gray-800 p-1 w-full font-mono text-xs" rows={6} value={form.verify} onChange={(e) => setForm({ ...form, verify: e.target.value })} /></details>

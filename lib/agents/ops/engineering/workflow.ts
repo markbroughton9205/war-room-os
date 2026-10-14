@@ -34,7 +34,9 @@ import { newFirstPassState, buildFirstPassReport, type FirstPassOptions, type Fi
 import { storageEnvVars } from './persistenceContract'
 import { seedFromHandoff } from './successor'
 
-export type FeatureRequest = { request: string; acceptance: string[]; hints?: string[] }
+/** targets: the Commander names the files the feature is built in (create or modify). When present they replace the planner's file selection; everything else (contract, gates, repair, verification) is unchanged. */
+export type FeatureTarget = { path: string; action: 'create' | 'modify'; layer?: 'storage' | 'domain' | 'api' | 'ui' | 'tests' }
+export type FeatureRequest = { request: string; acceptance: string[]; hints?: string[]; targets?: FeatureTarget[] }
 export type WorkflowEvent = { at: string; kind: string; detail: string }
 export type FinalVerification = { label: string; argv: string[]; run: () => Promise<CommandRecord> }
 export type WorkflowDeps = {
@@ -264,7 +266,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     plan = planFromCode(index0, { request: req.request, acceptance: req.acceptance, hints: req.hints, kind: 'feature' })
     const fileSteps: CheckpointStep[] = []
     let n = 0
+    const targetLayer = (t: FeatureTarget): string => t.layer ?? (/(^|\/)(tests?|__tests__)\/|\.(test|spec)\.[cm]?[jt]sx?$/.test(t.path) ? 'tests' : /\.(tsx|jsx|html?|css)$/.test(t.path) ? 'ui' : 'domain')
     for (const layer of LAYER_ORDER) {
+      if (req.targets?.length) {
+        for (const t of req.targets.filter((x) => targetLayer(x) === layer)) { n += 1; fileSteps.push({ id: `s${n}`, title: `${layer}: ${t.action} ${t.path}`, status: 'PENDING', layer, files: [t.path], note: 'file named by the Commander' }) }
+        continue
+      }
       if (layer === 'tests' && tplan) { for (const f of tplan.files) { n += 1; fileSteps.push({ id: `s${n}`, title: `tests: create ${f.path}`, status: 'PENDING', layer: 'tests', files: [f.path], note: `contract tests for ${f.criteria.map((c) => 'C' + c).join(', ')}` }) } continue }
       const sl = plan.slices.find((s) => s.layer === layer)
       if (!sl) continue

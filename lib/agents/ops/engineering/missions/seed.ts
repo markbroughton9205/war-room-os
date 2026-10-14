@@ -56,7 +56,7 @@ export function seedWorkspace(root: string, source: SourceSpec | undefined): { s
   }
   // a workspace the engine can run tests in: plain ES modules, `node --test`
   const pj = path.join(root, 'package.json')
-  if (!existsSync(pj)) writeFileSync(pj, JSON.stringify({ name: 'foundry-feature', version: '1.0.0', private: true, type: 'module', scripts: { test: 'node --test test/' } }, null, 2))
+  if (!existsSync(pj)) writeFileSync(pj, JSON.stringify({ name: 'foundry-feature', version: '1.0.0', private: true, type: 'module', scripts: { test: 'node --test' } }, null, 2))
   const ws = new Workspace(root)
   const snapshot = ws.snapshot()
   return { seeded: seeded.sort(), snapshot, treeSha256: treeHash(snapshot) }

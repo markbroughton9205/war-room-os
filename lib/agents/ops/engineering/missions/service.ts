@@ -76,7 +76,7 @@ export async function startFromApi(deps: RunnerDeps, body: Record<string, unknow
   const write = Array.isArray(scopeIn.write) ? scopeIn.write.map(String) : []
   const repo = paths.length ? engineeringRepo(deps.log) : null
   if (paths.length && !repo) throw new MissionError('SCOPE', 'no engineering repository is configured on this machine (WAR_ROOM_ENGINEERING_REPO or engineering-config.json)')
-  const draft: MissionDraft = { title: String(body.title ?? ''), request: String(body.request ?? ''), acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths } } : {}) } }
+  const draft: MissionDraft = { title: String(body.title ?? ''), request: String(body.request ?? ''), acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets: Array.isArray(body.targets) ? (body.targets as { path?: unknown; action?: unknown }[]).map((t) => ({ path: String(t?.path ?? ''), action: t?.action === 'create' ? ('create' as const) : ('modify' as const) })) : [], install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths } } : {}) } }
   const rec = await createMission(deps, draft, actor as never)
   launchMission(deps, rec.id, 'START')
   return rec

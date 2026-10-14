@@ -21,7 +21,7 @@ import type { ModelClient, ModelResult } from '../runtime/ports'
 import { MissionStore } from './store'
 import { assessLiveness, pidAliveReal, pidStartOf, LEASE_MS, STALL_MS } from './liveness'
 import { reconcileMissions, localRunners } from './reconcile'
-import { createMission, launchMission, resumeMission, cancelMission, validateDraft, MissionError, type ModelLineup, type RunnerDeps } from './runner'
+import { GENERIC_VERIFIER, createMission, launchMission, resumeMission, cancelMission, validateDraft, MissionError, type ModelLineup, type RunnerDeps } from './runner'
 import { planApply } from './apply'
 import { SeedError, checkSeedPath, seedWorkspace } from './seed'
 import { buildReceipt, verifyReceipt } from './receipt'
@@ -283,6 +283,38 @@ const code = (fn: () => unknown) => { try { fn(); return 'none' } catch (e) { re
   cancelMission(busyW.deps, live.id, C, 'validator done')
   localRunners().delete(live.id)
   check('F06_ids_are_unique_and_unguessable', (() => { const s2 = new MissionStore(new AgentOpsLog(tmp())); const ids = new Set(Array.from({ length: 50 }, () => s2.newId())); return ids.size === 50 && [...ids].every((i) => /^msn-\d{8}T\d{6}-[0-9a-f]{8}$/.test(i)) })())
+}
+
+// ============================================================ repository gate repair (real tsc, real repository)
+{
+  const repo = makeRepo()
+  symlinkSync(path.resolve(path.dirname(SELF), '../../../../../node_modules'), path.join(repo, 'node_modules'))
+  writeFileSync(path.join(repo, 'tsconfig.json'), JSON.stringify({ compilerOptions: { noEmit: true, strict: true, target: 'es2022', module: 'esnext', moduleResolution: 'bundler', allowImportingTsExtensions: true, skipLibCheck: true, types: [] }, include: ['view/**/*.ts'] }))
+  mkdirSync(path.join(repo, 'view')); writeFileSync(path.join(repo, 'view', 'panel.ts'), 'export const label = (n: number): string => `n=${n}`\n')
+  sh(repo, 'add', '--', 'tsconfig.json', 'view/panel.ts'); sh(repo, 'commit', '-q', '-m', 'ts view')
+  let asked = 0
+  const script = (c: ScriptCtx): string | null => {
+    if (c.path === 'view/panel.ts') { if (/repository type check/.test(c.prompt)) { asked++; return fenced('export const label = (n: number): string => `n=${n}`\nexport const twice = (n: number): number => n * 2') } return fenced('export const label = (n: number): string => `n=${n}`\nexport const twice = (n: number): number => n * "2"') }
+    return good(c)
+  }
+  const gw = world({ script, gates: { typecheck: true, validators: [] } })
+  const dr = DRAFT(repo); dr.scope = { source: { repo, paths: [...files, 'view', 'tsconfig.json'] }, write: [...files, 'view'] }
+  const rec = await createMission(gw.deps, { ...dr, targets: [['src/messageStore.mjs', 'modify'], ['src/chatService.mjs', 'modify'], ['server.mjs', 'modify'], ['view/panel.ts', 'modify'], ['public/app.js', 'modify'], ['public/index.html', 'modify'], ['test/messageStore.test.mjs', 'create'], ['test/chatService.test.mjs', 'modify']].map(([p, a]) => ({ path: p, action: a as 'create' | 'modify' })) }, C)
+  await launchMission(gw.deps, rec.id, 'START').done
+  const g = gw.store.read(rec.id)!
+  check('G01_a_type_error_in_a_mission_file_is_sent_back_to_the_builder_with_the_compiler_output', asked >= 1, `repair prompts ${asked}; ${g.state}: ${g.stateReason}`)
+  if (process.env.DEBUG_MISSIONS) console.log(JSON.stringify(g.receipt?.integration, null, 1), gw.store.events(rec.id).map((e) => e.kind + ': ' + e.detail).join('\n'))
+  check('G02_after_the_repair_the_gates_pass_one_commit_is_made_and_the_mission_completes', g.state === 'COMPLETED' && g.receipt?.integration.state === 'APPLIED' && g.receipt.integration.gates.some((x) => /typecheck/.test(x.name) && x.exitCode === 0), `${g.state}: ${g.stateReason}`)
+  check('G03_the_repair_is_in_the_provenance_ledger_as_a_builder_write_to_that_file', gw.store.ledger(rec.id).some((e) => e.type === 'write' && e.path === 'view/panel.ts' && e.tag === ':gate-repair' && e.role === 'implementation_model'))
+  check('G04_the_receipt_matches_the_repaired_file_on_disk', g.receipt !== null && verifyReceipt(g.receipt, new Workspace(g.workspace.root)).ok)
+}
+
+{
+  const vdir = tmp(); writeFileSync(path.join(vdir, 'verify.mjs'), GENERIC_VERIFIER)
+  const run = (setup: (d: string) => void) => { const d = tmp(); setup(d); return execFileSync(process.execPath, [path.join(vdir, 'verify.mjs'), d], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }) }
+  const tryRun = (setup: (d: string) => void) => { try { run(setup); return 0 } catch (e) { return (e as { status?: number }).status ?? -1 } }
+  const T = (body: string) => (d: string) => { mkdirSync(path.join(d, 'test')); writeFileSync(path.join(d, 'test', 'a.test.mjs'), `import test from 'node:test'\nimport assert from 'node:assert'\ntest('t', () => { ${body} })\n`) }
+  check('G05_the_generic_verifier_passes_a_passing_suite_fails_a_failing_one_and_accepts_no_tests', tryRun(T('assert.ok(true)')) === 0 && tryRun(T('assert.ok(false)')) === 1 && tryRun(() => {}) === 0)
 }
 
 finish()

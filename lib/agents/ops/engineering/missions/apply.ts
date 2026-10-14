@@ -47,9 +47,12 @@ export async function integrate(m: MissionRecord, ws: Workspace, created: string
   const out: ChangeReceipt['integration'] = { state: 'GATES_FAILED', branch, gates: [], refused: [] }
   const has = await runTool([git, '-C', src.repo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], src.repo, { timeoutMs: 20_000 })
   if (has.exitCode === 0) {
-    const c = await runTool([git, '-C', src.repo, 'rev-parse', `refs/heads/${branch}`], src.repo, { timeoutMs: 20_000 })
-    const t = await runTool([git, '-C', src.repo, 'rev-parse', `refs/heads/${branch}^{tree}`], src.repo, { timeoutMs: 20_000 })
-    return { ...out, state: 'APPLIED', commit: c.stdout.trim(), tree: t.stdout.trim(), gates: [{ name: 'already-applied', exitCode: 0, summary: 'the branch already holds this mission\'s commit (a resumed attempt does not apply twice)' }] }
+    const c = (await runTool([git, '-C', src.repo, 'rev-parse', `refs/heads/${branch}`], src.repo, { timeoutMs: 20_000 })).stdout.trim()
+    // the branch exists from the first (uncommitted) attempt at its base commit; only a tip beyond the base means this mission's commit already exists
+    if (c && c !== base) {
+      const t = await runTool([git, '-C', src.repo, 'rev-parse', `refs/heads/${branch}^{tree}`], src.repo, { timeoutMs: 20_000 })
+      return { ...out, state: 'APPLIED', commit: c, tree: t.stdout.trim(), gates: [{ name: 'already-applied', exitCode: 0, summary: 'the branch already holds this mission\'s commit (a resumed attempt does not apply twice)' }] }
+    }
   }
   mkdirSync(deps.integrationRoot, { recursive: true })
   if (!existsSync(wt)) {
@@ -68,7 +71,7 @@ export async function integrate(m: MissionRecord, ws: Workspace, created: string
   let ok = true
   const record = (name: string, r: { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }) => {
     const tail = (r.stdout + '\n' + r.stderr).trim().split('\n').slice(-6).join(' | ').slice(0, 500)
-    out.gates.push({ name, exitCode: r.exitCode ?? -1, summary: r.timedOut ? 'TIMED OUT' : tail || 'no output' })
+    out.gates.push({ name, exitCode: r.exitCode ?? -1, summary: r.timedOut ? 'TIMED OUT' : tail || 'no output', ...(r.exitCode !== 0 ? { detail: (r.stdout + '\n' + r.stderr).trim().slice(-6000) } : {}) })
     if (r.exitCode !== 0) ok = false
   }
   if (gates.typecheck) record('typecheck (tsc --noEmit)', await runTool([node, path.join(wt, 'node_modules', 'typescript', 'bin', 'tsc'), '--noEmit', '-p', '.'], wt, { timeoutMs: 900_000 }))

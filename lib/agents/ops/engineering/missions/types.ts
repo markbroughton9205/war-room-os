@@ -58,7 +58,7 @@ export type ChangeReceipt = {
   deterministicRepairs: { kind: string; file: string; note: string }[]
   modelGeneratedEdits: { path: string; author: string; role: ProvenanceRole }[]
   verifier: { label: string; exitCode: number | 'NOT_RUN'; summary: string; at: string }
-  integration: { state: 'NOT_RUN' | 'REFUSED' | 'GATES_FAILED' | 'APPLIED'; branch?: string; commit?: string; tree?: string; gates: { name: string; exitCode: number | 'NOT_RUN'; summary: string }[]; refused: string[] }
+  integration: { state: 'NOT_RUN' | 'REFUSED' | 'GATES_FAILED' | 'APPLIED'; branch?: string; commit?: string; tree?: string; gates: { name: string; exitCode: number | 'NOT_RUN'; summary: string; detail?: string }[]; refused: string[] }
   install: { state: 'NOT_REQUESTED' | 'NOT_RUN' | 'FAILED' | 'INSTALLED'; path?: string; stamp?: string; detail?: string }
   provenance: { roles: Record<string, { model: string; calls: number }[]>; files: FileProvenance[]; recoveryWorkers: { attempt: number; workerId: string }[] }
   treeSha256: string
@@ -72,6 +72,8 @@ export type MissionRecord = {
   request: string
   acceptance: string[]
   hints: string[]
+  /** files the Commander named for the feature; when present they are the plan's file list */
+  targets: { path: string; action: 'create' | 'modify' }[]
   scope: ScopeSpec
   install: boolean
   createdAt: string
