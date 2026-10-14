@@ -5,12 +5,15 @@ import { FoundrySpecialistPool } from './FoundrySpecialistPool'
 import { FoundryCompute } from './FoundryCompute'
 import { FoundryEngineeringMissions } from './FoundryEngineeringMissions'
 import { buildOpsViewModel, type Control, type LoadState, type OpsEnvelope } from '@/lib/agents/ops/uiState'
+import { filterRows, stateCounts } from '@/lib/agents/ops/assignmentFilter.mjs'
 
 /** Phase 10 operator surface: durable agents, long-lived workers, approvals, actions, errors, usage. Controls call the Commander-gated API. */
 export function FoundryAgentOpsPanel() {
   const [state, setState] = useState<LoadState<OpsEnvelope>>({ phase: 'loading' })
   const [notice, setNotice] = useState<string | null>(null)
   const [confirming, setConfirming] = useState<string | null>(null)
+  const [filterState, setFilterState] = useState<string>('ALL')
+  const [filterText, setFilterText] = useState<string>('')
 
   const load = useCallback(() => {
     fetch('/api/foundry/agents/ops?section=summary&limit=50', { cache: 'no-store' })
@@ -70,7 +73,7 @@ export function FoundryAgentOpsPanel() {
           </div>
         ))}
       </section>
-      {(['assignments', 'scheduler', 'approvals', 'runs', 'errors', 'usage'] as const).map((k) => (
+      {(['scheduler', 'approvals', 'runs', 'errors', 'usage'] as const).map((k) => (
         <section key={k} data-testid={`agentops-${k}`} className="mb-6">
           <h2 className="text-lg border-b border-gray-700 mb-2">{vm.sections[k].title}</h2>
           {vm.sections[k].rows.length === 0 && <p className="text-gray-400 text-sm">{vm.sections[k].empty}</p>}
@@ -84,6 +87,30 @@ export function FoundryAgentOpsPanel() {
           ))}
         </section>
       ))}
+      <section data-testid="agentops-assignments" className="mb-6">
+        <h2 className="text-lg border-b border-gray-700 mb-2">{vm.sections.assignments.title}</h2>
+        {vm.sections.assignments.rows.length === 0 && <p className="text-gray-400 text-sm">{vm.sections.assignments.empty}</p>}
+        <div className="mb-2 flex gap-2">
+          <select data-testid="assignment-state-filter" className="text-black text-sm p-1" value={filterState} onChange={(e) => setFilterState(e.target.value)}>
+            <option value="ALL">All States</option>
+            {Object.entries(stateCounts(vm.sections.assignments.rows)).map(([state]) => (
+              <option key={state} value={state}>{state}</option>
+            ))}
+          </select>
+          <input data-testid="assignment-text-filter" className="text-black text-sm p-1 flex-1" placeholder="Search..." value={filterText} onChange={(e) => setFilterText(e.target.value)} />
+        </div>
+        <div data-testid="assignment-filter-count" className="text-xs text-gray-400 mb-2">
+          Showing {filterRows(vm.sections.assignments.rows, { state: filterState, text: filterText }).length} of {vm.sections.assignments.rows.length}
+        </div>
+        {filterRows(vm.sections.assignments.rows, { state: filterState, text: filterText }).map((r) => (
+          <div key={r.id} className="mb-2 text-sm">
+            <div className="font-medium">{r.title}</div>
+            <div className="text-gray-300 text-xs">{r.detail}</div>
+            {'outputs' in r && Array.isArray(r.outputs) && r.outputs.map((o: string) => <div key={o} className="text-gray-400 text-xs">· {o}</div>)}
+            {'controls' in r && Array.isArray(r.controls) && r.controls.length > 0 && <div>{controlButtons(r.id, r.controls)}</div>}
+          </div>
+        ))}
+      </section>
       <FoundryEngineeringMissions />
       <FoundrySpecialistPool />
       <FoundryCompute />
