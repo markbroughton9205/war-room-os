@@ -66,3 +66,6 @@ Of its 5 misses in the 20 gate runs, all are "wrong fix" (no rewrites, no root-c
 - SpecialistUse `loadMs` is UNKNOWN (the model load is inside the batched embedding call; only the total is measured).
 - The gold proof (9/9, twice) was not run on this line: nothing was promoted. The nine BASELINE missions (default configuration, padded repository) were all CLEAN 12/12.
 - GitHub push protection reminder: no key-shaped literals in fixtures.
+
+## Installed runtime (versioned, launcher NOT repointed)
+`~/.local/opt/war-room-os-0.2.0-e41a525c-specialist-stage4` (git `e41a525c`, clean tree, stamp in `INSTALL_STAMP.json`, rollback installs listed there). Packaged server run headless on port 3849 with an isolated data root holding the combined Forge store (benchmarks, resource profiles, 15 SpecialistUse records): 13/13 checks (`p10-evidence/stage4/install/stage4-installed-proof.json`). Retrieval and research run in the harness, not in the packaged server, so the install shows the compute view and routing only. No Electron launch (needs the Commander's sudo for `chrome-sandbox` root:root 4755).
