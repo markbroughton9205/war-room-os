@@ -13,9 +13,12 @@ export const STALL_MS = 12 * 60_000
 export type Liveness = { verdict: 'ALIVE' | 'DEAD' | 'STALLED' | 'NOT_ACTIVE'; reason: string }
 export type LivenessFacts = { pidAlive: (pid: number, pidStart: string | 'UNKNOWN') => boolean; hasLocalRunner: (missionId: string) => boolean; ownPid: number; now: Date }
 
-export function assessLiveness(m: Pick<MissionRecord, 'id' | 'state' | 'lease'>, f: LivenessFacts): Liveness {
+export const CREATION_GRACE_MS = 120_000
+export function assessLiveness(m: Pick<MissionRecord, 'id' | 'state' | 'lease'> & { stateAt?: string }, f: LivenessFacts): Liveness {
   if (!ACTIVE_STATES.includes(m.state)) return { verdict: 'NOT_ACTIVE', reason: `mission is ${m.state}` }
   const l: Lease | null = m.lease
+  // a mission that was just reserved has no worker yet: it is being created, not dead
+  if (!l && m.state === 'QUEUED' && m.stateAt && f.now.getTime() - Date.parse(m.stateAt) < CREATION_GRACE_MS) return { verdict: 'ALIVE', reason: 'mission is being created' }
   if (!l) return { verdict: 'DEAD', reason: 'no worker lease is recorded for an active mission' }
   if (!f.pidAlive(l.pid, l.pidStart)) return { verdict: 'DEAD', reason: `worker process ${l.pid} is not running` }
   if (l.pid === f.ownPid && !f.hasLocalRunner(m.id)) return { verdict: 'DEAD', reason: 'this server process has no runner for the mission (the runner ended or was lost)' }

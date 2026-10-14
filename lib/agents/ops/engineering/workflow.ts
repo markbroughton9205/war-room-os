@@ -66,7 +66,7 @@ export type WorkflowDeps = {
   /** Opt-in batched context phase before the builder's first call: hybrid retrieval (+ an optional bounded research brief). Advisory context only. */
   contextPhase?: ContextPhase
   /** Provenance hooks (mission runner): every file Foundry writes names its author (a model as provider/model, or a deterministic Foundry tool), and every delivery (model or generator) is reported. */
-  onWrite?: (w: { path: string; stepId: string; tag: string; beforeHash: string | null; afterHash: string; author: string; deterministic: boolean; autofixed: boolean; at: string }) => void
+  onWrite?: (w: { path: string; stepId: string; tag: string; beforeHash: string | null; afterHash: string; author: string; deterministic: boolean; autofixed: boolean; editedBy?: string; at: string }) => void
   onDelivery?: (d: { executor: { provider: string; model: string } | 'UNKNOWN'; latencyMs: number | 'UNKNOWN'; outputTokens: number | 'UNKNOWN'; at: string }) => void
   /** The controlling mission id (defaults to the assignment's parent mission). */
   missionId?: string
@@ -496,8 +496,9 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     return out
   }
   let restoreSeq = 0
+  const authorByPath = new Map<string, string>()
   /** tag: a restore/revert is a NEW effect even when the same content was written earlier (the idempotency key would otherwise treat it as already done and skip it). */
-  const writeFile = async (stepId: string, path: string, content: string, tag = '', by?: string) => {
+  const writeFile = async (stepId: string, path: string, content: string, tag = '', by?: string, authorOverride?: string) => {
     let autofixed = false
     // first-pass: a known, deterministic defect is corrected on EVERY model write (edit stage, preflight repair, acceptance repair), not only on the first one
     if (fpOn && fpContract && tag === '' && !/^test\//.test(path) && /\.m?js$/.test(path)) {
@@ -518,8 +519,14 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     if (out.conflict) throw new Error(out.conflict)
     if (out.ran) {
       const restore = /^:(revert|restore)/.test(tag)
-      const author = by ?? (restore ? 'foundry:restore' : lastExec === 'UNKNOWN' ? 'UNKNOWN' : `${lastExec.provider}/${lastExec.model}`)
-      deps.onWrite?.({ path, stepId, tag, beforeHash: before, afterHash: expected.afterHash, author, deterministic: !!by || restore || (lastExec !== 'UNKNOWN' && lastExec.provider === 'foundry'), autofixed, at: clock().toISOString() })
+      const prior = authorByPath.get(path)
+      const lastAuthor = lastExec === 'UNKNOWN' ? 'UNKNOWN' : `${lastExec.provider}/${lastExec.model}`
+      const tool = by ?? (restore ? 'foundry:restore' : undefined)
+      // a Foundry tool that EDITS a file a model wrote (autofix, correction, quarantine, restore) does not become its author: the model stays the author and the tool is recorded as the editor
+      const editsModelFile = !!tool && !!prior && !prior.startsWith('foundry:') && prior !== 'UNKNOWN'
+      const author = authorOverride ?? (editsModelFile ? prior : tool ?? lastAuthor)
+      authorByPath.set(path, author)
+      deps.onWrite?.({ path, stepId, tag, beforeHash: before, afterHash: expected.afterHash, author, deterministic: !editsModelFile && (!!tool || (lastExec !== 'UNKNOWN' && lastExec.provider === 'foundry' && !authorOverride)), autofixed, ...(editsModelFile ? { editedBy: tool } : {}), at: clock().toISOString() })
     }
     if (out.ran || out.skipped === 'RECONCILED_LANDED') { state.fileChanges = [...state.fileChanges.filter((c) => !(c.path === path && c.stepId === stepId)), expected]; if (!state.effectsDone.includes(key)) state.effectsDone.push(key); changed.add(path) }
   }
@@ -1086,7 +1093,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
             if (rescueNo) { rescue.rescue_skipped_reason = rescueNo; emit('TEST_RESCUE_SKIPPED', `${path}: ${rescueNo}`) }
             if (run.exitCode !== 0 && deps.testCandidates?.length && !tplan?.files.find((f) => f.path === path)?.generated && state.validations.some((v) => v.stepId === 'accept' && v.status === 'PASSED') && !rescueNo && (rescueMode || helperOk(`${path}: competing test candidates`))) {
             const base = ws.read(path)
-            const pool: { label: string; content: string; failing: number; passed: boolean; grounded: number }[] = [{ label: writerLabel, content: base, failing: failCount(run), passed: false, grounded: groundTests(path, base, req.acceptance, writerLabel).filter((g) => g.confidence !== 'NONE').length }]
+            const pool: { label: string; author?: string; content: string; failing: number; passed: boolean; grounded: number }[] = [{ label: writerLabel, author: authorByPath.get(path), content: base, failing: failCount(run), passed: false, grounded: groundTests(path, base, req.acceptance, writerLabel).filter((g) => g.confidence !== 'NONE').length }]
             for (const alt of deps.testCandidates.slice(0, deps.maxCandidatesPerFile ?? 1)) {
               if (rescueMode) { const no = rescueBlocked(); if (no) { rescue.rescue_skipped_reason = no; emit('TEST_RESCUE_SKIPPED', `${path}: ${no}`); break } } else if (!budgetLeft() || !helperOk(`${path}: candidate ${alt.label}`)) break
               emit('TEST_CANDIDATE', `${path}: asking ${alt.label} for a competing test file`)
@@ -1102,12 +1109,12 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
               await writeFile(step.id, path, pa.content, `:cand${++restoreSeq}`)
               const rc = await runCheck(tests)
               const failing = rc.exitCode === 0 ? 0 : failCount(rc)
-              pool.push({ label: alt.label, content: pa.content, failing, passed: rc.exitCode === 0, grounded: groundTests(path, pa.content, req.acceptance, alt.label).filter((g) => g.confidence !== 'NONE').length })
+              pool.push({ label: alt.label, author: authorByPath.get(path), content: pa.content, failing, passed: rc.exitCode === 0, grounded: groundTests(path, pa.content, req.acceptance, alt.label).filter((g) => g.confidence !== 'NONE').length })
               candidateLog.push({ label: alt.label, file: path, failing, passed: rc.exitCode === 0, kept: false })
               if (rc.exitCode === 0) break
             }
             const best = [...pool].sort((a, b) => Number(b.passed) - Number(a.passed) || a.failing - b.failing || b.grounded - a.grounded)[0]
-            if (ws.read(path) !== best.content) await writeFile(step.id, path, best.content, `:cand${++restoreSeq}`)
+            if (ws.read(path) !== best.content) await writeFile(step.id, path, best.content, `:cand${++restoreSeq}`, undefined, best.author)
             const kept = candidateLog.find((c) => c.label === best.label && c.file === path); if (kept) kept.kept = true
             emit('TEST_CANDIDATE_CHOSEN', `${path}: kept ${best.label} (${best.passed ? 'passes' : `${best.failing} failing`}, ${best.grounded} contract-grounded) of ${pool.length} candidate(s)`)
             run = await runCheck(tests)

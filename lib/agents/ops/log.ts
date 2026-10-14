@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeSync, linkSync } from 'node:fs'
 import path from 'node:path'
 import { resolveLocalAppDataPaths } from '@/lib/sovereign-runtime/local-ownership/paths'
 import { valueContainsSecret } from '@/lib/recursive-learning/ingestion/redact'
@@ -44,13 +44,24 @@ export class AgentOpsLog {
     for (;;) {
       try { fd = openSync(lock, 'wx'); try { writeSync(fd, String(process.pid)) } catch { /* holder pid is best effort */ } break } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
-        // a lock whose holder process is gone is stolen at once (a killed worker must not block recovery); otherwise it goes stale after 10 s
+        // A lock whose holder is gone is stolen at once, but safely: the lock file is first RENAMED to a name only this waiter knows (rename is atomic, so exactly one waiter
+        // wins), the holder is checked on the renamed file, and a lock whose holder turns out to be alive is put back instead of deleted.
         try {
-          const holder = Number(readFileSync(lock, 'utf8').trim())
-          let gone = false
-          if (Number.isInteger(holder) && holder > 0 && holder !== process.pid) { try { process.kill(holder, 0) } catch (k) { gone = (k as NodeJS.ErrnoException).code === 'ESRCH' } }
-          if (gone || Date.now() - statSync(lock).mtimeMs > 10_000) unlinkSync(lock)
-        } catch { /* raced */ }
+          // cheap pre-check without touching the lock: a live, fresh holder is never disturbed
+          let h0 = NaN; try { h0 = Number(readFileSync(lock, 'utf8').trim()) } catch { /* unreadable */ }
+          let gone0 = false
+          if (Number.isInteger(h0) && h0 > 0 && h0 !== process.pid) { try { process.kill(h0, 0) } catch (k) { gone0 = (k as NodeJS.ErrnoException).code === 'ESRCH' } }
+          let old0 = false; try { old0 = Date.now() - statSync(lock).mtimeMs > (Number.isNaN(h0) ? 1_500 : 10_000) } catch { /* gone */ } // a lock with no holder pid (its owner died before writing it) goes stale after 1.5 s
+          if (!gone0 && !old0) throw new Error('holder is alive')
+          const grave = `${lock}.stale.${process.pid}.${Math.random().toString(36).slice(2)}`
+          renameSync(lock, grave)
+          let holder = NaN; try { holder = Number(readFileSync(grave, 'utf8').trim()) } catch { /* unreadable */ }
+          let dead = false
+          if (Number.isInteger(holder) && holder > 0) { try { process.kill(holder, 0) } catch (k) { dead = (k as NodeJS.ErrnoException).code === 'ESRCH' } }
+          let old = false; try { old = Date.now() - statSync(grave).mtimeMs > 10_000 } catch { /* gone */ }
+          if (dead || old || holder === process.pid) { try { unlinkSync(grave) } catch { /* gone */ } }
+          else { try { linkSync(grave, lock) } catch { /* someone else took the lock meanwhile: they hold it now */ } try { unlinkSync(grave) } catch { /* gone */ } }
+        } catch { /* nothing to steal, or another waiter won the rename */ }
         if (Date.now() - started > 5_000) throw new Error('agent foundry log lock timeout')
         sleepSync(5)
       }

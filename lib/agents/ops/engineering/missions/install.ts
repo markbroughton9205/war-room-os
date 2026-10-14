@@ -22,23 +22,35 @@ export async function installRuntime(m: MissionRecord, integ: ChangeReceipt['int
     await runTool([git, '-C', repo, 'merge', '--abort'], repo, { timeoutMs: 30_000 })
     return { state: 'FAILED', detail: `merge refused (${(merged.stdout + merged.stderr).trim().slice(-200)}); the repository was left as it was (${head0.slice(0, 10)})` }
   }
+  /** Undoes ONLY the merge this stage made: HEAD must still be the merged commit and the tree clean; the integrated commit stays reachable on its foundry branch. */
+  const mergedAt = (await runTool([git, '-C', repo, 'rev-parse', 'HEAD'], repo, { timeoutMs: 20_000 })).stdout.trim()
+  const rollback = async (why: string): Promise<ChangeReceipt['install']> => {
+    const head = (await runTool([git, '-C', repo, 'rev-parse', 'HEAD'], repo, { timeoutMs: 20_000 })).stdout.trim()
+    const dirtyNow = (await runTool([git, '-C', repo, 'status', '--porcelain'], repo, { timeoutMs: 60_000 })).stdout.trim()
+    if (head === mergedAt && !dirtyNow) {
+      const r = await runTool([git, '-C', repo, 'reset', '--hard', head0], repo, { timeoutMs: 60_000 })
+      on(`rolled the repository back to ${head0.slice(0, 10)}: exit ${r.exitCode}`)
+      return { state: 'FAILED', detail: `${why}; the repository was rolled back to ${head0.slice(0, 10)} (the integrated commit stays on ${integ.branch})` }
+    }
+    return { state: 'FAILED', detail: `${why}; the repository was NOT rolled back automatically (HEAD moved or the tree changed): it is at ${head.slice(0, 10)}, was ${head0.slice(0, 10)} before the merge` }
+  }
   const sha = (await runTool([git, '-C', repo, 'rev-parse', 'HEAD'], repo, { timeoutMs: 20_000 })).stdout.trim()
   const tree = (await runTool([git, '-C', repo, 'rev-parse', 'HEAD^{tree}'], repo, { timeoutMs: 20_000 })).stdout.trim()
   const branch = (await runTool([git, '-C', repo, 'rev-parse', '--abbrev-ref', 'HEAD'], repo, { timeoutMs: 20_000 })).stdout.trim()
   const installId = `war-room-os-${opts.version ?? '0.2.0'}-${sha.slice(0, 8)}-foundry-${m.id.slice(-8)}`
   const optRoot = opts.optRoot ?? path.join(os.homedir(), '.local', 'opt')
   const dest = path.join(optRoot, installId)
-  if (existsSync(dest)) return { state: 'FAILED', detail: `install directory already exists and is never overwritten: ${dest}` }
+  if (existsSync(dest)) return rollback(`install directory already exists and is never overwritten: ${dest}`)
   const b1 = await run('next build', [pnpm, 'run', 'build'], repo, 30 * 60_000)
-  if (b1.exitCode !== 0) return { state: 'FAILED', detail: `next build failed: ${(b1.stderr || b1.stdout).trim().slice(-300)}` }
+  if (b1.exitCode !== 0) return rollback(`next build failed: ${(b1.stderr || b1.stdout).trim().slice(-300)}`)
   const b2 = await run('prepare the desktop runtime', [node, 'scripts/prepare-desktop-runtime.mjs'], repo, 15 * 60_000)
-  if (b2.exitCode !== 0) return { state: 'FAILED', detail: `prepare-desktop-runtime failed: ${(b2.stderr || b2.stdout).trim().slice(-300)}` }
+  if (b2.exitCode !== 0) return rollback(`prepare-desktop-runtime failed: ${(b2.stderr || b2.stdout).trim().slice(-300)}`)
   const b3 = await run('package the desktop app', [path.join(path.dirname(node), 'npx'), 'electron-builder', '--linux', 'dir', '--x64'], path.join(repo, 'desktop'), 30 * 60_000)
-  if (b3.exitCode !== 0) return { state: 'FAILED', detail: `electron-builder failed: ${(b3.stderr || b3.stdout).trim().slice(-300)}` }
+  if (b3.exitCode !== 0) return rollback(`electron-builder failed: ${(b3.stderr || b3.stdout).trim().slice(-300)}`)
   const unpacked = path.join(repo, 'desktop', 'dist-release', 'linux-unpacked')
-  if (!existsSync(path.join(unpacked, 'war-room-os'))) return { state: 'FAILED', detail: 'the packaged executable was not produced' }
+  if (!existsSync(path.join(unpacked, 'war-room-os'))) return rollback('the packaged executable was not produced')
   const after = await runTool([git, '-C', repo, 'status', '--porcelain'], repo, { timeoutMs: 60_000 })
-  if (after.stdout.trim()) return { state: 'FAILED', detail: 'the build left the tree dirty; refusing to stamp it as a clean install' }
+  if (after.stdout.trim()) return rollback('the build left the tree dirty; refusing to stamp it as a clean install')
   mkdirSync(path.join(dest, 'opt'), { recursive: true })
   renameSync(unpacked, path.join(dest, 'opt', 'War-Room-OS'))
   const stamp = { install_id: installId, feature: `${m.title} (Foundry engineering mission ${m.id})`, mission: m.id, gitSha: sha, gitShort: sha.slice(0, 8), gitTree: tree, gitDirty: false, gitRef: branch, foundryBranch: integ.branch, foundryCommit: integ.commit, builtAt: new Date().toISOString(), executable: path.join(dest, 'opt', 'War-Room-OS', 'war-room-os'), canonical_launcher_repointed: false, rollback_repository_head: head0 }

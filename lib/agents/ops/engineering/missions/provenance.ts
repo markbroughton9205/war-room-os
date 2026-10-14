@@ -11,7 +11,7 @@ export function roleOf(author: string, cfg: MissionRecord['config']): Provenance
   return 'unknown'
 }
 
-export type LedgerWrite = { type: 'write'; path: string; stepId: string; tag: string; author: string; role: ProvenanceRole; deterministic: boolean; autofixed: boolean; attempt: number; recovered: boolean; workerId: string; beforeHash: string | null; afterHash: string; at: string }
+export type LedgerWrite = { type: 'write'; path: string; stepId: string; tag: string; author: string; role: ProvenanceRole; deterministic: boolean; autofixed: boolean; editedBy?: string; attempt: number; recovered: boolean; workerId: string; beforeHash: string | null; afterHash: string; at: string }
 export type LedgerDelivery = { type: 'delivery'; model: string; provider: string; role: ProvenanceRole; attempt: number; recovered: boolean; latencyMs: number | 'UNKNOWN'; outputTokens: number | 'UNKNOWN'; at: string }
 
 /** Final authorship per path = the LAST ledger write of that path whose content hash still matches the file on disk; anything else is reported as UNATTRIBUTED. */

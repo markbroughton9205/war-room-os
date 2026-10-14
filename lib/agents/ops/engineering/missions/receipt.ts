@@ -37,6 +37,7 @@ export function buildReceipt(i: ReceiptInputs): ChangeReceipt {
   const deleted = Object.keys(i.seed).filter((p) => !(p in final)).sort()
   const detRepairs: ChangeReceipt['deterministicRepairs'] = []
   for (const w of i.writes) {
+    if (w.editedBy) detRepairs.push({ kind: w.editedBy.replace(/^foundry:/, ''), file: w.path, note: `applied to a file written by ${w.author}` })
     if (w.autofixed) detRepairs.push({ kind: 'structural-autofix(on write)', file: w.path, note: `applied to a ${w.role} write` })
     if (w.deterministic && w.author.startsWith('foundry:') && w.author !== 'foundry:contract-test-generator') detRepairs.push({ kind: w.author.slice('foundry:'.length), file: w.path, note: w.tag || 'write' })
   }

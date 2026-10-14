@@ -27,9 +27,12 @@ import { SeedError, checkSeedPath, seedWorkspace } from './seed'
 import { buildReceipt, verifyReceipt } from './receipt'
 import { fileProvenance, roleOf, type LedgerWrite } from './provenance'
 import { missionView } from './service'
+import { installRuntime } from './install'
 import type { MissionRecord } from './types'
 
 const SELF = fileURLToPath(import.meta.url)
+// the chat fixture writes package.json (a denylisted surface); the denylist itself is exercised below with this switched off
+process.env.WAR_ROOM_ENG_ALLOW_SENSITIVE = '1'
 const ORIGINAL_TEST = `import test from 'node:test'
 import assert from 'node:assert'
 import { addMessage, listMessages, validateMessage } from '../src/chatService.mjs'
@@ -180,7 +183,7 @@ const code = (fn: () => unknown) => { try { fn(); return 'none' } catch (e) { re
   const asg = deriveAssignments(log).assignments.get(after.assignmentId)!
   check('B09_before_reconciliation_the_record_still_says_RUNNING_and_the_process_is_dead', stateBefore === 'RUNNING' && !pidAliveReal(info.pid, before.lease!.pidStart))
   check('B10_reconciliation_moves_the_dead_run_to_INTERRUPTED_never_COMPLETED', changed.includes(info.id) && after.state === 'INTERRUPTED' && after.state !== ('COMPLETED' as string) && /worker died/.test(after.stateReason))
-  check('B11_the_assignment_is_interrupted_in_the_log_and_the_lease_is_retired_as_evidence', asg.state === 'INTERRUPTED' && store.readLease(info.id) === null && readdirSync(store.dir(info.id)).some((f) => /^lease\.dead\./.test(f)))
+  check('B11_the_assignment_is_interrupted_in_the_log_and_the_lease_is_retired_as_evidence', asg.state === 'INTERRUPTED' && store.readLease(info.id) === null && readdirSync(store.dir(info.id)).some((f) => /^lease\.dead\./.test(f)), `asg ${asg.state}; lease ${JSON.stringify(store.readLease(info.id))}; files ${readdirSync(store.dir(info.id)).join(',')}`)
   check('B12_a_recovery_record_names_the_cause_the_checkpoint_and_whether_it_can_resume', after.recoveries.length === 1 && after.recoveries[0].resumable === true && /not running/.test(after.recoveries[0].reason) && after.attempts[0].endState === 'INTERRUPTED')
   check('B13_reconciling_again_is_a_no_op', reconcileMissions(log, store).length === 0 && store.read(info.id)!.recoveries.length === 1)
   check('B14_interruption_evidence_is_written_once_and_the_workspace_is_preserved', existsSync(path.join(store.dir(info.id), 'receipts', 'interrupted-a1.json')) && existsSync(after.workspace.root))
@@ -315,6 +318,70 @@ const code = (fn: () => unknown) => { try { fn(); return 'none' } catch (e) { re
   const tryRun = (setup: (d: string) => void) => { try { run(setup); return 0 } catch (e) { return (e as { status?: number }).status ?? -1 } }
   const T = (body: string) => (d: string) => { mkdirSync(path.join(d, 'test')); writeFileSync(path.join(d, 'test', 'a.test.mjs'), `import test from 'node:test'\nimport assert from 'node:assert'\ntest('t', () => { ${body} })\n`) }
   check('G05_the_generic_verifier_passes_a_passing_suite_fails_a_failing_one_and_accepts_no_tests', tryRun(T('assert.ok(true)')) === 0 && tryRun(T('assert.ok(false)')) === 1 && tryRun(() => {}) === 0)
+}
+
+// ============================================================ review fixes: busy race, zombie fencing, attribution, denylist, install rollback
+{
+  // M1: two simultaneous starts reserve atomically
+  const repo = makeRepo(); const w = world({ script: () => new Promise<string | null>(() => {}) })
+  const results = await Promise.allSettled([createMission(w.deps, { ...DRAFT(repo), title: 'a' }, C), createMission(w.deps, { ...DRAFT(repo), title: 'b' }, C)])
+  check('R01_two_simultaneous_starts_create_exactly_one_mission_and_the_other_is_BUSY', results.filter((r) => r.status === 'fulfilled').length === 1 && results.some((r) => r.status === 'rejected' && (r.reason as MissionError).code === 'BUSY'), results.map((r) => r.status).join())
+  check('R02_a_freshly_reserved_mission_is_not_mistaken_for_a_dead_one', assessLiveness({ id: 'm', state: 'QUEUED', lease: null, stateAt: new Date().toISOString() }, { pidAlive: () => true, hasLocalRunner: () => true, ownPid: 1, now: new Date() }).verdict === 'ALIVE')
+  const ok = results.find((r) => r.status === 'fulfilled') as PromiseFulfilledResult<MissionRecord>
+  launchMission(w.deps, ok.value.id, 'START')
+  const second = { ...w.store.read(ok.value.id)!, id: w.store.newId(), state: 'QUEUED' as const, lease: null }
+  w.store.create(second)
+  check('R03_launching_a_second_mission_while_one_is_active_is_refused', code(() => launchMission(w.deps, second.id, 'START')) === 'MISSION:BUSY')
+  cancelMission(w.deps, ok.value.id, C, 'cleanup'); localRunners().delete(ok.value.id)
+}
+{
+  // M2: a worker that lost its lease cannot record a result, retire the new lease, or integrate
+  const repo = makeRepo(); const w = world()
+  const rec = await createMission(w.deps, DRAFT(repo), C)
+  const run = launchMission(w.deps, rec.id, 'START')
+  // declare it dead while it runs (as a reconciler would after a stalled heartbeat): retire its lease and mark it interrupted
+  await new Promise((r) => setTimeout(r, 400))
+  w.store.retireLease(rec.id, 'dead'); w.store.update(rec.id, (m) => { m.state = 'INTERRUPTED'; m.stateReason = 'declared dead by the validator'; return m })
+  await run.done
+  const after = w.store.read(rec.id)!
+  check('R04_a_zombie_worker_cannot_complete_or_overwrite_the_mission_it_lost', after.state === 'INTERRUPTED' && after.receipt === null && w.store.readLease(rec.id) === null, `${after.state}`)
+  check('R05_the_late_result_is_logged_as_discarded_and_nothing_was_integrated', w.store.events(rec.id, 500).some((e) => e.kind === 'LATE_RESULT_DISCARDED') && (() => { try { sh(repo, 'rev-parse', '--verify', `refs/heads/foundry/${rec.id}`); return false } catch { return true } })())
+}
+{
+  // M3/M4: attribution
+  const cfg = { builder: 'devstral', testReviewer: null, testCandidates: ['qwen2.5'], escalation: null, flags: {} } as MissionRecord['config']
+  const lw = (p: string, author: string, h: string, extra: Partial<LedgerWrite> = {}): LedgerWrite => ({ type: 'write', path: p, stepId: 's', tag: '', author, role: roleOf(author, cfg), deterministic: false, autofixed: false, attempt: 1, recovered: false, workerId: 'w', beforeHash: null, afterHash: h, at: 'now', ...extra })
+  const f1 = fileProvenance([lw('t.mjs', 'ollama/devstral', 'a'), lw('t.mjs', 'ollama/devstral', 'b', { editedBy: 'foundry:quarantine' })], { 't.mjs': 'b' })
+  check('R06_a_model_written_file_edited_by_a_Foundry_tool_keeps_the_model_as_author', f1[0].author === 'ollama/devstral' && f1[0].role === 'implementation_model' && f1[0].deterministic === false)
+  const rc = buildReceipt({ mission: { id: 'x', attempts: [] } as unknown as MissionRecord, ws: (() => { const d = tmp(); writeFileSync(path.join(d, 'package.json'), '{}'); writeFileSync(path.join(d, 't.mjs'), 'x'); return new Workspace(d) })(), seed: {}, writes: [lw('t.mjs', 'ollama/devstral', 'b', { editedBy: 'foundry:quarantine' })], deliveries: [], result: null, verifier: { label: 'v', exitCode: 0, summary: '', at: '' }, integration: { state: 'NOT_RUN', gates: [], refused: [] }, install: { state: 'NOT_REQUESTED' } })
+  check('R07_the_receipt_lists_the_tool_edit_as_a_deterministic_repair_without_taking_the_authorship', rc.deterministicRepairs.some((d) => d.kind === 'quarantine' && d.file === 't.mjs'))
+}
+{
+  // M6: sensitive write scope
+  process.env.WAR_ROOM_ENG_ALLOW_SENSITIVE = ''
+  const repo = makeRepo()
+  const bad = ['package.json', 'scripts/x.mjs', 'desktop/src', 'lib/security/a.ts', 'middleware.ts', '.github/workflows', 'next.config.mjs', 'app/api/auth/x']
+  const refused = bad.filter((b) => code(() => validateDraft({ ...DRAFT(repo), scope: { source: { repo, paths: ['server.mjs'] }, write: [b] } })) === 'MISSION:SCOPE')
+  check('R08_security_build_and_config_surfaces_are_refused_as_write_scope', refused.length === bad.length, `refused ${refused.join(',')}`)
+  check('R09_ordinary_feature_paths_are_still_allowed', code(() => validateDraft({ ...DRAFT(repo), scope: { source: { repo, paths: ['server.mjs'] }, write: ['src', 'test', 'components/war-room/foundry/Panel.tsx'] } })) === 'none')
+  check('R10_apply_back_refuses_sensitive_and_case_variants', planApply(['package.json', 'SRC/.GIT/x', 'src/ok.mjs', 'src/Node_Modules/x.js'], [], ['src', 'package.json', 'SRC']).allowed.join() === 'src/ok.mjs')
+  process.env.WAR_ROOM_ENG_ALLOW_SENSITIVE = '1'
+}
+{
+  // M7: a live holder's lock is never disturbed; a dead holder's is stolen
+  const l = new AgentOpsLog(tmp()); writeFileSync(l.file + '.lock', String(process.ppid))
+  let got = false
+  try { l.withLock(() => { got = true }) } catch { /* expected: a live process holds it, so this waits out its timeout */ }
+  check('R11_a_lock_held_by_a_live_process_is_not_stolen', !got && existsSync(l.file + '.lock') && readFileSync(l.file + '.lock', 'utf8') === String(process.ppid))
+}
+{
+  // M5: a failed build after the merge rolls the repository back
+  const repo = makeRepo(); const head0 = sh(repo, 'rev-parse', 'HEAD')
+  sh(repo, 'checkout', '-q', '-b', 'foundry/x'); writeFileSync(path.join(repo, 'src', 'added.mjs'), 'export const a = 1\n'); sh(repo, 'add', '--', 'src/added.mjs'); sh(repo, 'commit', '-q', '-m', 'foundry work'); const fc = sh(repo, 'rev-parse', 'HEAD'); sh(repo, 'checkout', '-q', 'main')
+  process.env.WAR_ROOM_ENG_PNPM = '/bin/false'
+  const res = await installRuntime({ id: 'msn-20261014T000000-aaaaaaaa', title: 't' } as MissionRecord, { state: 'APPLIED', branch: 'foundry/x', commit: fc, gates: [], refused: [] }, () => {}, repo, { optRoot: path.join(tmp(), 'opt') })
+  delete process.env.WAR_ROOM_ENG_PNPM
+  check('R12_a_build_that_fails_after_the_merge_rolls_the_repository_back_and_keeps_the_foundry_branch', res.state === 'FAILED' && /rolled back/.test(res.detail ?? '') && sh(repo, 'rev-parse', 'HEAD') === head0 && sh(repo, 'status', '--porcelain') === '' && sh(repo, 'rev-parse', 'foundry/x') === fc, JSON.stringify(res))
 }
 
 finish()

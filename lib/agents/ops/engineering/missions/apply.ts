@@ -7,7 +7,7 @@ import { resolveBin, runTool } from './toolchain'
 
 export type GateSpec = { typecheck: boolean; validators: string[] }
 export const DEFAULT_GATES: GateSpec = { typecheck: true, validators: [] }
-const SECRET_NAME = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_rsa.*|\.npmrc)$/i
+import { SECRET_NAME, isSensitiveWrite } from './seed'
 
 /** Which changed paths may be applied back: created/modified only, repository-relative, under a declared write prefix, nothing secret-shaped. Pure, so it is testable without a repository. */
 export function planApply(changed: string[], deleted: string[], write: string[]): { allowed: string[]; refused: string[] } {
@@ -19,7 +19,8 @@ export function planApply(changed: string[], deleted: string[], write: string[])
     const p = raw.replace(/\\/g, '/')
     if (path.isAbsolute(p) || p.split('/').includes('..') || p.includes('\0')) { refused.push(`${raw}: not a repository-relative path`); continue }
     if (SECRET_NAME.test(p)) { refused.push(`${raw}: secret-shaped file name`); continue }
-    if (p.split('/').some((s) => s === '.git' || s === 'node_modules')) { refused.push(`${raw}: protected path`); continue }
+    if (isSensitiveWrite(p)) { refused.push(`${raw}: a security, build or configuration surface (never written by a mission)`); continue }
+    if (p.split('/').some((s) => s.toLowerCase() === '.git' || s.toLowerCase() === 'node_modules')) { refused.push(`${raw}: protected path`); continue }
     if (!prefixes.some((w) => p === w || p.startsWith(w + '/'))) { refused.push(`${raw}: outside the declared write scope (${prefixes.join(', ') || 'none'})`); continue }
     allowed.push(p)
   }
@@ -50,6 +51,12 @@ export async function integrate(m: MissionRecord, ws: Workspace, created: string
     const c = (await runTool([git, '-C', src.repo, 'rev-parse', `refs/heads/${branch}`], src.repo, { timeoutMs: 20_000 })).stdout.trim()
     // the branch exists from the first (uncommitted) attempt at its base commit; only a tip beyond the base means this mission's commit already exists
     if (c && c !== base) {
+      // the existing commit must hold exactly what the workspace holds now (a resumed run that changed files after the commit must not inherit it)
+      for (const f of plan.allowed) {
+        const inBranch = (await runTool([git, '--literal-pathspecs', '-C', src.repo, 'rev-parse', `${c}:${f}`], src.repo, { timeoutMs: 20_000 })).stdout.trim()
+        const inWs = (await runTool([git, '-C', src.repo, 'hash-object', '--no-filters', path.join(ws.root, f)], src.repo, { timeoutMs: 20_000 })).stdout.trim()
+        if (inBranch !== inWs) return { state: 'REFUSED', gates: [], refused: [`${f}: the integration branch already holds a different version than the workspace`] }
+      }
       const t = await runTool([git, '-C', src.repo, 'rev-parse', `refs/heads/${branch}^{tree}`], src.repo, { timeoutMs: 20_000 })
       return { ...out, state: 'APPLIED', commit: c, tree: t.stdout.trim(), gates: [{ name: 'already-applied', exitCode: 0, summary: 'the branch already holds this mission\'s commit (a resumed attempt does not apply twice)' }] }
     }
@@ -81,7 +88,7 @@ export async function integrate(m: MissionRecord, ws: Workspace, created: string
   }
   rmSync(nm, { force: true })
   if (!ok) return out
-  const add = await runTool([git, '-C', wt, 'add', '--', ...plan.allowed], wt, { timeoutMs: 60_000 })
+  const add = await runTool([git, '--literal-pathspecs', '-C', wt, 'add', '--', ...plan.allowed], wt, { timeoutMs: 60_000 })
   if (add.exitCode !== 0) { out.gates.push({ name: 'git add', exitCode: add.exitCode ?? -1, summary: add.stderr.slice(-300) }); return out }
   const msg = `foundry(${m.id}): ${m.title}\n\nEngineering mission ${m.id}. Workspace seed ${m.workspace.seedTreeSha256.slice(0, 12)}; base ${base.slice(0, 12)}.\nFiles: ${plan.allowed.join(', ')}\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`
   const cm = await runTool([git, '-C', wt, '-c', 'user.name=Foundry Engineering', '-c', 'user.email=foundry@war-room.local', 'commit', '-m', msg], wt, { timeoutMs: 60_000 })

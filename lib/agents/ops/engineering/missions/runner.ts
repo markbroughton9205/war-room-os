@@ -19,7 +19,7 @@ import { GATE_REPAIR_ROUNDS, GATE_REPAIR_SYSTEM, extractCorrected, gateRepairPro
 import { fileProvenance, roleOf, type LedgerDelivery, type LedgerWrite } from './provenance'
 import { buildReceipt, verifyReceipt } from './receipt'
 import { localRunners, realFacts, reconcileMissions, resumability } from './reconcile'
-import { SeedError, checkSeedPath, seedWorkspace } from './seed'
+import { SeedError, checkSeedPath, isSensitiveWrite, seedWorkspace } from './seed'
 import { assessLiveness, HEARTBEAT_MS, pidStartOf } from './liveness'
 import { resolveBin, runTool } from './toolchain'
 import type { MissionStore } from './store'
@@ -56,7 +56,10 @@ export function validateDraft(d: MissionDraft): { title: string; request: string
   if (acceptance.length < 1 || acceptance.length > 20) throw new MissionError('INVALID', 'between 1 and 20 acceptance criteria are required (each a testable statement)')
   const hints = (Array.isArray(d.hints) ? d.hints : []).map((h) => clip(String(h), 60)).filter(Boolean).slice(0, 8)
   const write = (d.scope?.write ?? []).map((w) => String(w).replace(/\\/g, '/').replace(/\/+$/, ''))
-  for (const w of write) if (!w || w.startsWith('/') || w.split('/').includes('..') || /^\.git(\/|$)/.test(w) || w.includes('\0')) throw new MissionError('SCOPE', `invalid write scope: ${w}`)
+  for (const w of write) {
+    if (!w || w.startsWith('/') || w.split('/').includes('..') || /^\.git(\/|$)/i.test(w) || w.includes('\0')) throw new MissionError('SCOPE', `invalid write scope: ${w}`)
+    if (isSensitiveWrite(w) || isSensitiveWrite(w + '/')) throw new MissionError('SCOPE', `${w} is a security, build or configuration surface; a mission may not write there`)
+  }
   let source: ScopeSpec['source']
   if (d.scope?.source) {
     const repo = String(d.scope.source.repo ?? '')
@@ -116,35 +119,44 @@ export function missionPaths(deps: Pick<RunnerDeps, 'store'>, id: string) { cons
 export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: Actor): Promise<MissionRecord> {
   const v = validateDraft(draft)
   const now = (deps.now ?? (() => new Date()))()
-  const busy = deps.store.list().find((m) => ACTIVE_STATES.includes(m.state) && assessLiveness(m, realFacts(now)).verdict !== 'DEAD')
-  if (busy) throw new MissionError('BUSY', `mission ${busy.id} is ${busy.state}; one engineering mission runs at a time (one GPU, one resident builder)`)
   reconcileMissions(deps.log, deps.store)
   const lineup = await deps.lineup()
   const id = deps.store.newId(now)
   const root = path.join(deps.workspacesRoot, id)
   let baseCommit: string | undefined
   if (v.scope.source) { const r = await runTool([resolveBin('git'), '-C', v.scope.source.repo, 'rev-parse', 'HEAD'], v.scope.source.repo, { timeoutMs: 20_000 }); if (r.exitCode === 0) baseCommit = r.stdout.trim() }
-  let seeded
-  try { seeded = seedWorkspace(root, v.scope.source) } catch (e) { throw new MissionError('SCOPE', e instanceof SeedError ? e.message : String(e)) }
   const agentId = ensureAgent(deps.log, by)
-  const { assignment } = assign(deps.log, {
-    idempotencyKey: keyFor(id, 'feature_implementation', v.request), agentId, parentMission: { id, title: v.title }, taskClass: 'feature_implementation', capabilities: ['feature_implementation'], objective: v.request,
-    expectedOutputs: ['working feature with tests', 'change receipt'], completionConditions: ['independent verification passes', 'integration gates pass'], workspace: { id: `ws-${id}`, root, kind: 'sandbox' }, tools: TOOLS,
-    limits: { maxSteps: 40, maxRuntimeMs: 30 * 60_000, maxModelCalls: 60, maxRetries: 5 }, dependencies: [],
-  }, by)
   const rec: MissionRecord = {
     schema: 1, id, title: v.title, request: v.request, acceptance: v.acceptance, hints: v.hints, targets: v.targets, scope: v.scope, install: v.install, createdAt: now.toISOString(), createdBy: by,
-    state: 'QUEUED', stateReason: 'queued', stateAt: now.toISOString(), workspace: { root, seeded: seeded.seeded, seedTreeSha256: seeded.treeSha256, ...(baseCommit ? { baseCommit } : {}) },
-    assignmentId: assignment.id, agentId, lease: null, attempts: [], recoveries: [],
+    state: 'QUEUED', stateReason: 'creating the workspace', stateAt: now.toISOString(), workspace: { root, seeded: [], seedTreeSha256: 'PENDING', ...(baseCommit ? { baseCommit } : {}) },
+    assignmentId: 'PENDING', agentId, lease: null, attempts: [], recoveries: [],
     config: { builder: lineup.builder.label, testReviewer: lineup.testReviewer?.label ?? null, testCandidates: lineup.testCandidates.map((c) => c.label), escalation: lineup.escalation?.label ?? null, flags: { simulated: lineup.simulated, firstPass: deps.engine?.firstPass !== false, contractTests: deps.engine?.contractTests !== false && !v.targets.length, retrieval: false, research: false, fastRepair: false } },
     progress: { stepsDone: 0, stepsTotal: 0, modelCalls: 0, repairs: 0, filesChanged: [], lastEvent: 'queued' }, result: null, receipt: null,
   }
-  deps.store.create(rec)
-  const p = missionPaths(deps, id)
-  writeFileSync(p.seed, JSON.stringify(seeded.snapshot))
-  mkdirSync(p.verifier, { recursive: true }); writeFileSync(path.join(p.verifier, 'verify.mjs'), v.verifyScript ?? GENERIC_VERIFIER)
-  deps.store.event(id, { kind: 'CREATED', detail: `${v.title}; workspace ${root}; ${seeded.seeded.length} seeded file(s); builder ${lineup.builder.label}${lineup.simulated ? ' (SIMULATED)' : ''}`, attempt: 0 })
-  return rec
+  // the reservation is the record itself, created under the cross-process lock together with the "one mission at a time" check
+  try { deps.store.createExclusive(rec, (all) => all.find((m) => ACTIVE_STATES.includes(m.state) && assessLiveness(m, realFacts(now)).verdict !== 'DEAD')?.id ?? null) } catch (e) {
+    const busyId = (e as { busyId?: string }).busyId
+    if (busyId) throw new MissionError('BUSY', `mission ${busyId} is active; one engineering mission runs at a time (one GPU, one resident builder)`)
+    throw e
+  }
+  try {
+    let seeded
+    try { seeded = seedWorkspace(root, v.scope.source) } catch (e) { throw new MissionError('SCOPE', e instanceof SeedError ? e.message : String(e)) }
+    const { assignment } = assign(deps.log, {
+      idempotencyKey: keyFor(id, 'feature_implementation', v.request), agentId, parentMission: { id, title: v.title }, taskClass: 'feature_implementation', capabilities: ['feature_implementation'], objective: v.request,
+      expectedOutputs: ['working feature with tests', 'change receipt'], completionConditions: ['independent verification passes', 'integration gates pass'], workspace: { id: `ws-${id}`, root, kind: 'sandbox' }, tools: TOOLS,
+      limits: { maxSteps: 40, maxRuntimeMs: 30 * 60_000, maxModelCalls: 60, maxRetries: 5 }, dependencies: [],
+    }, by)
+    const p = missionPaths(deps, id)
+    writeFileSync(p.seed, JSON.stringify(seeded.snapshot))
+    mkdirSync(p.verifier, { recursive: true }); writeFileSync(path.join(p.verifier, 'verify.mjs'), v.verifyScript ?? GENERIC_VERIFIER)
+    const out = deps.store.update(id, (m) => { m.workspace = { ...m.workspace, seeded: seeded.seeded, seedTreeSha256: seeded.treeSha256 }; m.assignmentId = assignment.id; m.stateReason = 'queued'; return m })
+    deps.store.event(id, { kind: 'CREATED', detail: `${v.title}; workspace ${root}; ${seeded.seeded.length} seeded file(s); builder ${lineup.builder.label}${lineup.simulated ? ' (SIMULATED)' : ''}`, attempt: 0 })
+    return out
+  } catch (e) {
+    deps.store.update(id, (m) => { m.state = 'FAILED'; m.stateAt = new Date().toISOString(); m.stateReason = `could not create the mission: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300); return m })
+    throw e
+  }
 }
 
 const setState = (deps: RunnerDeps, id: string, workerId: string | null, state: MissionState, reason: string, patch: (m: MissionRecord) => void = () => {}) => {
@@ -158,6 +170,8 @@ const setState = (deps: RunnerDeps, id: string, workerId: string | null, state: 
 /** Start (or restart after recovery) the worker for a mission. The runner executes inside this process; its lease is renewed by a heartbeat and checked by the reconciler. */
 export function launchMission(deps: RunnerDeps, id: string, kind: 'START' | 'RESUME', recoveredFrom?: Attempt['recoveredFrom']): { workerId: string; done: Promise<void> } {
   const now = deps.now ?? (() => new Date())
+  const other = deps.store.list().find((x) => x.id !== id && ACTIVE_STATES.includes(x.state) && assessLiveness(x, realFacts(now())).verdict !== 'DEAD')
+  if (other) throw new MissionError('BUSY', `mission ${other.id} is active; one engineering mission runs at a time`)
   const workerId = `eng-${process.pid}-${randomUUID().slice(0, 6)}`
   const t = now().toISOString()
   const lease = { workerId, pid: process.pid, pidStart: pidStartOf(process.pid), bootId: (() => { try { return readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() } catch { return 'UNKNOWN' } })(), startedAt: t, heartbeatAt: t, progressAt: t, progressNote: kind === 'START' ? 'starting' : 'resuming' }
@@ -187,9 +201,13 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
   const deliveries: LedgerDelivery[] = prior.filter((e) => e.type === 'delivery') as unknown as LedgerDelivery[]
   let progressNote = kind === 'START' ? 'starting' : 'resuming'
   let progressAt = clock().toISOString()
+  /** True only while this worker still holds the mission. A worker the reconciler declared dead keeps running its code, but every effect below is fenced on this. */
+  const owns = () => { const l = store.readLease(id); const m = store.read(id); return !!l && l.workerId === workerId && !!m && ACTIVE_STATES.includes(m.state) }
   const beat = (note?: string, progress = false) => {
     if (progress) { progressAt = clock().toISOString(); if (note) progressNote = note }
-    try { store.writeLease(id, { ...(store.readLease(id) ?? ({} as never)), workerId, pid: process.pid, pidStart: pidStartOf(process.pid), heartbeatAt: clock().toISOString(), progressAt, progressNote } as never) } catch { /* the lease is best effort; a missed beat is what the reconciler reads */ }
+    const cur = store.readLease(id)
+    if (!cur || cur.workerId !== workerId) return // never rewrite or resurrect a lease this worker no longer holds
+    try { store.writeLease(id, { ...cur, workerId, pid: process.pid, pidStart: pidStartOf(process.pid), heartbeatAt: clock().toISOString(), progressAt, progressNote } as never) } catch { /* the lease is best effort; a missed beat is what the reconciler reads */ }
   }
   const hb = setInterval(() => beat(), HEARTBEAT_MS); hb.unref?.()
   let lastProg = 0
@@ -213,7 +231,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
       ...(deps.engine?.crashAfterSteps !== undefined ? { crashAfterSteps: deps.engine.crashAfterSteps } : {}), groundTests: false,
       onWrite: (w) => {
         const role = roleOf(w.author, cfg)
-        const e: LedgerWrite = { type: 'write', path: w.path, stepId: w.stepId, tag: w.tag, author: w.author, role, deterministic: w.deterministic || role === 'deterministic_tool', autofixed: w.autofixed, attempt: attemptNo, recovered, workerId, beforeHash: w.beforeHash, afterHash: w.afterHash, at: w.at }
+        const e: LedgerWrite = { type: 'write', path: w.path, stepId: w.stepId, tag: w.tag, author: w.author, role, deterministic: w.deterministic || role === 'deterministic_tool', autofixed: w.autofixed, ...(w.editedBy ? { editedBy: w.editedBy } : {}), attempt: attemptNo, recovered, workerId, beforeHash: w.beforeHash, afterHash: w.afterHash, at: w.at }
         writes.push(e); store.ledgerAppend(id, e); beat(`wrote ${w.path}`, true)
       },
       onDelivery: (d) => {
@@ -229,6 +247,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     try { progress() } catch { /* view only */ }
     if (result.status === 'CRASHED') return // simulated process death (tests only): the lease is left to expire and the reconciler must notice
     const finishAs = async (state: MissionState, reason: string, integration: ChangeReceipt['integration'], install: ChangeReceipt['install'], verifier: ChangeReceipt['verifier']) => {
+      if (!owns()) { store.event(id, { kind: 'LATE_RESULT_DISCARDED', detail: `worker ${workerId} no longer holds the mission; its ${state} result was not recorded`, attempt: attemptNo }); return }
       const receipt = buildReceipt({ mission: store.read(id)!, ws, seed, writes, deliveries, result, verifier, integration, install, now: clock() })
       const check = verifyReceipt(receipt, ws)
       if (state === 'COMPLETED' && !check.ok) { state = 'FAILED'; reason = `the change receipt does not match the filesystem: ${check.mismatches.slice(0, 3).join('; ')}` }
@@ -248,6 +267,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     if (result.status === 'CANCELLED') { await finishAs('CANCELLED', result.reason, noInt, noInst, notRun); return }
     if (result.status !== 'COMPLETED') { await finishAs('FAILED', `${result.status}: ${result.reason}`, noInt, noInst, notRun); return }
     // ---- independent verification, run now against the final workspace
+    if (!owns()) { store.event(id, { kind: 'LATE_RESULT_DISCARDED', detail: `worker ${workerId} lost the mission before verification`, attempt: attemptNo }); return }
     setState(deps, id, workerId, 'VERIFYING', 'running the independent verifier against the final workspace'); beat('independent verification', true)
     const fv = await verification.run()
     let verifier: ChangeReceipt['verifier'] = { label: verification.label, exitCode: fv.exitCode ?? -1, summary: (fv.stdout + '\n' + fv.stderr).trim().split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ').slice(0, 400) || 'no summary', at: clock().toISOString() }
@@ -255,6 +275,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     // ---- integration into the repository branch (only for repository missions)
     let integration = noInt
     if (m0.scope.source) {
+      if (!owns()) { store.event(id, { kind: 'LATE_RESULT_DISCARDED', detail: `worker ${workerId} lost the mission before integration; nothing was applied`, attempt: attemptNo }); return }
       setState(deps, id, workerId, 'APPLYING', 'applying the verified changes to the integration branch and running the repository gates'); beat('integration gates', true)
       const final = ws.snapshot()
       const created = Object.keys(final).filter((p) => !(p in seed)); const modified = Object.keys(final).filter((p) => p in seed && seed[p] !== final[p]); const deleted = Object.keys(seed).filter((p) => !(p in final))
@@ -262,6 +283,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
       // A repository gate that fails on the mission's own files gets a bounded repair: the compiler's errors go back to the builder for exactly those files, then the
       // independent verifier and the workspace tests run again before the gates do. Errors outside the mission's files are not the mission's to fix.
       for (let round = 1; round <= GATE_REPAIR_ROUNDS && integration.state === 'GATES_FAILED'; round++) {
+        if (!owns()) { store.event(id, { kind: 'LATE_RESULT_DISCARDED', detail: `worker ${workerId} lost the mission during gate repair`, attempt: attemptNo }); return }
         const tsc = integration.gates.find((g) => g.name.startsWith('typecheck') && g.exitCode !== 0)
         if (!tsc?.detail || integration.gates.some((g) => g.exitCode !== 0 && g !== tsc)) break
         const missionFiles = [...created, ...modified]
@@ -300,6 +322,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     // ---- install (only when the Commander asked for it at creation)
     let install = noInst
     if (m0.install) {
+      if (!owns()) { store.event(id, { kind: 'LATE_RESULT_DISCARDED', detail: `worker ${workerId} lost the mission before install; nothing was merged or built`, attempt: attemptNo }); return }
       if (!deps.installer) { await finishAs('FAILED', 'an install was requested but this deployment has no installer', integration, { state: 'NOT_RUN', detail: 'no installer configured' }, verifier); return }
       setState(deps, id, workerId, 'INSTALLING', 'building and installing a new versioned runtime from the integrated commit'); beat('installing', true)
       install = await deps.installer(store.read(id)!, integration, (s) => { store.event(id, { kind: 'INSTALL', detail: s, attempt: attemptNo }); beat(`install: ${s}`.slice(0, 160), true) })

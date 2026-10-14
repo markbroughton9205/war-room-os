@@ -36,6 +36,14 @@ export class MissionStore {
       return rec
     })
   }
+  /** Atomic reservation: the busy check and the creation happen in ONE critical section, so two simultaneous starts cannot both pass. `isBusy` returns the blocking mission id, if any. */
+  createExclusive(rec: MissionRecord, isBusy: (others: MissionRecord[]) => string | null): MissionRecord {
+    return this.log.withLock(() => {
+      const busy = isBusy(this.list())
+      if (busy) throw Object.assign(new Error(`mission ${busy} is active`), { busyId: busy })
+      return this.create(rec)
+    })
+  }
   private write(rec: MissionRecord) {
     const f = this.file(rec.id); const tmp = `${f}.${process.pid}.tmp`
     // the lease lives in its own file (renewed every few seconds without taking the lock); the record on disk never carries a copy that could go stale
