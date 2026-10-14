@@ -219,40 +219,22 @@ function extractFile(rel: string, content: string, files: Set<string>): FoundryF
   }
 }
 
-export async function buildCodeIndex(force = false): Promise<FoundryCodeIndex> {
-  const dest = cachePath()
-  const root = path.resolve(resolveRepoRoot())
-  const listed: string[] = []
-  for (const prefix of isWarRoomSourceTree(root) ? INDEX_PREFIXES : ['']) {
-    const files = await listRepoFiles(prefix)
-    for (const file of files) {
-      if (!SOURCE_RE.test(file)) continue
-      listed.push(file)
-      if (listed.length >= MAX_INDEX_FILES) break
-    }
-    if (listed.length >= MAX_INDEX_FILES) break
-  }
-  // A workspace can gain files or change imports between missions. Cache AST extraction,
-  // never the directory/content snapshot used to establish ownership.
-  const snapshots = await Promise.all(listed.map(async rel => ({ rel, read: await readRepoFile(rel) })))
-  const sourceFingerprint = createHash('sha256')
-    .update(JSON.stringify(snapshots.map(({rel, read}) => [rel, read.ok ? read.content : null])))
-    .digest('hex')
-  if (!force && existsSync(dest)) {
-    try {
-      const cached = JSON.parse(await readFile(dest, 'utf8')) as FoundryCodeIndex
-      if (cached.cacheVersion === INDEX_CACHE_VERSION && cached.root === root && cached.sourceFingerprint === sourceFingerprint) return cached
-    } catch { /* rebuild */ }
-  }
+/**
+ * Pure assembly of a code index from file contents: AST extraction per file, then the import-dependents, symbol-owner and test-sibling maps.
+ * buildCodeIndex uses it for the live repository; the Reverse Engineer uses it for a read-only snapshot of any authorized root.
+ */
+export function assembleCodeIndex(
+  sources: Array<{ rel: string; content: string }>,
+  listed: string[],
+  meta: { root: string; sourceFingerprint: string },
+): FoundryCodeIndex {
+  const { root, sourceFingerprint } = meta
   const fileSet = new Set(listed)
   const files: Record<string, FoundryFileIndex> = {}
-  for (const {rel, read} of snapshots) {
-    if (!read.ok || read.sizeBytes > MAX_FILE_BYTES) continue
-    files[rel] = extractFile(rel, read.content, fileSet)
-  }
-
+  for (const { rel, content } of sources) files[rel] = extractFile(rel, content, fileSet)
   const dependents: Record<string, string[]> = {}
-  const symbols: Record<string, string[]> = {}
+  // null prototype: a symbol named `constructor` or `toString` must not resolve to Object.prototype members
+  const symbols: Record<string, string[]> = Object.create(null)
   const tests: Record<string, string[]> = {}
   for (const file of Object.values(files)) {
     file.tests = testSiblings(file.path, fileSet)
@@ -283,6 +265,39 @@ export async function buildCodeIndex(force = false): Promise<FoundryCodeIndex> {
     dependents,
     tests,
   }
+  return index
+}
+
+export async function buildCodeIndex(force = false): Promise<FoundryCodeIndex> {
+  const dest = cachePath()
+  const root = path.resolve(resolveRepoRoot())
+  const listed: string[] = []
+  for (const prefix of isWarRoomSourceTree(root) ? INDEX_PREFIXES : ['']) {
+    const files = await listRepoFiles(prefix)
+    for (const file of files) {
+      if (!SOURCE_RE.test(file)) continue
+      listed.push(file)
+      if (listed.length >= MAX_INDEX_FILES) break
+    }
+    if (listed.length >= MAX_INDEX_FILES) break
+  }
+  // A workspace can gain files or change imports between missions. Cache AST extraction,
+  // never the directory/content snapshot used to establish ownership.
+  const snapshots = await Promise.all(listed.map(async rel => ({ rel, read: await readRepoFile(rel) })))
+  const sourceFingerprint = createHash('sha256')
+    .update(JSON.stringify(snapshots.map(({rel, read}) => [rel, read.ok ? read.content : null])))
+    .digest('hex')
+  if (!force && existsSync(dest)) {
+    try {
+      const cached = JSON.parse(await readFile(dest, 'utf8')) as FoundryCodeIndex
+      if (cached.cacheVersion === INDEX_CACHE_VERSION && cached.root === root && cached.sourceFingerprint === sourceFingerprint) return cached
+    } catch { /* rebuild */ }
+  }
+  const index = assembleCodeIndex(
+    snapshots.flatMap(({ rel, read }) => (read.ok && read.sizeBytes <= MAX_FILE_BYTES ? [{ rel, content: read.content }] : [])),
+    listed,
+    { root, sourceFingerprint },
+  )
   await mkdir(path.dirname(dest), { recursive: true }).catch(() => undefined)
   await writeFile(dest, JSON.stringify(index), 'utf8').catch(() => undefined)
   return index
@@ -388,7 +403,7 @@ function isRuntimeRenderingOwner(rel: string, file: FoundryFileIndex): boolean {
 }
 
 export function lookupSymbol(index: FoundryCodeIndex, name: string): { name: string; definitions: Array<{ path: string; line: number; kind: string }>; references: string[] } {
-  const definitionFiles = index.symbols[name] ?? []
+  const definitionFiles = Array.isArray(index.symbols[name]) ? index.symbols[name] : []
   const definitions = definitionFiles.flatMap(filePath => {
     const file = index.files[filePath]
     return (file?.symbols ?? [])

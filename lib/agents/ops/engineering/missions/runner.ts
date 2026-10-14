@@ -42,7 +42,7 @@ export type RunnerDeps = {
   engine?: { crashAfterSteps?: number; firstPass?: boolean; contractTests?: boolean }
   now?: () => Date
 }
-export type MissionDraft = { title: string; request: string; acceptance: string[]; hints?: string[]; targets?: { path: string; action: 'create' | 'modify' }[]; scope?: Partial<ScopeSpec>; install?: boolean; verifyScript?: string }
+export type MissionDraft = { title: string; request: string; acceptance: string[]; hints?: string[]; targets?: { path: string; action: 'create' | 'modify' }[]; scope?: Partial<ScopeSpec>; install?: boolean; verifyScript?: string; analysisId?: string }
 
 const C_SYSTEM: Actor = 'system:engineering-runner'
 const clip = (s: string, n: number) => s.trim().slice(0, n)
@@ -132,6 +132,7 @@ export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: A
     assignmentId: 'PENDING', agentId, lease: null, attempts: [], recoveries: [],
     config: { builder: lineup.builder.label, testReviewer: lineup.testReviewer?.label ?? null, testCandidates: lineup.testCandidates.map((c) => c.label), escalation: lineup.escalation?.label ?? null, flags: { simulated: lineup.simulated, firstPass: deps.engine?.firstPass !== false, contractTests: deps.engine?.contractTests !== false && !v.targets.length, retrieval: false, research: false, fastRepair: false } },
     progress: { stepsDone: 0, stepsTotal: 0, modelCalls: 0, repairs: 0, filesChanged: [], lastEvent: 'queued' }, result: null, receipt: null,
+    ...(draft.analysisId && /^rev-[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$/.test(draft.analysisId) ? { analysisId: draft.analysisId } : {}),
   }
   // the reservation is the record itself, created under the cross-process lock together with the "one mission at a time" check
   try { deps.store.createExclusive(rec, (all) => all.find((m) => ACTIVE_STATES.includes(m.state) && assessLiveness(m, realFacts(now)).verdict !== 'DEAD')?.id ?? null) } catch (e) {
@@ -151,7 +152,7 @@ export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: A
     writeFileSync(p.seed, JSON.stringify(seeded.snapshot))
     mkdirSync(p.verifier, { recursive: true }); writeFileSync(path.join(p.verifier, 'verify.mjs'), v.verifyScript ?? GENERIC_VERIFIER)
     const out = deps.store.update(id, (m) => { m.workspace = { ...m.workspace, seeded: seeded.seeded, seedTreeSha256: seeded.treeSha256 }; m.assignmentId = assignment.id; m.stateReason = 'queued'; return m })
-    deps.store.event(id, { kind: 'CREATED', detail: `${v.title}; workspace ${root}; ${seeded.seeded.length} seeded file(s); builder ${lineup.builder.label}${lineup.simulated ? ' (SIMULATED)' : ''}`, attempt: 0 })
+    deps.store.event(id, { kind: 'CREATED', detail: `${v.title}; workspace ${root}; ${seeded.seeded.length} seeded file(s); builder ${lineup.builder.label}${lineup.simulated ? ' (SIMULATED)' : ''}${rec.analysisId ? `; seeded from Reverse Engineer analysis ${rec.analysisId}` : ''}`, attempt: 0 })
     return out
   } catch (e) {
     deps.store.update(id, (m) => { m.state = 'FAILED'; m.stateAt = new Date().toISOString(); m.stateReason = `could not create the mission: ${e instanceof Error ? e.message : String(e)}`.slice(0, 300); return m })

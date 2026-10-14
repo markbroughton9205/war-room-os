@@ -398,6 +398,7 @@
     "validate:recursive-learning-all": "pnpm run validate:recursive-learning && pnpm run validate:recursive-learning-ingestion && pnpm run validate:recursive-learning-backfill && pnpm run validate:recursive-learning-api && pnpm run validate:recursive-learning-ui && pnpm run validate:recursive-learning-governance && pnpm run validate:recursive-learning-integration",
     "backfill:recursive-learning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/ingestion/backfill.cli.ts",
     "validate:foundry-missions": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/missions/missions.validation.ts",
+    "validate:foundry-reverse": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/reverse/reverse.validation.ts",
     "validate:agent-eng-importfix": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/importFix.validation.ts"
   },
   "dependencies": {

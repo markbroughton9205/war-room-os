@@ -93,6 +93,8 @@ export type MissionRecord = {
   result: { status: WorkflowResult['status']; reason: string; completionClass?: string; verifierExit: number | 'NOT_RUN' } | null
   receipt: ChangeReceipt | null
   cancelRequestedAt?: string
+  /** the Reverse Engineer analysis this mission was seeded from (record id under engineering-analyses), when it was started from one */
+  analysisId?: string
 }
 
 export type MissionEvent = { at: string; kind: string; detail: string; attempt: number }

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { FoundrySpecialistPool } from './FoundrySpecialistPool'
 import { FoundryCompute } from './FoundryCompute'
 import { FoundryEngineeringMissions } from './FoundryEngineeringMissions'
+import { FoundryReverseEngineer } from './FoundryReverseEngineer'
+import { FoundryHelp } from './FoundryHelp'
 import { buildOpsViewModel, type Control, type LoadState, type OpsEnvelope } from '@/lib/agents/ops/uiState'
 import { filterRows, stateCounts } from '@/lib/agents/ops/assignmentFilter.mjs'
 
@@ -14,6 +16,7 @@ export function FoundryAgentOpsPanel() {
   const [confirming, setConfirming] = useState<string | null>(null)
   const [filterState, setFilterState] = useState<string>('ALL')
   const [filterText, setFilterText] = useState<string>('')
+  const [workflow, setWorkflow] = useState<'build' | 'reverse' | 'help'>('build')
 
   const load = useCallback(() => {
     fetch('/api/foundry/agents/ops?section=summary&limit=50', { cache: 'no-store' })
@@ -111,7 +114,15 @@ export function FoundryAgentOpsPanel() {
           </div>
         ))}
       </section>
-      <FoundryEngineeringMissions />
+      <nav data-testid="foundry-workflows" className="mb-3 flex gap-2 text-sm" aria-label="Foundry workflows">
+        <button type="button" data-testid="wf-build" title="Build Feature: Foundry plans, builds, tests, verifies and writes a receipt" className={`px-3 py-1 ${workflow === 'build' ? 'bg-sky-700' : 'bg-gray-700'}`} onClick={() => setWorkflow('build')}>Build Feature</button>
+        <button type="button" data-testid="wf-reverse" title="Reverse Engineer: explain an existing implementation before changing it (read-only)" className={`px-3 py-1 ${workflow === 'reverse' ? 'bg-sky-700' : 'bg-gray-700'}`} onClick={() => setWorkflow('reverse')}>Reverse Engineer</button>
+        <button type="button" data-testid="wf-help" title="Learn Foundry: what each control does" className={`px-3 py-1 ${workflow === 'help' ? 'bg-sky-700' : 'bg-gray-700'}`} onClick={() => setWorkflow('help')}>Learn Foundry</button>
+        <span className="px-3 py-1 bg-gray-800 text-gray-500 text-xs self-center" title="Hardware probing, protocol interception and firmware extraction are not implemented">FUTURE — DEVICE / PROTOCOL LAB (not implemented)</span>
+      </nav>
+      {workflow === 'build' && <FoundryEngineeringMissions />}
+      {workflow === 'reverse' && <FoundryReverseEngineer />}
+      {workflow === 'help' && <FoundryHelp />}
       <FoundrySpecialistPool />
       <FoundryCompute />
     </div>

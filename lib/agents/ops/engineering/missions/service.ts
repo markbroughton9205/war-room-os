@@ -12,6 +12,8 @@ import { createMission, launchMission, resumeMission, cancelMission, MissionErro
 import { verifyReceipt } from './receipt'
 import type { MissionRecord } from './types'
 import { installRuntime } from './install'
+import { AnalysisError, buildDraftFromAnalysis, getAnalysis, runAnalysis } from '../reverse/service'
+import { isAnalysisId } from '../reverse/store'
 
 /** The repository a mission may seed from and integrate into. Server-side configuration only: the UI never names a path. */
 export function engineeringRepo(log: AgentOpsLog): string | null {
@@ -36,6 +38,7 @@ export type MissionView = {
   attempts: MissionRecord['attempts']; recoveries: MissionRecord['recoveries']
   config: MissionRecord['config']; scope: MissionRecord['scope']; install: boolean
   workspace: { root: string; seeded: number; baseCommit: string | null }
+  analysisId: string | null
   progress: MissionRecord['progress']; assignment: ReturnType<typeof buildAssignmentStatus> | null
   result: MissionRecord['result']
   receipt: MissionRecord['receipt'] | null
@@ -60,6 +63,7 @@ export function missionView(deps: Pick<RunnerDeps, 'log' | 'store'>, m: MissionR
     worker: l ? { workerId: l.workerId, pid: l.pid, heartbeatAgeSec: Math.round((f.now.getTime() - Date.parse(l.heartbeatAt)) / 1000), progressAgeSec: Math.round((f.now.getTime() - Date.parse(l.progressAt)) / 1000), progressNote: l.progressNote } : null,
     attempts: m.attempts, recoveries: m.recoveries, config: m.config, scope: m.scope, install: m.install,
     workspace: { root: m.workspace.root, seeded: m.workspace.seeded.length, baseCommit: m.workspace.baseCommit ?? null },
+    analysisId: m.analysisId ?? null,
     progress: m.progress, assignment: asg ? buildAssignmentStatus(deps.log, asg) : null,
     result: m.result, receipt: detail ? m.receipt : m.receipt ? ({ ...m.receipt, provenance: { ...m.receipt.provenance, files: [] } } as MissionRecord['receipt']) : null, receiptCheck,
     events: deps.store.events(m.id, detail ? 300 : 12), controls,
@@ -69,14 +73,37 @@ export function missionView(deps: Pick<RunnerDeps, 'log' | 'store'>, m: MissionR
 export function listMissions(deps: RunnerDeps) { reconcileMissions(deps.log, deps.store); return deps.store.list().slice(0, 30).map((m) => missionView(deps, m)) }
 export function getMission(deps: RunnerDeps, id: string) { reconcileMissions(deps.log, deps.store); const m = deps.store.read(id); return m ? missionView(deps, m, true) : null }
 
-/** Start from the API: the repository comes from server configuration, never from the request. */
+/**
+ * Start from the API: the repository comes from server configuration, never from the request.
+ * Optional Reverse Engineer handoff: `fromAnalysis` seeds the mission from a stored analysis; `reverseFirst` runs one first (read-only) and seeds from it. Neither is forced:
+ * a plain start behaves exactly as before.
+ */
 export async function startFromApi(deps: RunnerDeps, body: Record<string, unknown>, actor: string) {
   const scopeIn = (body.scope ?? {}) as { paths?: unknown; write?: unknown }
-  const paths = Array.isArray(scopeIn.paths) ? scopeIn.paths.map(String) : []
-  const write = Array.isArray(scopeIn.write) ? scopeIn.write.map(String) : []
+  let paths = Array.isArray(scopeIn.paths) ? scopeIn.paths.map(String) : []
+  let write = Array.isArray(scopeIn.write) ? scopeIn.write.map(String) : []
+  let targets = Array.isArray(body.targets) ? (body.targets as { path?: unknown; action?: unknown }[]).map((t) => ({ path: String(t?.path ?? ''), action: t?.action === 'create' ? ('create' as const) : ('modify' as const) })) : []
+  let request = String(body.request ?? '')
+  let analysisId: string | undefined
+  if (body.fromAnalysis !== undefined || body.reverseFirst === true) {
+    let a
+    if (body.fromAnalysis !== undefined) {
+      const id = String(body.fromAnalysis)
+      if (!isAnalysisId(id)) throw new MissionError('INVALID', 'invalid analysis id')
+      a = getAnalysis(id, { log: deps.log })
+      if (!a) throw new MissionError('NOT_FOUND', `unknown analysis ${id}`)
+    } else {
+      const named = targets.map((t) => t.path).filter(Boolean)
+      const target = (named.length ? named.join(' ') : `${String(body.title ?? '')}. ${request}`).slice(0, 600)
+      try { a = runAnalysis({ target, depth: 'standard', outputs: ['all'] }, actor, { log: deps.log }) } catch (e) { throw new MissionError(e instanceof AnalysisError && e.code === 'SCOPE' ? 'SCOPE' : 'INVALID', e instanceof Error ? e.message : String(e)) }
+    }
+    analysisId = a.id
+    const d = buildDraftFromAnalysis(a, { request, paths, write, targets })
+    request = d.request; paths = d.paths; write = d.write; targets = d.targets
+  }
   const repo = paths.length ? engineeringRepo(deps.log) : null
   if (paths.length && !repo) throw new MissionError('SCOPE', 'no engineering repository is configured on this machine (WAR_ROOM_ENGINEERING_REPO or engineering-config.json)')
-  const draft: MissionDraft = { title: String(body.title ?? ''), request: String(body.request ?? ''), acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets: Array.isArray(body.targets) ? (body.targets as { path?: unknown; action?: unknown }[]).map((t) => ({ path: String(t?.path ?? ''), action: t?.action === 'create' ? ('create' as const) : ('modify' as const) })) : [], install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths } } : {}) } }
+  const draft: MissionDraft = { title: String(body.title ?? ''), request, acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets, install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths } } : {}) }, analysisId }
   const rec = await createMission(deps, draft, actor as never)
   launchMission(deps, rec.id, 'START')
   return rec

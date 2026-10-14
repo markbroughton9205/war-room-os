@@ -15,7 +15,7 @@ export function FoundryEngineeringMissions() {
   const [open, setOpen] = useState<string | null>(null)
   const [detail, setDetail] = useState<MissionView | null>(null)
   const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState({ title: '', request: '', acceptance: '', paths: '', write: '', targets: '', install: false, verify: '' })
+  const [form, setForm] = useState({ title: '', request: '', acceptance: '', paths: '', write: '', targets: '', install: false, verify: '', reverseFirst: false })
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const load = useCallback(async () => {
@@ -45,7 +45,7 @@ export function FoundryEngineeringMissions() {
     } catch (e) { setNotice(`${label} failed: ${e instanceof Error ? e.message : 'error'}`) }
     setBusy(false); void load()
   }
-  const start = () => post({ action: 'start', title: form.title, request: form.request, acceptance: lines(form.acceptance), scope: { paths: lines(form.paths), write: lines(form.write) }, targets: lines(form.targets).map((l) => { const m = /^(create|modify)\s+(\S+)$/i.exec(l); return m ? { action: m[1].toLowerCase(), path: m[2] } : { action: 'modify', path: l } }), install: form.install, ...(form.verify.trim() ? { verifyScript: form.verify } : {}) }, 'Start mission')
+  const start = () => post({ action: 'start', title: form.title, request: form.request, acceptance: lines(form.acceptance), scope: { paths: lines(form.paths), write: lines(form.write) }, targets: lines(form.targets).map((l) => { const m = /^(create|modify)\s+(\S+)$/i.exec(l); return m ? { action: m[1].toLowerCase(), path: m[2] } : { action: 'modify', path: l } }), install: form.install, ...(form.reverseFirst ? { reverseFirst: true } : {}), ...(form.verify.trim() ? { verifyScript: form.verify } : {}) }, 'Start mission')
 
   return (
     <section data-testid="agentops-missions" className="mb-8">
@@ -58,10 +58,11 @@ export function FoundryEngineeringMissions() {
         <textarea data-testid="mission-paths" className="bg-gray-800 p-1" rows={2} placeholder="Repository paths to work from, one per line (files or folders; the repository itself is configured on the server)" value={form.paths} onChange={(e) => setForm({ ...form, paths: e.target.value })} />
         <textarea data-testid="mission-targets" className="bg-gray-800 p-1" rows={3} placeholder="Files to build, one per line: 'create path' or 'modify path' (optional; when empty Foundry plans the files itself)" value={form.targets} onChange={(e) => setForm({ ...form, targets: e.target.value })} />
         <textarea data-testid="mission-write" className="bg-gray-800 p-1" rows={2} placeholder="Where changes may be applied, one folder or file prefix per line (anything else is refused)" value={form.write} onChange={(e) => setForm({ ...form, write: e.target.value })} />
+        <label className="text-xs text-sky-200" title="Runs a read-only Reverse Engineer analysis of the files/feature first and seeds the mission with its map and evidence. Worth it for unfamiliar or high-impact areas; skip it for trivial changes."><input data-testid="mission-reverse-first" type="checkbox" checked={form.reverseFirst} onChange={(e) => setForm({ ...form, reverseFirst: e.target.checked })} /> Reverse Engineer first (recommended for unfamiliar or high-impact areas; read-only)</label>
         <details><summary className="text-xs text-gray-400 cursor-pointer">Independent verifier (optional Node script; receives the workspace path as its first argument; hidden from the builder)</summary>
           <textarea data-testid="mission-verify" className="bg-gray-800 p-1 w-full font-mono text-xs" rows={6} value={form.verify} onChange={(e) => setForm({ ...form, verify: e.target.value })} /></details>
         <label className="text-xs text-amber-200"><input data-testid="mission-install" type="checkbox" checked={form.install} onChange={(e) => setForm({ ...form, install: e.target.checked })} /> Commander approval: after verification, merge the integration branch into the repository branch and build a NEW versioned runtime from it (the launcher is not changed).</label>
-        <div><button data-testid="mission-start" type="button" disabled={busy} className="px-3 py-1 bg-sky-700 disabled:opacity-50" onClick={start}>Start mission</button>{notice && <span data-testid="mission-notice" className="ml-3 text-xs text-amber-300">{notice}</span>}</div>
+        <div><button data-testid="mission-start" type="button" title="Start mission: Foundry owns plan, build, test, verify and the receipt" disabled={busy} className="px-3 py-1 bg-sky-700 disabled:opacity-50" onClick={start}>Start mission</button>{notice && <span data-testid="mission-notice" className="ml-3 text-xs text-amber-300">{notice}</span>}</div>
       </div>
       {err && <p data-testid="missions-error" className="text-xs text-red-300">Missions API unavailable: {err}</p>}
       {missions && missions.length === 0 && <p className="text-xs text-gray-400">No engineering missions yet.</p>}
@@ -73,6 +74,7 @@ export function FoundryEngineeringMissions() {
               <span data-testid="mission-state" className={`px-2 py-0.5 text-xs ${TONE[b.tone]}`}>{b.label}</span>
               <span className="font-medium">{m.title}</span>
               <span className="text-xs text-gray-400">{m.id}</span>
+              {m.analysisId && <span className="text-xs bg-sky-900 px-1" title="This mission was seeded from a Reverse Engineer analysis">from analysis {m.analysisId}</span>}
               {m.config.flags.simulated && <span className="text-xs bg-fuchsia-800 px-1">SIMULATED MODELS</span>}
             </div>
             <div data-testid="mission-note" className="text-xs text-gray-300 mt-1">{b.note}</div>
@@ -83,8 +85,8 @@ export function FoundryEngineeringMissions() {
             {m.receipt && <div data-testid="mission-receipt-line" className="text-xs">receipt: {m.receipt.filesCreated.length} created, {m.receipt.filesModified.length} modified, {m.receipt.filesDeleted.length} deleted · integration {m.receipt.integration.state}{m.receipt.integration.commit ? ` ${m.receipt.integration.commit.slice(0, 10)} on ${m.receipt.integration.branch}` : ''} · install {m.receipt.install.state}</div>}
             <div className="mt-1">
               <button type="button" className="mr-3 text-xs underline text-sky-300" onClick={() => { setOpen(open === m.id ? null : m.id); setDetail(null) }}>{open === m.id ? 'Hide details' : 'Details'}</button>
-              {m.controls.includes('resume') && <button data-testid="mission-resume" type="button" disabled={busy} className="mr-3 text-xs underline text-sky-300" onClick={() => post({ action: 'resume', id: m.id }, 'Resume')}>Resume from checkpoint</button>}
-              {m.controls.includes('cancel') && <button data-testid="mission-cancel" type="button" disabled={busy} className="mr-3 text-xs underline text-red-300" onClick={() => post({ action: 'cancel', id: m.id, reason: 'Commander cancelled from the Foundry UI' }, 'Cancel')}>Cancel</button>}
+              {m.controls.includes('resume') && <button data-testid="mission-resume" type="button" disabled={busy} className="mr-3 text-xs underline text-sky-300" title="Continue this interrupted mission from its last verified checkpoint" onClick={() => post({ action: 'resume', id: m.id }, 'Resume')}>Resume from checkpoint</button>}
+              {m.controls.includes('cancel') && <button data-testid="mission-cancel" type="button" disabled={busy} className="mr-3 text-xs underline text-red-300" title="Stop this mission at a safe point; nothing from a cancelled mission is applied" onClick={() => post({ action: 'cancel', id: m.id, reason: 'Commander cancelled from the Foundry UI' }, 'Cancel')}>Cancel</button>}
             </div>
             {d && (
               <div data-testid="mission-detail" className="mt-2 text-xs text-gray-300">
