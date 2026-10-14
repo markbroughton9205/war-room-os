@@ -12,6 +12,14 @@ test('[C1] rowState returns state from last segment', () => {
   assert.strictEqual(rowState(null), 'UNKNOWN')
 })
 
+test('[C1] rowState separator rule', () => {
+  assert.strictEqual(rowState({ title: 'Task · RUNNING' }), 'RUNNING')
+  assert.strictEqual(rowState({ title: 'RUNNING' }), 'UNKNOWN')
+  assert.strictEqual(rowState({ title: 'Task · running' }), 'UNKNOWN')
+  assert.strictEqual(rowState({ title: 'Task · RUNNING_UNDERSCORE' }), 'RUNNING_UNDERSCORE')
+  assert.strictEqual(rowState({ title: 'Task · RUNNING·' }), 'UNKNOWN')
+})
+
 test('[C2] filterRows by state', () => {
   const rows = [
     { title: 'Task · RUNNING', detail: 'details' },
@@ -27,9 +35,30 @@ test('[C2] filterRows by state', () => {
   assert.strictEqual(filterRows(null, { state: 'RUNNING' }).length, 0)
 })
 
-// QUARANTINED (no contract basis, failed against the independently verified implementation): [C2] filterRows by text
+test('[C2] filterRows by text alone', () => {
+  const rows = [
+    { title: 'Task · RUNNING', detail: 'details' },
+    { title: 'Task · STOPPED', detail: 'details' },
+    { title: 'Task · RUNNING', detail: 'details' }
+  ]
+  assert.strictEqual(filterRows(rows, { text: 'task' }).length, 3)
+  assert.strictEqual(filterRows(rows, { text: 'RUNNING' }).length, 2)
+  assert.strictEqual(filterRows(rows, { text: 'details' }).length, 3)
+  assert.strictEqual(filterRows(rows, { text: 'STOPPED' }).length, 1)
+  assert.strictEqual(filterRows(rows, { text: 'unknown' }).length, 0)
+})
 
-// QUARANTINED (no contract basis, failed against the independently verified implementation): [C2] filterRows by state and text
+test('[C2] filterRows by state and text together', () => {
+  const rows = [
+    { title: 'Task · RUNNING', detail: 'details' },
+    { title: 'Task · STOPPED', detail: 'details' },
+    { title: 'Task · RUNNING', detail: 'details' }
+  ]
+  assert.strictEqual(filterRows(rows, { state: 'RUNNING', text: 'task' }).length, 2)
+  assert.strictEqual(filterRows(rows, { state: 'RUNNING', text: 'STOPPED' }).length, 0)
+  assert.strictEqual(filterRows(rows, { state: 'STOPPED', text: 'details' }).length, 1)
+  assert.strictEqual(filterRows(rows, { state: 'ALL', text: 'RUNNING' }).length, 2)
+})
 
 test('[C2] filterRows preserves order and does not modify input', () => {
   const rows = [
