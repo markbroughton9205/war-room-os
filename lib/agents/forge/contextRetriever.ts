@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { ContextPhase, ContextPhaseInput, ContextPhaseResult, ContextStep, ResearchBrief, RetrievedItem } from '@/lib/agents/ops/engineering/contextPhase'
 import { RETRIEVED_CHARS_PER_ITEM, RETRIEVED_PER_STEP } from '@/lib/agents/ops/engineering/contextPhase'
-import { researchTrigger, type Researcher } from './researchBrief'
+import { MIN_RESEARCH_MATERIAL_CHARS, researchTrigger, type Researcher } from './researchBrief'
 import { QUERY_INSTRUCTION, cosine } from './roleBench/retrieval'
 
 /**
@@ -146,6 +146,11 @@ export class HybridContextPhase implements ContextPhase {
     // 4. optional bounded research, only when Foundry's deterministic trigger fires
     let brief: ResearchBrief | null = null
     const trig = researchTrigger(input.request, input.acceptance, input.files)
+    // retrieval is the better relevance signal than word overlap: long documentation that search surfaced for any step is worth briefing
+    for (const p of new Set(Object.values(packages).flat().map((i) => i.path))) {
+      const t = input.files[p]
+      if (/\.md$/i.test(p) && t && t.length >= MIN_RESEARCH_MATERIAL_CHARS && !trig.sources.includes(p)) { trig.sources.push(p); trig.reasons.push(`retrieval surfaced long documentation ${p} (${t.length} chars)`); trig.fire = true; trig.topic = trig.topic || `documentation: ${p}` }
+    }
     report.researchTrigger = trig
     if (trig.fire && o.research) {
       const material = [...trig.sources.map((p) => ({ path: p, text: input.files[p] })), ...[...new Set(Object.values(packages).flat().map((i) => i.path))].slice(0, 3).map((p) => ({ path: p, text: input.files[p] ?? '' }))].filter((m) => m.text)

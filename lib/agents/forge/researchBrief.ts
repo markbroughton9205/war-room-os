@@ -36,7 +36,7 @@ export function researchTrigger(request: string, acceptance: string[], files: Re
 
 export const RESEARCH_SYSTEM = 'You prepare a SHORT research brief for a software engineer who is about to implement a feature. Use ONLY the MATERIAL provided; never rely on memory for project facts. Output at most 8 bullet points, each a concrete fact or constraint taken from the material, each ending with its source in square brackets, e.g. [docs/config.md]. If the material does not answer something the task needs, write one bullet "NOT IN MATERIAL: <what is missing>". No code, no implementation decisions, no opinions, at most 160 words.'
 export const researchPrompt = (request: string, acceptance: string[], material: { path: string; text: string }[]) =>
-  `TASK THE ENGINEER MUST IMPLEMENT: ${request}\nACCEPTANCE CRITERIA:\n${acceptance.map((a) => `- ${a}`).join('\n')}\n\nMATERIAL:\n${material.map((m) => `--- ${m.path} ---\n${m.text.slice(0, 2600)}`).join('\n\n')}\n\nWrite the brief.`
+  `TASK THE ENGINEER MUST IMPLEMENT: ${request}\nACCEPTANCE CRITERIA:\n${acceptance.map((a) => `- ${a}`).join('\n')}\n\nMATERIAL:\n${material.map((m) => `--- ${m.path} ---\n${m.text.slice(0, 6000)}`).join('\n\n')}\n\nWrite the brief.`
 
 /** Foundry's check on a brief before the builder sees it: on topic, cites only supplied sources, and its specific claims (numbers, quoted/backticked tokens) occur in the material. */
 export function assessBrief(brief: Pick<ResearchBrief, 'text' | 'sources'>, request: string, acceptance: string[], material: { path: string; text: string }[]): { relevant: boolean; reason: string; unsupported: string[] } {
