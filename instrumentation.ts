@@ -12,4 +12,11 @@ export async function register() {
   } catch {
     // scheduler problems must never prevent the server from starting
   }
+  try {
+    // engineering missions: dead-run detection at boot and on a timer (a mission whose worker died with the previous server becomes INTERRUPTED, never stays RUNNING)
+    const { startMissionSupervisor } = await import('@/lib/agents/ops/engineering/missions/supervisor')
+    startMissionSupervisor()
+  } catch {
+    // never prevents the server from starting
+  }
 }

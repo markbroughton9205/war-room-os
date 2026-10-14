@@ -37,9 +37,17 @@ export class Workspace implements WorkspacePort {
     if (abs !== this.root && !abs.startsWith(this.root + path.sep)) throw new WorkspaceError('ESCAPE', `path escapes the workspace: ${rel}`)
     const parts = path.relative(this.root, abs).split(path.sep)
     if (parts[0] === '.git' || parts.includes('node_modules')) throw new WorkspaceError('FORBIDDEN_PATH', `protected path: ${rel}`)
-    // walk existing ancestors: no symlink may lead outside
+    // walk the path with lstat (so a DANGLING link is seen too): no link may lead outside, and a link at the leaf is never written through
     let cur = this.root
-    for (const p of parts) { cur = path.join(cur, p); if (!existsSync(cur)) break; if (lstatSync(cur).isSymbolicLink()) { const t = realpathSync(cur); if (t !== this.root && !t.startsWith(this.root + path.sep)) throw new WorkspaceError('ESCAPE', `symlink escapes the workspace: ${rel}`) } }
+    for (let i = 0; i < parts.length; i++) {
+      cur = path.join(cur, parts[i])
+      let st
+      try { st = lstatSync(cur) } catch { break }
+      if (!st.isSymbolicLink()) continue
+      let t: string
+      try { t = realpathSync(cur) } catch { throw new WorkspaceError('ESCAPE', `dangling symlink in path: ${rel}`) }
+      if (t !== this.root && !t.startsWith(this.root + path.sep)) throw new WorkspaceError('ESCAPE', `symlink escapes the workspace: ${rel}`)
+    }
     return abs
   }
   exists(rel: string) { try { return existsSync(this.resolve(rel)) } catch { return false } }

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeSync } from 'node:fs'
 import path from 'node:path'
 import { resolveLocalAppDataPaths } from '@/lib/sovereign-runtime/local-ownership/paths'
 import { valueContainsSecret } from '@/lib/recursive-learning/ingestion/redact'
@@ -42,9 +42,15 @@ export class AgentOpsLog {
     const started = Date.now()
     let fd = -1
     for (;;) {
-      try { fd = openSync(lock, 'wx'); break } catch (e) {
+      try { fd = openSync(lock, 'wx'); try { writeSync(fd, String(process.pid)) } catch { /* holder pid is best effort */ } break } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
-        try { if (Date.now() - statSync(lock).mtimeMs > 10_000) unlinkSync(lock) } catch { /* raced */ }
+        // a lock whose holder process is gone is stolen at once (a killed worker must not block recovery); otherwise it goes stale after 10 s
+        try {
+          const holder = Number(readFileSync(lock, 'utf8').trim())
+          let gone = false
+          if (Number.isInteger(holder) && holder > 0 && holder !== process.pid) { try { process.kill(holder, 0) } catch (k) { gone = (k as NodeJS.ErrnoException).code === 'ESRCH' } }
+          if (gone || Date.now() - statSync(lock).mtimeMs > 10_000) unlinkSync(lock)
+        } catch { /* raced */ }
         if (Date.now() - started > 5_000) throw new Error('agent foundry log lock timeout')
         sleepSync(5)
       }

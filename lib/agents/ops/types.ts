@@ -195,6 +195,8 @@ export type AssignmentEventKind =
   | 'STARTED' | 'PAUSED' | 'RESUMED' | 'BLOCKED' | 'UNBLOCKED'
   | 'CANCEL_REQUESTED' | 'CANCEL_ACKNOWLEDGED' | 'CANCELLED' | 'CANCEL_UNSAFE'
   | 'COMPLETED' | 'FAILED' | 'HANDED_OFF' | 'INTERRUPTED'
+  /** an INTERRUPTED assignment taken up again from its checkpoint (recovery provenance is on the mission record) */
+  | 'RECOVERED'
 
 export type StepStatus = 'PENDING' | 'ACTIVE' | 'DONE' | 'FAILED' | 'SKIPPED'
 export type CheckpointStep = { id: string; title: string; status: StepStatus; layer?: string; files: string[]; note?: string }

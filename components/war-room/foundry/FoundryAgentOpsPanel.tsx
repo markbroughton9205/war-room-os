@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { FoundrySpecialistPool } from './FoundrySpecialistPool'
 import { FoundryCompute } from './FoundryCompute'
+import { FoundryEngineeringMissions } from './FoundryEngineeringMissions'
 import { buildOpsViewModel, type Control, type LoadState, type OpsEnvelope } from '@/lib/agents/ops/uiState'
 
 /** Phase 10 operator surface: durable agents, long-lived workers, approvals, actions, errors, usage. Controls call the Commander-gated API. */
@@ -83,6 +84,7 @@ export function FoundryAgentOpsPanel() {
           ))}
         </section>
       ))}
+      <FoundryEngineeringMissions />
       <FoundrySpecialistPool />
       <FoundryCompute />
     </div>

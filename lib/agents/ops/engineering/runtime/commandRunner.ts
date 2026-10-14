@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { copyTreeNoLinks } from './safeFs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { redactText } from '@/lib/recursive-learning/ingestion/redact'
@@ -71,7 +72,7 @@ export async function runHermetic(root: string, argv: string[], tools: Engineeri
   const scratch = mkdtempSync(path.join(tmpdir(), 'wr-hermetic-'))
   const copy = path.join(scratch, 'ws')
   try {
-    cpSync(root, copy, { recursive: true, filter: (src) => { const rel = path.relative(root, src); return !rel.split(path.sep).some((seg) => seg === 'node_modules' || seg === '.git') } })
+    copyTreeNoLinks(root, copy, (rel) => rel.split(path.sep).some((seg) => seg === 'node_modules' || seg === '.git'))
     // TMPDIR is private to this run, so fixed-name temp files (os.tmpdir()/x.json) never persist between runs or leak into /tmp, and the fixture's storage variables start empty
     const tmpDir = path.join(scratch, 'tmp'), stateDir = path.join(scratch, 'state')
     mkdirSync(tmpDir, { recursive: true }); mkdirSync(stateDir, { recursive: true })

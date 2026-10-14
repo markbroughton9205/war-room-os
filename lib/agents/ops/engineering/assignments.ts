@@ -46,6 +46,7 @@ const FLOW: Record<AssignmentEventKind, { from: AssignmentState[]; to: Assignmen
   FAILED: { from: ['RUNNING', 'PAUSED', 'BLOCKED', 'STOPPING', 'CANCEL_REQUESTED'], to: 'FAILED' },
   HANDED_OFF: { from: ['RUNNING', 'PAUSED', 'BLOCKED', 'FAILED'], to: 'HANDED_OFF' },
   INTERRUPTED: { from: ['RUNNING', 'STOPPING', 'CANCEL_REQUESTED'], to: 'INTERRUPTED' },
+  RECOVERED: { from: ['INTERRUPTED'], to: 'RUNNING' },
 }
 
 export function deriveAssignments(log: AgentOpsLog): { assignments: Map<string, AssignmentView>; rejectedEvents: number } {
@@ -166,6 +167,7 @@ export const finalizeCancel = (log: AgentOpsLog, id: string, by: Actor, disposit
 export const completeAssignment = (log: AgentOpsLog, id: string, by: Actor, outcome: AssignmentOutcome, now?: Date) => appendEvent(log, id, 'COMPLETED', by, outcome.summary || 'completed', { outcome }, now)
 export const failAssignment = (log: AgentOpsLog, id: string, by: Actor, reason: string, outcome?: AssignmentOutcome, now?: Date) => appendEvent(log, id, 'FAILED', by, reason, { stopReason: reason.slice(0, 300), ...(outcome ? { outcome } : {}) }, now)
 export const handOffAssignment = (log: AgentOpsLog, id: string, by: Actor, toAgentId: string, reason: string, now?: Date) => appendEvent(log, id, 'HANDED_OFF', by, reason, { handoffTo: toAgentId, stopReason: reason.slice(0, 300) }, now)
+export const recoverAssignment = (log: AgentOpsLog, id: string, by: Actor, reason: string, now?: Date) => appendEvent(log, id, 'RECOVERED', by, reason, {}, now)
 export const interruptAssignment = (log: AgentOpsLog, id: string, by: Actor, reason: string, now?: Date) => appendEvent(log, id, 'INTERRUPTED', by, reason, { stopReason: reason.slice(0, 300) }, now)
 
 /** Runner-side check at every safe boundary: should execution continue right now? */

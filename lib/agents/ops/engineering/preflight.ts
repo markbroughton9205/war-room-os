@@ -12,7 +12,8 @@
  *           the default storage path (and its folder) is created; the existing (compat) endpoints answer.
  */
 import { spawn } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { copyTreeNoLinks, removeContained } from './runtime/safeFs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -131,7 +132,7 @@ export async function runtimePreflight(root: string, c: ImplementationContract, 
   try { const pj = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')); const m = /node\s+(\S+)/.exec(pj?.scripts?.start ?? ''); if (m && !opts.entry) entry = m[1] } catch { /* default entry */ }
   if (!existsSync(path.join(root, entry))) return { findings, checked, skipped: [`runtime: entry ${entry} does not exist yet`] }
   const dirs: string[] = []
-  const copy = () => { const d = mkdtempSync(path.join(tmpdir(), 'pf-')); dirs.push(d); cpSync(root, d, { recursive: true, filter: (s) => !/node_modules|\/\.git(\/|$)|\/data(\/|$)/.test(s) }); return d }
+  const copy = () => { const d = mkdtempSync(path.join(tmpdir(), 'pf-')); dirs.push(d); copyTreeNoLinks(root, d, (rel) => /node_modules|(^|\/)\.git(\/|$)|(^|\/)data(\/|$)/.test(rel)); return d }
   const add = (check: string, criterion: number | null, fact: string, expected: string, file: string | null = entry, recipe: string | null = null, st?: { route: string; expect: number; got: number }) => findings.push({ stage: 'RUNTIME', check, criterion, recipe, file, symbol: null, fact, expected, ...(st ?? {}) })
   const procs: Proc[] = []
   try {
@@ -345,8 +346,8 @@ export async function runtimePreflight(root: string, c: ImplementationContract, 
       const inside = (t: string) => { const r = path.relative(d2, t); return !!r && !r.startsWith('..') && !path.isAbsolute(r) }
       if (!target || !inside(target)) { skipped.push(`runtime: default storage path "${c.persistence.defaultPath}" is not a path inside the workspace; the default-path probe was not run`) }
       else {
-      rmSync(target, { force: true })
-      const parent = path.dirname(target); if (parent !== d2 && inside(parent)) rmSync(parent, { recursive: true, force: true })
+      removeContained(d2, target)
+      const parent = path.dirname(target); if (parent !== d2 && inside(parent)) removeContained(d2, parent, { recursive: true })
       const p2 = await startServer(d2, entry, {})
       if ('error' in p2) add('PERSISTENCE.default-boot', c.persistence.criteria[0] ?? null, `without ${c.persistence.envVar ?? 'a storage variable'} the server does not start: ${p2.error}`, 'the server starts with the default storage path', entry, 'JSON_FILE_STORE')
       else {

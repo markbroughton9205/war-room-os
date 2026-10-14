@@ -62,6 +62,9 @@ export type WorkflowDeps = {
   fastRepair?: { label: string; model: ModelClient }
   /** Opt-in batched context phase before the builder's first call: hybrid retrieval (+ an optional bounded research brief). Advisory context only. */
   contextPhase?: ContextPhase
+  /** Provenance hooks (mission runner): every file Foundry writes names its author (a model as provider/model, or a deterministic Foundry tool), and every delivery (model or generator) is reported. */
+  onWrite?: (w: { path: string; stepId: string; tag: string; beforeHash: string | null; afterHash: string; author: string; deterministic: boolean; autofixed: boolean; at: string }) => void
+  onDelivery?: (d: { executor: { provider: string; model: string } | 'UNKNOWN'; latencyMs: number | 'UNKNOWN'; outputTokens: number | 'UNKNOWN'; at: string }) => void
   /** The controlling mission id (defaults to the assignment's parent mission). */
   missionId?: string
   /** Enable the contract-grounding reviewer for generated tests (implied by `testWriter`). Off by default so pre-existing flows are unchanged. */
@@ -352,7 +355,8 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       note(kind, { call: callNo, attempt, outcome: 'RETRIED', waitedMs, detail: r.detail, purpose }); emit(kind === 'TIMEOUT' ? 'MODEL_TIMEOUT_RETRY' : 'MODEL_TRANSIENT_RETRY', `${purpose}: attempt ${attempt + 1} ${word} after ${Math.round(waitedMs / 1000)}s; retrying (${attempt + 1}/${MODEL_MAX_ATTEMPTS - 1})`)
     }
   }
-  const noteTokens = (r: ModelResult) => { if (r.ok) { if (r.executor.provider !== 'foundry') executor = r.executor; // a file Foundry generated from the contract is not a model call and must not become the recorded executor
+  let lastExec: { provider: string; model: string } | 'UNKNOWN' = 'UNKNOWN'
+  const noteTokens = (r: ModelResult) => { if (r.ok) { lastExec = r.executor; deps.onDelivery?.({ executor: r.executor, latencyMs: r.latencyMs ?? 'UNKNOWN', outputTokens: r.outputTokens, at: clock().toISOString() }); if (r.executor.provider !== 'foundry') executor = r.executor; // a file Foundry generated from the contract is not a model call and must not become the recorded executor
        tokens = tokens === 'UNKNOWN' || r.outputTokens === 'UNKNOWN' ? 'UNKNOWN' : tokens + r.outputTokens + (r.promptTokens === 'UNKNOWN' ? 0 : r.promptTokens); if (r.promptTokens === 'UNKNOWN') tokens = 'UNKNOWN' } }
   type Gate = { stop: WorkflowResult | null }
   const boundary = (): Gate => {
@@ -485,18 +489,24 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   }
   let restoreSeq = 0
   /** tag: a restore/revert is a NEW effect even when the same content was written earlier (the idempotency key would otherwise treat it as already done and skip it). */
-  const writeFile = async (stepId: string, path: string, content: string, tag = '') => {
+  const writeFile = async (stepId: string, path: string, content: string, tag = '', by?: string) => {
+    let autofixed = false
     // first-pass: a known, deterministic defect is corrected on EVERY model write (edit stage, preflight repair, acceptance repair), not only on the first one
     if (fpOn && fpContract && tag === '' && !/^test\//.test(path) && /\.m?js$/.test(path)) {
       const fl = runRecipeChecks(fpFilesWith(path, content), fpContract, fpRecipes).filter((f) => f.file === path)
       const fx = fl.length ? autofix(path, content, fl, fpContract) : null
-      if (fx) { content = fx.content; fpm.deterministic_structural_edits += fx.notes.length; emit('STRUCTURAL_AUTOFIX', `${path}: ${fx.notes.join('; ')} (on write)`) }
+      if (fx) { content = fx.content; autofixed = true; fpm.deterministic_structural_edits += fx.notes.length; emit('STRUCTURAL_AUTOFIX', `${path}: ${fx.notes.join('; ')} (on write)`) }
     }
     const key = `write:${path}:${sha256(content).slice(0, 12)}${tag}`
     const before = ws.hash(path)
     const expected: FileChange = { path, beforeHash: before, afterHash: sha256(content), stepId }
     const out = await runEffectOnce(log, assignmentId, key, { kind: 'file_write', consequential: true, summary: `write ${path}`, expectedChanges: [expected] }, async () => { const w = ws.write(path, content); return { value: w, fileChanges: [{ path, beforeHash: w.beforeHash, afterHash: w.afterHash, stepId }] } }, (p) => ws.hash(p))
     if (out.conflict) throw new Error(out.conflict)
+    if (out.ran) {
+      const restore = /^:(revert|restore)/.test(tag)
+      const author = by ?? (restore ? 'foundry:restore' : lastExec === 'UNKNOWN' ? 'UNKNOWN' : `${lastExec.provider}/${lastExec.model}`)
+      deps.onWrite?.({ path, stepId, tag, beforeHash: before, afterHash: expected.afterHash, author, deterministic: !!by || restore || (lastExec !== 'UNKNOWN' && lastExec.provider === 'foundry'), autofixed, at: clock().toISOString() })
+    }
     if (out.ran || out.skipped === 'RECONCILED_LANDED') { state.fileChanges = [...state.fileChanges.filter((c) => !(c.path === path && c.stepId === stepId)), expected]; if (!state.effectsDone.includes(key)) state.effectsDone.push(key); changed.add(path) }
   }
   // test runs are hermetic (fresh copy of the workspace each time); syntax/type checks are read-only so they run in place
@@ -808,7 +818,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
           const byFile = new Map<string, RecipeFinding[]>()
           for (const f of rep.findings) if (f.file && f.recipe && f.stage === 'STATIC') byFile.set(f.file, [...(byFile.get(f.file) ?? []), { recipe: f.recipe, check: f.check.replace(/^[A-Z_]+\./, ''), criterion: f.criterion, file: f.file, symbol: f.symbol, fact: f.fact, expected: f.expected }])
           let fixed = 0
-          for (const [file, fs_] of byFile) { if (!ws.exists(file)) continue; const fx = autofix(file, ws.read(file), fs_, fpContract); if (fx) { await writeFile(step.id, file, fx.content); fixed += 1; fpm.deterministic_structural_edits += fx.notes.length; emit('STRUCTURAL_AUTOFIX', `${file}: ${fx.notes.join('; ')}`) } }
+          for (const [file, fs_] of byFile) { if (!ws.exists(file)) continue; const fx = autofix(file, ws.read(file), fs_, fpContract); if (fx) { await writeFile(step.id, file, fx.content, '', 'foundry:structural-autofix'); fixed += 1; fpm.deterministic_structural_edits += fx.notes.length; emit('STRUCTURAL_AUTOFIX', `${file}: ${fx.notes.join('; ')}`) } }
           if (fixed) { const again = await runPf(); fpm.first_preflight = fpm.first_preflight ?? again.findings; rep = again }
         }
         if (!rep.passed) {
@@ -885,7 +895,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
       if (contractFile && tplan) {
         // the harness is Foundry's, not the model's: deterministic text, rewritten whenever it differs
         const hsrc = harnessSource(tplan.entry, tplan.storageVars)
-        if (!ws.exists(tplan.harnessPath) || ws.read(tplan.harnessPath) !== hsrc) { await writeFile(step.id, tplan.harnessPath, hsrc); emit('HARNESS_WRITTEN', `${tplan.harnessPath}: per-test server process, port and empty data directory`) }
+        if (!ws.exists(tplan.harnessPath) || ws.read(tplan.harnessPath) !== hsrc) { await writeFile(step.id, tplan.harnessPath, hsrc, '', 'foundry:test-harness'); emit('HARNESS_WRITTEN', `${tplan.harnessPath}: per-test server process, port and empty data directory`) }
       }
       const implRelated = (): { path: string; text: string }[] => {
         const idx = buildWorkspaceIndex(ws.root), out: { path: string; text: string }[] = []
@@ -1039,7 +1049,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                 const fx = repairDefaultStoragePath(ws.read(f), v, def) ?? repairMissingStorageDir(ws.read(f), v, def)
                 if (!fx) continue
                 snap[f] = ws.read(f)
-                await writeFile(step.id, f, fx.content)
+                await writeFile(step.id, f, fx.content, '', 'foundry:structural-autofix')
                 fpm.deterministic_structural_edits += 1
                 emit('IMPLEMENTATION_REPAIR', `${f}: ${fx.note}`)
               }
@@ -1129,7 +1139,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                 if (cc?.refused.length) emit('CONTRACT_CORRECTION_REFUSED', `${path}: ${cc.refused.join('; ').slice(0, 300)}`)
                 if (cc?.corrections.length) {
                   const before = ws.read(path), failsBefore = parseTestFailures(`${r0.stdout}\n${r0.stderr}`).length
-                  await writeFile(step.id, path, cc.content)
+                  await writeFile(step.id, path, cc.content, '', 'foundry:contract-correction')
                   const r1 = await runCheck(tests)
                   const failsAfter = r1.exitCode === 0 ? 0 : parseTestFailures(`${r1.stdout}\n${r1.stderr}`).length
                   if (failsAfter < failsBefore) {
@@ -1224,7 +1234,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
               const orig = ws.read(path)
               const q = quarantineTests(path, orig, failing, req.acceptance)
               if (q) {
-                await writeFile(step.id, path, q.content)
+                await writeFile(step.id, path, q.content, '', 'foundry:quarantine')
                 const after = await runCheck(tests)
                 if (after.exitCode === 0) {
                   const note = q.removed.map((r) => `${r.name} [contract overlap ${r.overlap}${r.criterion !== null ? ` with criterion ${r.criterion + 1}` : ''}]`).join('; ')
@@ -1244,7 +1254,7 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
                   const fails = parseTestFailures(`${r.stdout}\n${r.stderr}`).filter((f) => f.file === path && f.line)
                   const qa = quarantineAssertions(path, ws.read(path), fails.map((f) => f.line!))
                   if (!qa) break
-                  await writeFile(step.id, path, qa.content); removedAll.push(...qa.removed)
+                  await writeFile(step.id, path, qa.content, '', 'foundry:quarantine'); removedAll.push(...qa.removed)
                 }
                 const after = await runCheck(tests)
                 if (removedAll.length && after.exitCode === 0) {
