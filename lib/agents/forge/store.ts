@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { agentFoundryDir } from '@/lib/agents/ops/log'
 import { valueContainsSecret } from '@/lib/recursive-learning/ingestion/redact'
-import type { BenchmarkRecord, ForgeRecord, ModelEntry, ResourceProfile, SmokeResult } from './types'
+import type { BenchmarkRecord, ForgeRecord, ModelEntry, ResourceProfile, SmokeResult, SpecialistUse } from './types'
 import type { ModelResourceProfile } from './resourceProfile'
 import type { NodeRecord } from './nodeRecord'
 
@@ -34,6 +34,7 @@ export class ForgeStore {
   recordResourceProfile(p: ModelResourceProfile): void { this.append({ type: 'model_resource_profile', ...p } as never) }
   /** Node snapshots are stored on registration and on health change, not per heartbeat. Private keys never belong here (credential scan refuses them). */
   recordNode(n: NodeRecord): void { this.append({ type: 'node', at: new Date().toISOString(), ...n } as never) }
+  recordSpecialistUse(u: SpecialistUse): void { this.append({ type: 'specialist_use', ...u } as never) }
   models(): ModelEntry[] { const m = new Map<string, ModelEntry>(); for (const r of this.records()) if (r.type === 'model') { const { type: _t, rid: _r, at: _a, ...e } = r; m.set(e.ref, e) } return [...m.values()] }
   profiles(ref?: string): ResourceProfile[] { return this.records().flatMap((r) => (r.type === 'profile' && (!ref || r.modelRef === ref) ? [(({ type: _t, rid: _r, ...p }) => p)(r)] : [])) }
   smokes(ref?: string): SmokeResult[] { return this.records().flatMap((r) => (r.type === 'smoke' && (!ref || r.modelRef === ref) ? [(({ type: _t, rid: _r, ...s }) => s)(r)] : [])) }
@@ -41,4 +42,5 @@ export class ForgeStore {
   resourceProfiles(ref?: string, nodeId?: string): ModelResourceProfile[] { return this.records().flatMap((r) => (r.type === 'model_resource_profile' && (!ref || r.modelRef === ref) && (!nodeId || r.nodeId === nodeId) ? [(({ type: _t, rid: _r, ...p }) => p)(r)] : [])) }
   /** Latest snapshot per node id. */
   nodes(): NodeRecord[] { const m = new Map<string, NodeRecord>(); for (const r of this.records()) if (r.type === 'node') { const { type: _t, rid: _r, at: _a, ...n } = r; m.set(n.nodeId, n) } return [...m.values()] }
+  specialistUses(model?: string, role?: string): SpecialistUse[] { return this.records().flatMap((r) => (r.type === 'specialist_use' && (!model || r.model === model) && (!role || r.role === role) ? [(({ type: _t, rid: _r, ...u }) => u)(r)] : [])) }
 }

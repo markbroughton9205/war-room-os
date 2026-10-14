@@ -36,6 +36,8 @@ export type World = {
   allowUnqualified?: string[]
   /** the designated primary builder (policy + proven history, e.g. the legacy evidence route). When set, PRIMARY_BUILDER jobs are placed ONLY on this model; replacing it is a decision, not something the scheduler does from a leaderboard. */
   designatedBuilder?: string
+  /** measured cost (ms) to bring an evicted resident back, by model ref (e.g. the builder's reload after a helper evicted it); unmeasured evictions use a conservative default */
+  reloadMs?: Record<string, number>
   /** refs to keep resident when possible (the builder) */
   keep?: string[]
   excluded?: { nodeId: string; modelRef?: string }[]
@@ -52,6 +54,7 @@ export type Placement = PlacementOk | PlacementFail
 
 const MiB = 1048576
 const RAM_MARGIN_MIB = 1024
+export const DEFAULT_RELOAD_MS = 15_000
 type Key = (number | string)[]
 const cmp = (a: Key, b: Key) => { for (let i = 0; i < a.length; i++) { if (a[i] < b[i]) return -1; if (a[i] > b[i]) return 1 } return 0 }
 
@@ -133,7 +136,9 @@ export function schedule(job: Job, w: World): Placement {
       const tps = profile && typeof profile.latency.tokensPerSecond === 'number' ? profile.latency.tokensPerSecond : 0
       const perJobMs = tps > 0 ? ((job.estTokens ?? 1000) / tps) * 1000 : 1e9
       const loadMs = !resident && profile && typeof profile.loadMs === 'number' ? profile.loadMs : 0
-      const waitMs = (node.load.queued / Math.max(1, node.capabilities.concurrency)) * (node.load.queued ? perJobMs : 0) + transferMs + loadMs
+      // evicting a resident has a price: the model comes back later (measured reload when known, else a conservative default)
+      const evictMs = adm.evict.reduce((a, ref) => a + (w.reloadMs?.[ref] ?? (w.profiles.find((p) => p.modelRef === ref && p.nodeId === node.nodeId && typeof p.loadMs === 'number')?.loadMs as number | undefined) ?? DEFAULT_RELOAD_MS), 0)
+      const waitMs = (node.load.queued / Math.max(1, node.capabilities.concurrency)) * (node.load.queued ? perJobMs : 0) + transferMs + loadMs + evictMs
       const evictsKeep = job.role !== 'PRIMARY_BUILDER' && adm.evict.some((r) => keep.includes(r))
       opts.push({ node, model, digest: inst?.digest ?? model.digest, adm, needsPrepare, evictsKeep, resident, key: [-tier, evictsKeep ? 1 : 0, health === 'DEGRADED' ? 1 : 0, resident ? 0 : 1, waitMs, -tps, node.nodeId, model.ref] })
     }

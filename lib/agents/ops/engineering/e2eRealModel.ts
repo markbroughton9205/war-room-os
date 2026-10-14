@@ -31,6 +31,11 @@ import { governedClientForRef } from '@/lib/agents/forge/poolRuntime'
 import { probeLocalNode } from '@/lib/agents/forge/localNode'
 import { shadowDecisions } from '@/lib/agents/forge/computeShadow'
 import { FIRST_POOL } from '@/lib/agents/forge/registry'
+import { HybridContextPhase } from '@/lib/agents/forge/contextRetriever'
+import { makeResearcher } from '@/lib/agents/forge/researchBrief'
+import { embed as embedBatch } from '@/lib/agents/forge/roleBench/retrieval'
+import { padWorkspace } from './paddedWorkspace'
+import { readFileSync, existsSync } from 'node:fs'
 import { gpuUsedMiB, ramUsedMiB } from '@/lib/agents/forge/profile'
 import { makeIndependentVerification } from './runtime/verifier'
 import { allLessons, lessonsFor, measureLessonEffect } from './lessons'
@@ -61,6 +66,8 @@ if (replayFrom) { cpSync(replayFrom, wsRoot, { recursive: true, filter: (src) =>
   // the fixture's ORIGINAL test files come back (the model-written ones from the first run are dropped): existing tests must keep passing
   const pristine = path.join(os.tmpdir(), `replay-base-${Date.now()}`); FX.make(pristine); cpSync(path.join(pristine, 'test'), path.join(wsRoot, 'test'), { recursive: true }); rmSync(pristine, { recursive: true, force: true })
 } else FX.make(wsRoot)
+// PAD_WORKSPACE=1 (opt-in): a larger existing codebase around the fixture app (reusable helpers + conventions doc + unrelated modules), for measuring context retrieval
+const padded = process.env.PAD_WORKSPACE === '1' ? padWorkspace(wsRoot) : null
 const dataDir = path.join(outDir, `agent-ops-${stamp}`)
 const log = new AgentOpsLog(dataDir)
 const reg = new AgentRegistry(log)
@@ -106,6 +113,20 @@ const testWriter = process.env.TEST_WRITER_MODEL ? { label: process.env.TEST_WRI
 const testReviewer = process.env.TEST_REVIEWER_MODEL ? { label: process.env.TEST_REVIEWER_MODEL, model: localClient(process.env.TEST_REVIEWER_MODEL) } : undefined
 // FAST_REPAIR_MODEL=<ollama model> (opt-in): a local specialist takes the FIRST retry of an implementation file rejected for a bounded syntax/import/undeclared-name problem; the builder takes any further retry
 const fastRepair = process.env.FAST_REPAIR_MODEL ? { label: process.env.FAST_REPAIR_MODEL, model: localClient(process.env.FAST_REPAIR_MODEL) } : undefined
+// RETRIEVAL=1 (opt-in): ONE batched hybrid-retrieval pass before the builder's first call (exact/definition search first, embeddings for the rest; context only).
+// The embedding model runs under the Residency Governor as a transient helper (keep-alive 0), so it is unloaded before the builder loads. RESEARCH_MODEL=<ref> adds a bounded
+// research brief, but only when Foundry's deterministic trigger fires. COLD_START=1 unloads every model first so no configuration starts with a warm builder.
+const retrievalOn = process.env.RETRIEVAL === '1'
+const embedModel = process.env.EMBED_MODEL || 'qwen3-embedding:0.6b'
+const cacheFile = process.env.RETRIEVAL_CACHE
+const embedCache = new Map<string, number[]>(cacheFile && existsSync(cacheFile) ? (JSON.parse(readFileSync(cacheFile, 'utf8')) as [string, number[]][]) : [])
+const embedderFn = async (inputs: string[]) => {
+  const base = poolGov ? poolGov.node.endpoint : 'http://127.0.0.1:11434'
+  const run = () => embedBatch(base, embedModel, inputs, 0)
+  return poolGov ? poolGov.lease({ ref: embedModel, role: 'CODE_RETRIEVAL', residency: 'TRANSIENT', artifactBytes: 640 * 1048576 }, [modelName], run) : run()
+}
+const researchFn = process.env.RESEARCH_MODEL ? makeResearcher(localClient(process.env.RESEARCH_MODEL), process.env.RESEARCH_MODEL) : null
+const contextPhase = retrievalOn ? new HybridContextPhase({ embed: embedderFn, research: researchFn, cache: embedCache }) : undefined
 const testCandidates = (process.env.TEST_CANDIDATE_MODELS ?? '').split(',').map((x) => x.trim()).filter(Boolean).map((label) => ({ label, model: localClient(label) }))
 const frontierFamily = process.env.FRONTIER_FAMILY as DirectProviderFamily | undefined
 const frontierDeps = frontierFamily ? { provider: await defaultFrontierProvider(frontierFamily), reviewDir: path.join(outDir, `frontier-review-${stamp}`), maxCalls: frontierBudgetFromHistory([]).maxCalls } : undefined
@@ -122,11 +143,16 @@ if (lessonStoreDir) {
   lessonTexts = got.texts; lessonIds = got.ids
   console.log(`lessons retrieved: ${lessonIds.length}`)
 }
+if (process.env.COLD_START === '1') {
+  const ps = (await (await fetch('http://127.0.0.1:11434/api/ps')).json()) as { models?: { name: string }[] }
+  for (const m of ps.models ?? []) await fetch('http://127.0.0.1:11434/api/generate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model: m.name, keep_alive: 0 }) }).catch(() => undefined)
+  await new Promise((r) => setTimeout(r, 4000))
+}
 const t0 = Date.now()
 let peakGpu: number | 'UNKNOWN' = 'UNKNOWN', peakRam: number | 'UNKNOWN' = 'UNKNOWN'
 const sampler = setInterval(() => { const g = gpuUsedMiB(), r = ramUsedMiB(); if (typeof g === 'number' && (peakGpu === 'UNKNOWN' || g > peakGpu)) peakGpu = g; if (typeof r === 'number' && (peakRam === 'UNKNOWN' || r > peakRam)) peakRam = r }, 3000)
 const evCount: Record<string, number> = {}
-const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(escalation ? { escalation } : {}), ...(testWriter ? { testWriter } : {}), ...(testCandidates.length ? { testCandidates } : {}), ...(frontierDeps ? { frontier: frontierDeps } : {}), missionId: FX.mission, ...(process.env.CONTRACT_TESTS === '1' ? { contractTests: true } : {}), ...(process.env.FIRST_PASS === '1' ? { firstPass: { runtime: process.env.FIRST_PASS_RUNTIME !== '0' } } : {}), ...(testReviewer ? { testReviewer } : {}), ...(fastRepair ? { fastRepair } : {}), ...(replayFrom ? { reuseImplementation: true } : {}), groundTests: process.env.GROUND_TESTS === '1', ...(process.env.MAX_CANDIDATES_PER_FILE ? { maxCandidatesPerFile: Number(process.env.MAX_CANDIDATES_PER_FILE) } : {}), ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => { evCount[e.kind] = (evCount[e.kind] ?? 0) + 1; console.log(`[${e.kind}] ${e.detail}`) } }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
+const result = await runFeatureWorkflow({ log, assignmentId: assignment.id, ws: new Workspace(wsRoot), model: traced, tools: TOOLS, finalVerification: verification, ...(escalation ? { escalation } : {}), ...(testWriter ? { testWriter } : {}), ...(testCandidates.length ? { testCandidates } : {}), ...(frontierDeps ? { frontier: frontierDeps } : {}), missionId: FX.mission, ...(process.env.CONTRACT_TESTS === '1' ? { contractTests: true } : {}), ...(process.env.FIRST_PASS === '1' ? { firstPass: { runtime: process.env.FIRST_PASS_RUNTIME !== '0' } } : {}), ...(testReviewer ? { testReviewer } : {}), ...(fastRepair ? { fastRepair } : {}), ...(contextPhase ? { contextPhase } : {}), ...(replayFrom ? { reuseImplementation: true } : {}), groundTests: process.env.GROUND_TESTS === '1', ...(process.env.MAX_CANDIDATES_PER_FILE ? { maxCandidatesPerFile: Number(process.env.MAX_CANDIDATES_PER_FILE) } : {}), ...(lessonStoreDir ? { lessons: () => lessonTexts } : {}), onEvent: (e) => { evCount[e.kind] = (evCount[e.kind] ?? 0) + 1; console.log(`[${e.kind}] ${e.detail}`) } }, { request: FX.feature.request, acceptance: FX.feature.acceptance, hints: FX.feature.hints })
 const v = deriveAssignments(log).assignments.get(assignment.id)!
 const finalVerify = await verification.run()
 const lessonEffect = lessonStoreDir ? measureLessonEffect(log, assignment.id) : null
@@ -137,6 +163,8 @@ const report = {
   independentVerificationNow: { exitCode: finalVerify.exitCode, summary: finalVerify.stdout.split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ') },
   checkpoint: latestCheckpoint(log, assignment.id)?.state.steps.map((s) => `${s.id} ${s.status} ${s.files[0] ?? ''}${s.note ? ' — ' + s.note : ''}`),
   lessons: { storeDir: lessonStoreDir ?? null, retrievedIds: lessonIds, retrievedTexts: lessonTexts, effect: lessonEffect },
+  resources: { peakGpuMiB: peakGpu as number | 'UNKNOWN', peakRamMiB: peakRam as number | 'UNKNOWN', swapUsedMiB: (() => { try { const m = readFileSync('/proc/meminfo', 'utf8'); const g = (k: string) => Number(new RegExp(`${k}:\\s+(\\d+)`).exec(m)?.[1] ?? 0); return Math.round((g('SwapTotal') - g('SwapFree')) / 1024) } catch { return 'UNKNOWN' } })() },
+  padded: padded ? { files: padded.added.length, relevant: padded.relevant } : null,
   compute: computeShadow,
   specialistPool: poolGov ? { enabled: true, node: poolGov.node.id, decisions: poolGov.decisions() } : { enabled: false },
   eventCounts: evCount,
@@ -144,6 +172,7 @@ const report = {
 }
 clearInterval(sampler)
 writeFileSync(path.join(outDir, `report-${stamp}.json`), JSON.stringify(report, null, 1))
+if (cacheFile && embedCache.size) writeFileSync(cacheFile, JSON.stringify([...embedCache.entries()]))
 {
   // Forge benchmark record: score parsed from the independent verifier's own TAP totals; nothing here is estimated
   const pass = Number(/# pass (\d+)/.exec(report.independentVerificationNow.summary)?.[1]), total = Number(/# tests (\d+)/.exec(report.independentVerificationNow.summary)?.[1])

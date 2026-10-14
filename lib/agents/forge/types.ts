@@ -83,3 +83,24 @@ export type ForgeRecord =
   | ({ type: 'benchmark'; rid: string } & BenchmarkRecord)
   | ({ type: 'model_resource_profile'; rid: string } & ModelResourceProfile)
   | ({ type: 'node'; rid: string; at: string } & NodeRecord)
+  | ({ type: 'specialist_use'; rid: string } & SpecialistUse)
+
+/** One specialist's use in one mission, with the evidence Forge needs to decide whether it stays active. Deltas are against the mean of the paired BASELINE missions of the same fixture. */
+export type SpecialistUse = {
+  at: string
+  mission: string
+  fixture: string
+  engineSha?: string
+  specialistUsed: boolean
+  role: ModelRole
+  model: string
+  whyRouted: string
+  loadMs: number | 'UNKNOWN'
+  inferenceMs: number | 'UNKNOWN'
+  contextProvided: { items: number; chars: number; paths: string[] }
+  builderCallsSaved: number | 'UNKNOWN'
+  repairDelta: number | 'UNKNOWN'
+  missionTimeDeltaMs: number | 'UNKNOWN'
+  success: boolean
+  verifierResult: string
+}

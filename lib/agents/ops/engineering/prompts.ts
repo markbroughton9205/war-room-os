@@ -98,7 +98,7 @@ export function fitPrompt(parts: string[], relatedIndex: number, cap = PROMPT_CA
   const out = parts.slice(); out[relatedIndex] = parts[relatedIndex].slice(0, keep) + '\n... (related code shortened to fit the model window)'
   return out.filter(Boolean).join('\n\n')
 }
-export function featurePrompt(input: { request: string; acceptance: string[]; plan: EngineeringCodePlan; job: FileJob; related: { path: string; text: string }[]; lessons: string[]; priorNotes: string[]; keepExports?: string[]; mode?: EditMode; testPlanText?: string; firstPass?: { contractText: string; recipeText: string; stepText: string; manifest: boolean } }): string {
+export function featurePrompt(input: { request: string; acceptance: string[]; plan: EngineeringCodePlan; job: FileJob; related: { path: string; text: string }[]; lessons: string[]; priorNotes: string[]; keepExports?: string[]; researchBrief?: string; mode?: EditMode; testPlanText?: string; firstPass?: { contractText: string; recipeText: string; stepText: string; manifest: boolean } }): string {
   const rel = input.related.map((r) => `--- ${r.path} ---\n${r.text}`).join('\n\n')
   const parts = [
     `TASK: ${input.request}`,
@@ -110,6 +110,7 @@ export function featurePrompt(input: { request: string; acceptance: string[]; pl
     input.firstPass?.stepText ?? '',
     input.lessons.length ? `LESSONS FROM EARLIER WORK (apply them):\n${input.lessons.map((l) => `- ${l}`).join('\n')}` : '',
     input.priorNotes.length ? `ALREADY DONE IN THIS FEATURE:\n${input.priorNotes.map((n) => `- ${n}`).join('\n')}` : '',
+    input.researchBrief ? `RESEARCH BRIEF (advisory background from a separate research model; the acceptance criteria and the code above win over it, and it may be wrong):\n${input.researchBrief}` : '',
     rel ? `RELATED CODE (use these exact names and signatures):\n${rel}` : '',
     `FILE TO ${input.job.exists ? 'EDIT' : 'CREATE'}: ${input.job.path}  (layer: ${input.job.layer}, role: ${input.job.role})`,
     input.job.exists ? `CURRENT CONTENT OF ${input.job.path}:\n\`\`\`\n${input.job.current}\n\`\`\`` : `${input.job.path} does not exist yet.`,

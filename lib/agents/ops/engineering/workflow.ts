@@ -6,6 +6,7 @@ import { latestCheckpoint, planResume, runEffectOnce, saveCheckpoint, sha256 } f
 import { MAX_REPAIR_ATTEMPTS, addEvidence, deriveLedger, markUndetermined, proposeHypothesis, recordFailure, recordRepair, recordValidation, authorizeRepair, parseToolOutput } from './debugLedger'
 import { ANALYST_SYSTEM, ENGINEER_REWRITE_SYSTEM, ENGINEER_SYSTEM, ENGINEER_STRUCT_SYSTEM, analystPrompt, chooseMode, featurePrompt, parseEditReply, repairPrompt, type FileJob } from './prompts'
 import type { CommandRecord, ModelClient, ModelResult } from './runtime/ports'
+import { asRelated, briefText, emptyContextStats, type ContextPhase, type ContextPhaseResult } from './contextPhase'
 import { runCommand, runHermetic } from './runtime/commandRunner'
 import { Workspace, treeHash } from './runtime/workspaceFs'
 import { buildWorkspaceIndex, indexSource, topLevelDuplicates } from './workspaceIndex'
@@ -59,6 +60,8 @@ export type WorkflowDeps = {
   testCandidates?: { label: string; model: ModelClient }[]
   /** Local specialist for FAST_REPAIR: asked ONLY for the first retry of an implementation file rejected for a bounded syntax/import/undeclared-name problem; any second retry goes back to the builder, so a failed repair costs one cheap call. Off by default. */
   fastRepair?: { label: string; model: ModelClient }
+  /** Opt-in batched context phase before the builder's first call: hybrid retrieval (+ an optional bounded research brief). Advisory context only. */
+  contextPhase?: ContextPhase
   /** The controlling mission id (defaults to the assignment's parent mission). */
   missionId?: string
   /** Enable the contract-grounding reviewer for generated tests (implied by `testWriter`). Off by default so pre-existing flows are unchanged. */
@@ -100,6 +103,9 @@ export type WorkflowResult = {
   modelTimeouts?: ModelTimeoutRecord[]
   /** transient local-model errors (HTTP 500/502/503/504): same bounded retry, same evidence */
   modelTransients?: ModelTimeoutRecord[]
+  /** what the builder was actually given (always recorded) and, when a context phase ran, what it retrieved and briefed */
+  contextStats?: import('./contextPhase').ContextStats
+  contextPhase?: Record<string, unknown>
   /** FAST_REPAIR specialist usage (present only when a fast-repair model was configured) */
   fastRepair?: { model: string; calls: number; accepted: number; escalated: number; failedCalls: number }
   /** CLEAN / WITH_QUARANTINE / UNVERIFIED / FAILED, derived from the workflow's own evidence; the independent verifier decides UNVERIFIED */
@@ -214,7 +220,10 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     const testsPassed = tplan ? (quarantined === 0 && !!sv?.validations.some((v) => v.stepId === 'verify' && v.status === 'PASSED' && /--test/.test(v.command))) : null
     return buildFirstPassReport({ contract: fpContract, recipes: fpRecipes, steps: fpSteps.map((x) => ({ target_file: x.TARGET_FILE, recipes: x.recipes, behaviors: x.REQUIRED_BEHAVIOR.map((b) => b.id) })), st: fpm, repairs, quarantined, testDefects: testDefects.map((d) => ({ kind: d.kind, test: d.test })), acceptance: req.acceptance, testsPassed, verifierPassed: verifiedAtEnd })
   }
-  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => { const blockers = status === 'COMPLETED' ? cleanBlockersNow() : []; const clean = status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true && blockers.length === 0; const isClean = clean; for (const r of ledger.records) r.cleanOutcomeImpact = r.decision === 'ACCEPTED' ? (isClean ? 'CLEAN_AFTER_ACCEPTED_ASSIST' : 'NOT_CLEAN') : r.decision === 'REJECTED' ? 'ASSIST_REJECTED' : 'PENDING'; return {  build, subtasks: classifySteps(((state as CheckpointState | undefined)?.steps ?? []) as never, build, ledger.records.map((r) => ({ subtaskId: r.subtaskId, file: r.contextScope.files[0] ?? '', accepted: r.decision === 'PENDING' ? null : r.decision === 'ACCEPTED', family: r.provider }))), frontier: { usage: ledger.usage(status === 'COMPLETED' ? clean : null), records: ledger.records }, cleanKind: clean ? (ledger.records.some((r) => r.decision === 'ACCEPTED') ? 'CLEAN_WITH_FRONTIER_ASSIST' : 'CLEAN_LOCAL_ONLY') : null, testGrounding: groundingByFile, testAuthoring: { writer: writerLabel, candidates: candidateLog, ...(tplan ? { rescue: { ...rescue }, nameRewrites } : {}) }, testPlan: tplan ? { entry: tplan.entry, files: tplan.files, tests: tplan.tests } : null, testTraceability: traceability(), testReviews, testDefects, cleanBlockers: blockers, ...(fpOn ? { firstPass: fpReport() } : {}), ...(deps.fastRepair ? { fastRepair: { ...fastStats } } : {}), status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, modelTransients: transients, completionClass: completionClass({ status, quarantinedTests: quarantined, cleanBlockers: blockers }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor } }
+  const fastStats = { model: deps.fastRepair?.label ?? '', calls: 0, accepted: 0, escalated: 0, failedCalls: 0 }
+  const ctxStats = emptyContextStats()
+  let ctxPhase: ContextPhaseResult | null = null
+  const result = (status: WorkflowResult['status'], reason: string): WorkflowResult => { const blockers = status === 'COMPLETED' ? cleanBlockersNow() : []; const clean = status === 'COMPLETED' && quarantined === 0 && verifiedAtEnd === true && blockers.length === 0; const isClean = clean; for (const r of ledger.records) r.cleanOutcomeImpact = r.decision === 'ACCEPTED' ? (isClean ? 'CLEAN_AFTER_ACCEPTED_ASSIST' : 'NOT_CLEAN') : r.decision === 'REJECTED' ? 'ASSIST_REJECTED' : 'PENDING'; return {  build, subtasks: classifySteps(((state as CheckpointState | undefined)?.steps ?? []) as never, build, ledger.records.map((r) => ({ subtaskId: r.subtaskId, file: r.contextScope.files[0] ?? '', accepted: r.decision === 'PENDING' ? null : r.decision === 'ACCEPTED', family: r.provider }))), frontier: { usage: ledger.usage(status === 'COMPLETED' ? clean : null), records: ledger.records }, cleanKind: clean ? (ledger.records.some((r) => r.decision === 'ACCEPTED') ? 'CLEAN_WITH_FRONTIER_ASSIST' : 'CLEAN_LOCAL_ONLY') : null, testGrounding: groundingByFile, testAuthoring: { writer: writerLabel, candidates: candidateLog, ...(tplan ? { rescue: { ...rescue }, nameRewrites } : {}) }, testPlan: tplan ? { entry: tplan.entry, files: tplan.files, tests: tplan.tests } : null, testTraceability: traceability(), testReviews, testDefects, cleanBlockers: blockers, ...(fpOn ? { firstPass: fpReport() } : {}), ...(deps.fastRepair ? { fastRepair: { ...fastStats } } : {}), contextStats: { ...ctxStats }, ...(ctxPhase ? { contextPhase: ctxPhase.report } : {}), status, reason, modelCalls, repairs, filesChanged: [...changed], quarantinedTests: quarantined, correctedTests: corrections.length, contractCorrections: corrections, modelTimeouts: timeouts, modelTransients: transients, completionClass: completionClass({ status, quarantinedTests: quarantined, cleanBlockers: blockers }, status === 'COMPLETED' ? verifiedAtEnd : null), repairTrace: trace, escalations, routeEdits, stepsDone, tokens, latencyMs: Date.now() - t0, executor } }
 
   let state: CheckpointState
   let plan: EngineeringCodePlan
@@ -492,7 +501,6 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
   }
   // test runs are hermetic (fresh copy of the workspace each time); syntax/type checks are read-only so they run in place
   let helperCalls = 0
-  const fastStats = { model: deps.fastRepair?.label ?? '', calls: 0, accepted: 0, escalated: 0, failedCalls: 0 }
   let fastPending = false
   const BOUNDED_REPAIR = /syntax error|would not start|you import names that do not exist|is not defined|is not a function|undeclared|unexpected token|unterminated|cannot find (module|name)|missing (import|export)|does not (import|export)|duplicate (declaration|identifier)/i
   const helperOk = (what: string): boolean => { const h = helperBudgetLeft({ helperCalls, modelCalls, maxModelCalls: limits.maxModelCalls, elapsedMs: Date.now() - t0, maxRuntimeMs: limits.maxRuntimeMs, policy: deps.helperPolicy }); if (!h.ok) emit('HELPER_BUDGET_EXHAUSTED', `${what}: ${h.why}`); return h.ok }
@@ -756,6 +764,18 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
     emit('STATUS_EDIT', `${path}: the catch block answers with the status an error carries`)
     return fixed
   }
+  // ---- context phase (opt-in): ONE batched retrieval (+ optional research) before the builder's first call
+  if (deps.contextPhase && !deps.reuseImplementation) {
+    const t0c = Date.now()
+    const ctxSteps = () => {
+      const idx = buildWorkspaceIndex(ws.root); const earlier: string[] = []
+      return state.steps.filter((x) => x.files.length).map((x) => { const known = [...(idx.files[x.files[0]]?.imports.map((i) => i.resolved).filter((r): r is string => !!r) ?? []), ...earlier]; earlier.push(x.files[0]); return { id: x.id, path: x.files[0], layer: x.layer ?? '', title: x.title, note: x.note ?? '', known } })
+    }
+    try {
+      ctxPhase = await deps.contextPhase.prepare({ request: req.request, acceptance: req.acceptance, steps: ctxSteps(), files: ws.snapshot() })
+      emit('CONTEXT_PHASE', `retrieval for ${Object.keys(ctxPhase.packages).length} file step(s), ${Object.values(ctxPhase.packages).reduce((a, p) => a + p.length, 0)} item(s), research brief ${ctxPhase.brief ? (ctxPhase.brief.relevance.relevant ? 'used' : 'withheld: ' + ctxPhase.brief.relevance.reason) : 'not needed'}, ${Date.now() - t0c} ms`)
+    } catch (e) { ctxPhase = null; emit('CONTEXT_PHASE_FAILED', `${e instanceof Error ? e.message : e}; the builder proceeds with the deterministic context only`) }
+  }
   // ---- execute steps
   try {
     for (const step of state.steps) {
@@ -873,7 +893,18 @@ export async function runFeatureWorkflow(deps: WorkflowDeps, req: FeatureRequest
         }
         return out
       }
-      const askFile = async (extra: string[], retry = 0, viaOverride?: ModelClient) => { const useMode = fpForceRewrite ? 'rewrite' : mode; const r = await call(useMode === 'edits' ? (fpStep ? ENGINEER_STRUCT_SYSTEM : ENGINEER_SYSTEM) : ENGINEER_REWRITE_SYSTEM, featurePrompt({ ...fpPrompt(), request: req.request, acceptance: req.acceptance, plan, job, related: contractFile ? implRelated() : relatedFor(path, [...changed]), lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode: useMode, ...(contractFile && tplan ? { testPlanText: planPromptFor(tplan, path) } : {}) }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}, viaOverride ?? (job.role === 'test' ? deps.testWriter?.model : undefined)); noteTokens(r); return r }
+      /** the deterministic context plus this step's retrieved items (only those not already present), with an always-on record of what the builder was given */
+      const ctxRelated = (p: string, base: { path: string; text: string }[]): { path: string; text: string }[] => {
+        const have = new Set(base.map((b) => b.path))
+        const extra = (ctxPhase?.packages[p] ?? []).filter((i) => i.path !== p && !have.has(i.path))
+        const out = [...base, ...asRelated(extra)]
+        ctxStats.builderPromptCalls += 1
+        for (const b of base) { ctxStats.filesProvided[b.path] = (ctxStats.filesProvided[b.path] ?? 0) + 1; ctxStats.contextChars += b.text.length }
+        for (const i of extra) { ctxStats.retrievedProvided[i.path] = (ctxStats.retrievedProvided[i.path] ?? 0) + 1; ctxStats.contextChars += Math.min(i.text.length, 1800) }
+        if (ctxPhase && briefText(ctxPhase.brief)) ctxStats.briefProvidedCalls += 1
+        return out
+      }
+      const askFile = async (extra: string[], retry = 0, viaOverride?: ModelClient) => { const useMode = fpForceRewrite ? 'rewrite' : mode; const r = await call(useMode === 'edits' ? (fpStep ? ENGINEER_STRUCT_SYSTEM : ENGINEER_SYSTEM) : ENGINEER_REWRITE_SYSTEM, featurePrompt({ ...fpPrompt(), request: req.request, acceptance: req.acceptance, plan, job, related: ctxRelated(path, contractFile ? implRelated() : relatedFor(path, [...changed])), researchBrief: ctxPhase ? briefText(ctxPhase.brief) : undefined, lessons, priorNotes: [...notes, ...extra], keepExports: keep, mode: useMode, ...(contractFile && tplan ? { testPlanText: planPromptFor(tplan, path) } : {}) }), false, retry ? { temperature: 0.1 + 0.25 * retry, seed: 1000 + retry } : {}, viaOverride ?? (job.role === 'test' ? deps.testWriter?.model : undefined)); noteTokens(r); return r }
       let reply = await askFile([])
       let parsedReply: ReturnType<typeof parseEditReply> = reply.ok ? parseShaped(reply.text, job.exists ? job.current : null, path) : { kind: 'invalid', reason: 'model call failed' }
       if (parsedReply.kind === 'code') parsedReply = { ...parsedReply, content: shapeStatus(path, parsedReply.content) }

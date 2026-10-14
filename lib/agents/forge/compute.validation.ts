@@ -20,7 +20,7 @@ import { qualification, classRates } from './rank'
 import { SPECIALIST_CANDIDATES, promoteFromEvidence, earnedRoles } from './specialists'
 import { CLASS_GATES } from './roles'
 import { recommendResidency } from './resourceProfile'
-import { INTENT_ROLE, ROLE_FALLBACK, routeTask, routingTable } from './roleRouting'
+import { INTENT_ROLE, ROLE_FALLBACK, planPhases, routeTask, routingTable } from './roleRouting'
 import { probeLocalNode, type LocalProbeDeps } from './localNode'
 import { buildComputeView } from './computeView'
 import { computeViewModel } from './computeViewModel'
@@ -435,6 +435,28 @@ const cls = (ref: string, role: ModelRole, klass: string, wins: number, losses: 
   check('X03_a_model_that_needs_cpu_offload_is_on_demand_only', (() => { const r = recommendResidency({ isBuilder: false, vramMiB: 12290, cpuOffloadMiB: 6409, loadMs: 16182 }, ctx); return r.recommendation === 'ON_DEMAND_ONLY' })())
   check('X04_coexistence_is_recommended_only_when_the_measured_sizes_fit_with_the_desktops_use', (() => { const r = recommendResidency({ isBuilder: false, vramMiB: 800, cpuOffloadMiB: 0, loadMs: 900 }, { ...ctx, builderVramMiB: 9000 }); return r.recommendation === 'COEXIST_OK' && r.keepAlive === '5m' })())
   check('X05_an_unmeasured_model_is_unknown_and_unloads_at_once', (() => { const r = recommendResidency({ isBuilder: false, vramMiB: 'UNKNOWN', cpuOffloadMiB: 'UNKNOWN', loadMs: 'UNKNOWN' }, ctx); return r.recommendation === 'UNKNOWN' && r.keepAlive === '0' })())
+}
+
+// ------------------------------------------------------------------ context-integration stage: phases and the price of switching
+{
+  const embedM = mk('embed:0.6b', { artifactBytes: 0.6 * GiB }); const resM = mk('research:7b', { artifactBytes: 4.7 * GiB })
+  const nodeP = { ...local, installedModels: [...local.installedModels, { ref: embedM.ref, digest: 'e', sizeBytes: 0.6 * GiB }, { ref: resM.ref, digest: 'r', sizeBytes: 4.7 * GiB }] }
+  const clsRuns = (ref: string, role: ModelRole, n: number) => many(ref, role, n)
+  const ev = [...many(BUILD.ref, 'PRIMARY_BUILDER', 9), ...clsRuns(embedM.ref, 'CODE_RETRIEVAL', 24), ...clsRuns(resM.ref, 'RESEARCH_GENERALIST', 20).map((b, i) => ({ ...b, fixtureClass: i % 5 < 3 ? 'answerable' : 'unanswerable' }))]
+  const profs2: ModelResourceProfile[] = [{ ...prof, modelRef: embedM.ref, nodeId: 'local', loadMs: 1900 }, { ...prof, modelRef: resM.ref, nodeId: 'local', loadMs: 2400 }, { ...prof, modelRef: BUILD.ref, nodeId: 'local', loadMs: 15000 }]
+  const w2 = world({ models: [BUILD, embedM, resM], nodes: [nodeP], benchmarks: ev, profiles: profs2, designatedBuilder: BUILD.ref })
+  const plan = planPhases(['feature_build', 'technical_research', 'repo_context_search', 'failure_diagnosis'], w2)
+  check('Y01_helper_phases_run_before_the_builder_in_order_retrieval_research_build', plan.phases.map((p) => p.name).join() === 'RETRIEVAL,RESEARCH,BUILD', plan.phases.map((p) => p.name).join())
+  check('Y02_the_plan_counts_each_model_switch_once_with_its_measured_load_time', plan.switches === 3 && plan.estimatedSwitchMs === 1900 + 2400 + 15000, JSON.stringify([plan.switches, plan.estimatedSwitchMs]))
+  check('Y03_work_the_builder_must_do_itself_joins_the_build_phase', plan.phases.find((p) => p.name === 'BUILD')!.intents.includes('failure_diagnosis'))
+  const noHelp = planPhases(['feature_build', 'repo_context_search'], world({ models: [BUILD], benchmarks: many(BUILD.ref, 'PRIMARY_BUILDER', 9), designatedBuilder: BUILD.ref }))
+  check('Y04_without_a_qualified_helper_there_is_only_the_build_phase_and_a_note_says_why', noHelp.phases.length === 1 && noHelp.switches === 1 && noHelp.notes.some((n) => /repo_context_search/.test(n)))
+  const resident = { ...local, resident: [{ ref: BUILD.ref, sizeBytes: 14 * GiB, vramBytes: 12 * GiB }], load: { ...load, vramUsedMiB: 14800 } }
+  const cheap = mk('helperA:7b', { artifactBytes: 4 * GiB }), other = { ...local, nodeId: 'other', installedModels: [{ ref: 'helperA:7b', digest: 'h', sizeBytes: 4 * GiB }] }
+  const pick = schedule({ jobId: 'e1', role: 'FAST_REPAIR_WORKER' }, world({ models: [BUILD, cheap], nodes: [resident, other], benchmarks: [...many(BUILD.ref, 'PRIMARY_BUILDER', 9), ...many(cheap.ref, 'FAST_REPAIR_WORKER', 20)], keep: [BUILD.ref], designatedBuilder: BUILD.ref, reloadMs: { [BUILD.ref]: 18000 } }))
+  check('Y05_an_option_that_evicts_the_builder_is_priced_with_its_reload', pick.ok && pick.nodeId === 'other' && pick.evict.length === 0)
+  const onlyEvict = schedule({ jobId: 'e2', role: 'FAST_REPAIR_WORKER' }, world({ models: [BUILD, cheap], nodes: [{ ...resident, installedModels: [...resident.installedModels, { ref: 'helperA:7b', digest: 'h', sizeBytes: 4 * GiB }] }], benchmarks: [...many(BUILD.ref, 'PRIMARY_BUILDER', 9), ...many(BUILD.ref, 'FAST_REPAIR_WORKER', 20), ...many(cheap.ref, 'FAST_REPAIR_WORKER', 20)], keep: [BUILD.ref], designatedBuilder: BUILD.ref, reloadMs: { [BUILD.ref]: 18000 } }))
+  check('Y06_with_the_builder_resident_and_qualified_for_repair_the_repair_stays_on_the_builder_instead_of_paying_two_swaps', onlyEvict.ok && onlyEvict.modelRef === BUILD.ref && onlyEvict.evict.length === 0, JSON.stringify(onlyEvict.ok ? [onlyEvict.modelRef, onlyEvict.evict] : onlyEvict.reason))
 }
 
 console.log(`FORGE_COMPUTE_VALIDATION ${fails ? 'FAIL (' + fails + ')' : 'PASS'}`)

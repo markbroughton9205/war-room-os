@@ -981,4 +981,35 @@ void deriveAssignments; void AgentRegistry
   check('FR06_when_nothing_is_rejected_the_fast_worker_is_never_called', rf6.status === 'COMPLETED' && f6.calls.length === 0 && rf6.fastRepair?.calls === 0)
 }
 
+// ---- context phase (opt-in): batched retrieval + optional research brief, advisory context only
+{
+  const P = 'src/chatService.mjs'
+  const item = { path: 'src/lib/jsonFile.mjs', text: 'export function readJsonFile(file, fallback) { return fallback }', method: 'DEFINITION' as const, why: 'defines readJsonFile', score: 2000 }
+  const brief = (relevant: boolean) => ({ id: 'rb-1', topic: 't', text: '- Ids are numeric strings [docs/CONVENTIONS.md]', model: 'ollama:qwen2.5-coder:7b', sources: ['docs/CONVENTIONS.md'], relevance: { relevant, reason: relevant ? 'on topic' : 'UNSUPPORTED_CLAIMS: x' }, ms: 5 })
+  const seenInputs: { steps: { path: string; known?: string[] }[] }[] = []
+  const phase = (relevant: boolean, packages: Record<string, typeof item[]> = { [P]: [item] }) => ({ async prepare(inp: { steps: { path: string; known?: string[] }[] }) { seenInputs.push(inp); return { packages, brief: brief(relevant), report: { marker: 'ctx-report' } } } })
+  const prompts: string[] = []
+  const rec = new ScriptedModel((c) => { if (c.kind === 'file' && c.path === P) prompts.push(c.prompt); return good(c) })
+  const cp1 = makeWorld(); const evc: string[] = []
+  const rc1 = await runFeatureWorkflow(deps(cp1, rec, { contextPhase: phase(true), onEvent: (e) => evc.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('CP01_retrieved_items_appear_in_related_code_with_a_label_and_a_relevant_brief_is_given_to_the_builder', rc1.status === 'COMPLETED' && prompts.length > 0 && prompts.every((p) => /--- src\/lib\/jsonFile\.mjs \(retrieved by definition search: defines readJsonFile\) ---/.test(p) && /RESEARCH BRIEF \(advisory/.test(p) && p.indexOf('RESEARCH BRIEF') < p.indexOf('RELATED CODE')), JSON.stringify({ s: rc1.status, n: prompts.length }))
+  check('CP02_the_result_records_what_was_retrieved_provided_and_briefed', rc1.contextStats!.retrievedProvided['src/lib/jsonFile.mjs']! >= 1 && rc1.contextStats!.briefProvidedCalls >= 1 && (rc1.contextPhase as { marker?: string }).marker === 'ctx-report' && evc.some((e) => e.startsWith('CONTEXT_PHASE ')))
+  const prompts2: string[] = []
+  const cp2 = makeWorld()
+  const rc2 = await runFeatureWorkflow(deps(cp2, new ScriptedModel((c) => { if (c.kind === 'file' && c.path === P) prompts2.push(c.prompt); return good(c) }), { contextPhase: phase(false) }), REQ)
+  check('CP03_a_brief_Foundry_withheld_never_reaches_the_builder', rc2.status === 'COMPLETED' && prompts2.length > 0 && prompts2.every((p) => !/RESEARCH BRIEF/.test(p)) && rc2.contextStats!.briefProvidedCalls === 0)
+  const cp3 = makeWorld(); const evc3: string[] = []
+  const rc3 = await runFeatureWorkflow(deps(cp3, new ScriptedModel(good), { contextPhase: { async prepare() { throw new Error('embedding runtime down') } }, onEvent: (e) => evc3.push(`${e.kind} ${e.detail}`) }), REQ)
+  check('CP04_a_failing_context_phase_never_fails_the_build_the_builder_proceeds_with_deterministic_context', rc3.status === 'COMPLETED' && evc3.some((e) => /^CONTEXT_PHASE_FAILED .*embedding runtime down/.test(e)) && rc3.contextPhase === undefined)
+  const prompts4: string[] = []
+  const cp4 = makeWorld()
+  const rc4 = await runFeatureWorkflow(deps(cp4, new ScriptedModel((c) => { if (c.kind === 'file') prompts4.push(c.prompt); return good(c) })), REQ)
+  check('CP05_without_a_context_phase_nothing_is_retrieved_no_brief_and_the_stats_still_count_the_deterministic_context', rc4.status === 'COMPLETED' && prompts4.every((p) => !/retrieved by|RESEARCH BRIEF/.test(p)) && rc4.contextStats!.builderPromptCalls > 0 && Object.keys(rc4.contextStats!.retrievedProvided).length === 0 && rc4.contextPhase === undefined)
+  const cp5 = makeWorld(); const dupe = { ...item, path: 'src/messageStore.mjs' }
+  const prompts5: string[] = []
+  const rc5 = await runFeatureWorkflow(deps(cp5, new ScriptedModel((c) => { if (c.kind === 'file' && c.path === P) prompts5.push(c.prompt); return good(c) }), { contextPhase: phase(true, { [P]: [dupe] }) }), REQ)
+  check('CP06_an_item_the_deterministic_context_already_supplies_is_not_duplicated', rc5.status === 'COMPLETED' && prompts5.every((p) => (p.match(/--- src\/messageStore\.mjs/g) ?? []).length <= 1), JSON.stringify(prompts5.map((p) => (p.match(/--- src\/messageStore\.mjs/g) ?? []).length)))
+  check('CP07_each_step_is_told_which_files_the_deterministic_context_already_gives_it', seenInputs.length >= 1 && seenInputs[0].steps.length > 1 && seenInputs[0].steps.every((st, i) => Array.isArray(st.known) && seenInputs[0].steps.slice(0, i).every((e) => st.known!.includes(e.path))))
+}
+
 finish()
