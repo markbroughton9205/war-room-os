@@ -28,9 +28,11 @@ for (const c of configs.filter((x) => x !== 'BASELINE')) {
   }
   md.push('')
 }
+const flag = (n: string, d: string) => { const i = process.argv.indexOf(`--${n}`); return i >= 0 ? process.argv[i + 1] : d }
+const role = flag('role', 'CODE_RETRIEVAL') as import('./roles').ModelRole, model = flag('model', 'qwen3-embedding:0.6b'), why = flag('why', 'hybrid retrieval before the builder')
 if (process.argv.includes('--record')) {
   const store = new ForgeStore(); let n = 0
-  for (const r of rows.filter((x) => x.config !== 'BASELINE')) for (const u of specialistUses(r, base.filter((b) => b.fixture === r.fixture), 'CODE_RETRIEVAL', 'qwen3-embedding:0.6b', `hybrid retrieval before the builder (${r.config})`)) { store.recordSpecialistUse(u); n++ }
+  for (const r of rows.filter((x) => x.config !== 'BASELINE')) for (const u of specialistUses(r, base.filter((b) => b.fixture === r.fixture), role, model, `${why} (${r.config})`)) { store.recordSpecialistUse(u); n++ }
   md.push(`Recorded ${n} SpecialistUse record(s) in the Forge store.`)
 }
 writeFileSync(out, md.join('\n') + '\n'); writeFileSync(out.replace(/\.md$/, '.json'), JSON.stringify({ rows, verdicts }, null, 1))
