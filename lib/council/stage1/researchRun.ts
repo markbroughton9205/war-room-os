@@ -150,12 +150,22 @@ export function applyCoverage(accounting: ResearchAccounting, sources: SourceInp
   const terms = Array.from(new Set(topic.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 3 && !INSTRUCTION_WORDS.has(w))))
   if (!terms.length) return
   const accepted = accounting.verdicts.map((v, i) => (v.accepted ? sources[i] : null)).filter((x): x is SourceInput => x !== null)
-  const haystack = accepted.map(a => `${a.title} ${a.excerpt}`.toLowerCase()).join(' ')
+  const text = (a: SourceInput) => `${a.title} ${a.excerpt}`.toLowerCase()
+  const haystack = accepted.map(text).join(' ')
   const missing = terms.filter(t => !haystack.includes(t.replace(/s$/, '')))
   if (missing.length) {
     accounting.status = 'PARTIAL'
     accounting.statusReason = `${accounting.acceptedCount} accepted source(s), but none of them mention: ${missing.slice(0, 6).join(', ')}; the question is not fully covered`
     accounting.unresolved.push(`coverage: no accepted source mentions ${missing.slice(0, 6).join(', ')}`)
+    return
+  }
+  // Every term appears somewhere, but a comparison question is only answered when sources address it themselves:
+  // at least two accepted sources must each cover most of the key terms.
+  const onPoint = accepted.filter(a => terms.filter(t => text(a).includes(t.replace(/s$/, ''))).length / terms.length >= 0.6)
+  if (onPoint.length < 2) {
+    accounting.status = 'PARTIAL'
+    accounting.statusReason = `${accounting.acceptedCount} accepted source(s), but only ${onPoint.length} address most of the question's key terms; the terms are covered only across different sources`
+    accounting.unresolved.push('coverage: fewer than two accepted sources address the question directly')
   }
 }
 

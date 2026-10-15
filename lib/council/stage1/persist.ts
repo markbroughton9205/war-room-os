@@ -41,3 +41,34 @@ export async function readStage1Turns(req: Request, conversationId: string | nul
 }
 
 export { buildTurnRecord }
+
+/**
+ * Durable assistant message for a turn the SERVER answered (Stage 1 deterministic reply, or a single attributed member turn the
+ * client does not write). Without this the reply is visible live and gone after a restart. Idempotent: an identical assistant
+ * message already stored for this conversation in the last two minutes is not written again.
+ */
+export async function persistStage1Assistant(req: Request, conversationId: string | null | undefined, input: {
+  content: string
+  family: string
+  metadata: Record<string, unknown>
+}): Promise<PersistResult> {
+  if (!conversationId) return { persisted: false, reason: 'no conversation id on request' }
+  const content = input.content.trim()
+  if (!content) return { persisted: false, reason: 'empty content' }
+  try {
+    const { localCommanderOwnerId } = await import('@/lib/war-room/localConversationGateway')
+    const ownerId = await localCommanderOwnerId(req)
+    if (!ownerId) return { persisted: false, reason: 'not an authenticated local Commander request' }
+    const store = getLocalOwnershipStore(process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null)
+    const conv = store.getCouncilConversation(ownerId, conversationId)
+    if (!conv) return { persisted: false, reason: 'conversation not found for this owner' }
+    const recent = store.listCouncilMessages(ownerId, conversationId) ?? []
+    const cutoff = Date.now() - 120_000
+    const dup = recent.some(m => m.role === 'assistant' && m.content.trim() === content && Date.parse(m.created_at) >= cutoff)
+    if (dup) return { persisted: false, reason: 'identical assistant message already stored' }
+    store.addCouncilMessage(ownerId, conversationId, { role: 'assistant', content, family: input.family, metadata: { responseSuccessful: true, ...input.metadata } })
+    return { persisted: true }
+  } catch (err) {
+    return { persisted: false, reason: err instanceof Error ? err.message : 'persist failed' }
+  }
+}

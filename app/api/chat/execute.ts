@@ -261,7 +261,7 @@ import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
 import { runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
 import { renderAccountingMarkdown } from '@/lib/council/stage1/research'
 import { recordStage1Turn } from '@/lib/council/stage1/turn'
-import { readStage1Turns } from '@/lib/council/stage1/persist'
+import { persistStage1Assistant, readStage1Turns } from '@/lib/council/stage1/persist'
 import { BARE_CONTINUATION_RE } from '@/lib/council/stage1/language'
 import { lightweightIntelligencePublic, runCouncilIntelligenceMission } from '@/lib/council/intelligence'
 import type { CouncilIntelligencePublic } from '@/lib/council/intelligence/types'
@@ -988,6 +988,22 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const ebcClassification = classifyEvidenceBoardMission({ commanderMessage: raelDirectiveText })
   if (stage1?.finalResponse) {
     const fr = stage1.finalResponse
+    // The reply is the server's own (deterministic) answer; store it so a restart/reopen still shows Council's side of the thread.
+    await persistStage1Assistant(req, conversationId, {
+      content: fr.text,
+      family: 'AURORA',
+      metadata: {
+        stage1: true,
+        stage1Mode: fr.mode,
+        stage1Status: fr.status,
+        roundRequestId: stage1.provenance.turnId,
+        providerLabel: fr.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : fr.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : 'Clarification',
+        providerModel: null,
+        backendType: 'LOCAL',
+        backendProvider: null,
+        deterministic: true,
+      },
+    }).catch(() => undefined)
     return NextResponse.json(withTrace({
       councilSingleResponse: fr.text,
       results: [],
@@ -2392,7 +2408,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
             research.accounting.conflicts.length
               ? `Accepted sources disagree: ${research.accounting.conflicts.map(c => `${c.claimId} (for: ${c.for.join('; ')} | against: ${c.against.join('; ')})`).join(' ; ')}. Say so; do not pick one silently.`
               : 'Cite only the accepted sources listed above; anything else is your own judgment and must be labelled so.',
-          ].join('\n')
+            research.accounting.status !== 'COMPLETED'
+              ? `The research is ${research.accounting.status}: ${research.accounting.statusReason}. Do not call any conclusion verified or confirmed; say what the accepted sources do and do not establish and what is still unknown.`
+              : '',
+          ].filter(Boolean).join('\n')
         : ''
       let order = 0
       const spoken: string[] = []
@@ -2825,6 +2844,25 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         flow: 'family_to_family_deliberation',
         turnCount: familyDeliberation.turns.length,
       })
+      // A single member turn is not written by the client; store it with the model/provider that actually produced it.
+      if (stage1SoloOwned && synthesis && synthesis.completion_status === 'complete' && synthesis.full_response.trim()) {
+        await persistStage1Assistant(req, conversationId, {
+          content: synthesis.full_response,
+          family: synthesis.provider_label || 'AURORA',
+          metadata: {
+            stage1: true,
+            roundRequestId: stage1?.provenance.turnId ?? null,
+            providerLabel: synthesis.provider_label,
+            providerModel: synthesis.provider_model ?? null,
+            backendType: synthesis.backend_type ?? 'LOCAL',
+            backendProvider: synthesis.backend_provider ?? null,
+            backendRuntime: synthesis.backend_runtime ?? null,
+            nebulaId: synthesis.agent_identity ?? null,
+            stage: synthesis.turn_role,
+            turnId: synthesis.turn_id,
+          },
+        }).catch(() => undefined)
+      }
       return NextResponse.json(withTrace(attachShadowMetadata({
         results,
         familyDeliberation,

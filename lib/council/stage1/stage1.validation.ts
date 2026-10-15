@@ -281,6 +281,20 @@ const coverAcct = accountResearch({ topic: coverTopic, sources: coverSources, cl
 check('accounting alone says COMPLETED for an attested source', coverAcct.status === 'COMPLETED')
 applyCoverage(coverAcct, coverSources, coverTopic)
 check('coverage: accepted sources that miss a key term make the run PARTIAL, naming the term', coverAcct.status === 'PARTIAL' && /density/.test(coverAcct.statusReason), coverAcct.statusReason)
+const twoOnPoint = [
+  { url: 'https://a.example/1', title: 'Sodium-ion battery energy density', excerpt: 'Sodium-ion battery cells reach a given energy density, compared with lithium iron phosphate cells.', provider: 'arxiv' },
+  { url: 'https://a.example/2', title: 'Lithium iron phosphate battery energy density', excerpt: 'Lithium iron phosphate battery cells have a higher energy density than sodium-ion cells.', provider: 'crossref' },
+]
+const coverAcct2 = accountResearch({ topic: coverTopic, sources: twoOnPoint, claims: claimsFromSources(twoOnPoint, [0, 1]) })
+applyCoverage(coverAcct2, twoOnPoint, coverTopic)
+check('coverage: two sources that each address the question keep the run COMPLETED', coverAcct2.status === 'COMPLETED', coverAcct2.statusReason)
+const scattered = [
+  { url: 'https://a.example/1', title: 'Sodium-ion battery', excerpt: 'Sodium-ion battery cells are reviewed in this short overview of storage chemistry for stationary use.', provider: 'arxiv' },
+  { url: 'https://a.example/2', title: 'Lithium iron phosphate', excerpt: 'Lithium iron phosphate cathode material and its energy density in lithium cells for vehicles and tools.', provider: 'crossref' },
+]
+const coverAcct3 = accountResearch({ topic: coverTopic, sources: scattered, claims: claimsFromSources(scattered, [0, 1]) })
+applyCoverage(coverAcct3, scattered, coverTopic)
+check('coverage: terms scattered across different sources is PARTIAL, not completed', coverAcct3.status === 'PARTIAL' && /address most/.test(coverAcct3.statusReason), coverAcct3.statusReason)
 check('source counts match accepted evidence', acct.acceptedCount === 2 && acct.verdicts.filter(v => v.accepted).length === 2)
 check('research with every provider failing is FAILED, not complete', accountResearch({ topic: 'x battery', sources: [], claims: [], retrievalError: 'all providers failed' }).status === 'FAILED')
 check('attribution: completed turn with no model recorded is not a model-attributed completion', buildAttribution({ familyDeliberation: { turns: [{ turn_id: 't1', output_message_id: 'm1', agent_identity: 'AURORA', provider_label: 'AURORA', provider_family: 'chatgpt', turn_role: 'council_synthesis', completion_status: 'complete', speaking_order: 1, provider_model: null, backend_provider: null, backend_type: 'LOCAL' }] } }, null).contributions[0].status === 'PARTIAL')
