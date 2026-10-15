@@ -33,16 +33,17 @@ export type SandboxOpts = {
   cwd?: string
 }
 
-const homeDirs = (p: string): string[] => {
-  // the toolchain prefix of a binary under HOME, e.g. ~/.nvm/versions/node/v22/bin/node -> ~/.nvm/versions/node/v22
+/** The smallest directory that makes an executable under HOME usable: an nvm version prefix (npm/npx live beside bin), otherwise only the directory holding it. Never HOME itself or a broad parent such as ~/.local. */
+const toolPrefix = (exe: string): string | null => {
   const home = os.homedir()
-  const out: string[] = []
   try {
-    const real = realpathSync(p)
-    if (real.startsWith(home + path.sep)) { const parts = real.slice(home.length + 1).split(path.sep); const i = parts.indexOf('bin'); out.push(path.join(home, ...parts.slice(0, i > 0 ? i : Math.max(1, parts.length - 1)))) }
-  } catch { /* not resolvable */ }
-  return out
+    const real = realpathSync(exe)
+    if (!real.startsWith(home + path.sep)) return null
+    const m = /^(.*\/\.nvm\/versions\/node\/[^/]+)\//.exec(real)
+    return m ? m[1] : path.dirname(real)
+  } catch { return null }
 }
+const homeDirs = (p: string): string[] => { const t = p ? toolPrefix(p) : null; return t ? [t] : [] }
 
 /** Returns the argv to execute instead of `argv`. Throws SandboxUnavailable when isolation is required but impossible. */
 export function wrapSandboxed(argv: string[], opts: SandboxOpts): { argv: string[]; sandboxed: boolean } {
@@ -55,7 +56,7 @@ export function wrapSandboxed(argv: string[], opts: SandboxOpts): { argv: string
   for (const d of ['/run', '/mnt', '/media']) if (existsSync(d)) args.push('--tmpfs', d)
   if (home && home !== '/') args.push('--tmpfs', home)
   // executables found through PATH under HOME (nvm, ~/.local/bin) would vanish behind the HOME tmpfs: keep only those toolchain prefixes visible, read-only
-  const pathDirs = (process.env.PATH ?? '').split(path.delimiter).filter((d) => d.startsWith(home + path.sep)).map((d) => path.basename(d) === 'bin' ? path.dirname(d) : d)
+  const pathDirs = (process.env.PATH ?? '').split(path.delimiter).filter((d) => d.startsWith(home + path.sep) && existsSync(path.join(d, 'node'))).map((d) => toolPrefix(path.join(d, 'node'))).filter((d): d is string => !!d)
   const ro = new Set<string>([...pathDirs, ...(process.env.WAR_ROOM_ENG_NODE ? homeDirs(process.env.WAR_ROOM_ENG_NODE) : []),...(opts.ro ?? []), ...homeDirs(process.execPath), ...homeDirs(argv[0].includes('/') ? argv[0] : '')])
   for (const d of ro) if (existsSync(d)) args.push('--ro-bind', d, d)
   for (const d of opts.rw) { if (!existsSync(d)) throw new SandboxUnavailable(`sandbox writable directory missing: ${d}`); args.push('--bind', d, d) }
