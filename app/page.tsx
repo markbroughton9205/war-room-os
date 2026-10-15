@@ -1,5 +1,7 @@
 'use client'
 
+import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
+import { CouncilStage1Panel } from '@/components/council/CouncilStage1Panel'
 import { useState, useRef, useEffect, useCallback, useMemo, memo, startTransition, useDeferredValue, Profiler } from 'react'
 import type { FormEvent } from 'react'
 import Link from 'next/link'
@@ -9557,10 +9559,11 @@ function Home() {
       }
       const report = body.report
       setCouncilResearchPhase('final_answer_ready')
+      const honestResearch = researchUiFromReport(report)
       setLiveResearchHud({
-        mode: report.sourcesUnavailable ? 'unavailable' : 'verified',
-        sourcesCount: report.sources.length,
-        label: report.sourcesUnavailable ? 'Research — no live sources' : 'Council Research Team',
+        mode: honestResearch.mode,
+        sourcesCount: honestResearch.sourcesCount,
+        label: honestResearch.label,
         councilPhase: 'model_running',
         responseCompletion: 'complete',
       })
@@ -14028,6 +14031,7 @@ function Home() {
                   />
                   <SynthesisCard synthesis={conversationRuntimeSnapshot?.latestSynthesis} />
                   <SessionIntelligencePanel intelligence={sessionIntelligence} />
+                  <CouncilStage1Panel conversationId={liveCouncilConvId} refreshKey={paneCouncilMessages.length} />
                   {sessionIntelligence && sessionIntelligence.roundCount > 0 ? (
                     <div className="mt-2 rounded border border-cyan-900/50 bg-slate-950/50 px-2 py-2">
                       <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300">

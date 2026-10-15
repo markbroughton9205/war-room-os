@@ -192,50 +192,32 @@ export function computeLiveResearchClientUi(
       ...(retrievalStatus ? { retrievalStatus } : {}),
     }
   }
-  const sourcesCount = packet.sources.filter(s => s.ok).length ?? 0
-  const queried = packet.sources.length ?? 0
+  // Honest counting (Council Stage 1): `sourcesCount` is the number of legs that actually
+  // returned usable material, never the number that were merely queried. A failed or rejected
+  // leg is reported in the label, not folded into the count.
+  const okLegs = packet.sources.filter(s => s.ok)
+  const sourcesCount = okLegs.length
+  const queried = packet.sources.length
+  const failedLegs = queried - sourcesCount
+  const counts = `${sourcesCount} of ${queried} source${queried === 1 ? '' : 's'} responded`
+  const conflicting = packet.contradictions.length > 0
+  const shared = { councilPhase: 'released' as const, ...(intelligence ? { intelligence } : {}), ...(retrievalStatus ? { retrievalStatus } : {}) }
 
-  if (packet.usedLiveResearch && packet.confidence >= 0.72 && sourcesCount >= 2 && !packet.researchErrorSummary) {
-    return {
-      mode: 'verified',
-      sourcesCount: queried,
-      label: 'Current info verified (multi-source)',
-      councilPhase: 'released',
-      ...(intelligence ? { intelligence } : {}),
-      ...(retrievalStatus ? { retrievalStatus } : {}),
-    }
+  if (conflicting && sourcesCount >= 1) {
+    return { mode: 'partial', sourcesCount, label: `Sources conflict — ${counts}`, ...shared }
+  }
+  if (packet.usedLiveResearch && packet.confidence >= 0.72 && sourcesCount >= 2 && !packet.researchErrorSummary && failedLegs === 0) {
+    return { mode: 'verified', sourcesCount, label: `${counts}; consistent signals, not independently checked`, ...shared }
   }
   if (packet.usedLiveResearch && sourcesCount >= 1) {
-    if (sourcesCount < queried) {
-      return {
-        mode: 'partial',
-        sourcesCount: queried,
-        label: 'Research partially available',
-        councilPhase: 'released',
-        ...(intelligence ? { intelligence } : {}),
-        ...(retrievalStatus ? { retrievalStatus } : {}),
-      }
-    }
     return {
-      mode: 'sources_queried',
-      sourcesCount: queried,
-      label: 'Sources queried',
-      councilPhase: 'released',
-      ...(intelligence ? { intelligence } : {}),
-      ...(retrievalStatus ? { retrievalStatus } : {}),
+      mode: failedLegs > 0 || packet.researchErrorSummary ? 'partial' : 'sources_queried',
+      sourcesCount,
+      label: failedLegs > 0 ? `Research partial — ${counts}` : `${counts}; not corroborated`,
+      ...shared,
     }
   }
-  if (packet.usedLiveResearch) {
-    return { mode: 'active', sourcesCount: queried, label: 'Live research active', councilPhase: 'released', ...(intelligence ? { intelligence } : {}), ...(retrievalStatus ? { retrievalStatus } : {}) }
-  }
-  return {
-    mode: 'partial',
-    sourcesCount: queried,
-    label: 'Research partially available',
-    councilPhase: 'released',
-    ...(intelligence ? { intelligence } : {}),
-    ...(retrievalStatus ? { retrievalStatus } : {}),
-  }
+  return { mode: 'partial', sourcesCount, label: `Research partial — ${counts}`, ...shared }
 }
 
 export type LiveResearchClientSummary = {

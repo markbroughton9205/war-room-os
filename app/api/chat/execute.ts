@@ -204,6 +204,7 @@ import {
   applyPipelineProvenance,
   buildDeliberationPrompt,
   buildSynthesisContextBlock,
+  completedPrimaryTurns,
   createDeliberationProgressRecorder,
   createDeliberationSession,
   deriveFamilyDeliberationRoundOutcome,
@@ -254,6 +255,14 @@ import {
   type EbcPublicSnapshot,
 } from '@/lib/council/evidence-board'
 import { maybeHandleGiFrontDoor } from '@/lib/council/gi'
+import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/server'
+import { buildAttribution, isSkippedFamilyCall } from '@/lib/council/stage1/attribution'
+import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
+import { buildResearchEvidenceBlock, runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
+import { renderAccountingMarkdown } from '@/lib/council/stage1/research'
+import { recordStage1Turn } from '@/lib/council/stage1/turn'
+import { persistStage1Assistant, readStage1Turns } from '@/lib/council/stage1/persist'
+import { BARE_CONTINUATION_RE } from '@/lib/council/stage1/language'
 import { lightweightIntelligencePublic, runCouncilIntelligenceMission } from '@/lib/council/intelligence'
 import type { CouncilIntelligencePublic } from '@/lib/council/intelligence/types'
 
@@ -762,6 +771,13 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   // conversationId) plus how long assembly took, without needing to touch each of this
   // function's ~20 individual return points. warRoomContextSnapshotId/contextAssemblyDurationMs
   // are assigned once, below, before any provider dispatch happens.
+  // Council Stage 1 analysis; assigned once the decree text is known (declared here so every
+  // withTrace call site, including early ones, can read it without a temporal dead zone).
+  let stage1: Stage1TurnResult | null = null
+  // Holder object: assigned inside the deliberation closure and read after it (a plain `let` is narrowed to null).
+  const stage1ResearchState: { run: Stage1ResearchRun | null } = { run: null }
+  // Local Home ledger ids are not remote UUIDs (conversationId above is detached for them); Stage 1 persistence uses the raw id and is owner-scoped.
+  const stage1RawConversationId = typeof body.conversationId === 'string' ? body.conversationId.trim().slice(0, 80) : null
   const withTrace = <T extends Record<string, unknown>>(payload: T) => {
     signal.throwIfAborted()
     try {
@@ -772,10 +788,36 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         err instanceof Error ? err.message : err,
       )
     }
+    // Council Stage 1: every response carries the truthful attribution record derived from what
+    // the payload proves (deterministic Stage 1 answers already supply their own record).
+    let councilStage1 = (payload as Record<string, unknown>).councilStage1
+    if (!councilStage1 && stage1) {
+      try {
+        councilStage1 = {
+          understanding: stage1.understanding,
+          decision: stage1.decision,
+          provenance: stage1.provenance,
+          attribution: buildAttribution(payload as Record<string, unknown>, stage1.decision),
+        }
+      } catch { /* attribution must never break a response */ }
+    }
+    // A family call the coordinator told to stay silent is not a turn: it must not be recorded (it would add phantom failed members).
+    if (stage1 && !isSkippedFamilyCall(payload as Record<string, unknown>)) {
+      recordStage1Turn({
+        req,
+        // Local Home ledger ids are not remote UUIDs and are detached above; Stage 1 persistence
+        // uses the raw id and is gated by owner-scoped lookup in the local store.
+        conversationId: typeof body.conversationId === 'string' ? body.conversationId.trim().slice(0, 80) : null,
+        stage1,
+        payload: payload as Record<string, unknown>,
+        councilStage1: councilStage1 as Record<string, unknown> | undefined,
+      })
+    }
     return attachCouncilTrace(
       attachCouncilProgress(
         {
           ...payload,
+          ...(councilStage1 ? { councilStage1 } : {}),
           conversationId: payload.conversationId ?? conversationId,
           councilRoster: displayCouncilRoster,
           agiContextSnapshotId: warRoomContextSnapshotId,
@@ -875,7 +917,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   })
   const councilGatherPhase = body.councilGatherPhase === 'decree_soft' ? 'decree_soft' : null
   const councilSingleFamilyEarly = body.councilSingleFamily as CouncilSingleFamily | undefined
-  const raelDirectiveText =
+  const raelDirectiveTextBase =
     typeof body.raelDirectiveText === 'string' && body.raelDirectiveText.trim()
       ? body.raelDirectiveText.trim()
       : message.trim()
@@ -883,6 +925,28 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         : conversationalTurn
           ? 'Continue council dialogue on the active topic without a new decree. Respond once; challenge only if material.'
           : message
+  // Council Stage 1: deterministic language understanding + coordination. Folds resolved
+  // references/corrections into the decree and may answer the turn itself (no model call).
+  try {
+    const s1ConversationId = typeof body.conversationId === 'string' ? body.conversationId.trim().slice(0, 80) : null
+    const s1Text = raelDirectiveTextBase
+    const s1WantsRecovery = BARE_CONTINUATION_RE.test(s1Text.trim())
+    const s1PriorTurns = s1WantsRecovery ? await readStage1Turns(req, s1ConversationId) : undefined
+    stage1 = conversationalTurn && !message.trim()
+      ? null
+      : runStage1Turn({
+          priorTurns: s1PriorTurns,
+          turnId: typeof body.councilLogicalRequestId === 'string' && body.councilLogicalRequestId ? body.councilLogicalRequestId : `s1-${Date.now().toString(36)}`,
+          text: raelDirectiveTextBase,
+          thread: body.threadHistory,
+        })
+  } catch (err) {
+    console.error('[council-stage1] analysis failed; continuing without it:', err instanceof Error ? err.message : err)
+  }
+  // Routing/classification always uses the Commander's own words; the resolved-reference note is
+  // supplied to models only (prompt builders below).
+  const raelDirectiveText = raelDirectiveTextBase
+  const raelDirectiveTextForModel = stage1?.effectiveText ?? raelDirectiveTextBase
 
   if (
     detectUninstalledKimiMoonshotCommand(message)
@@ -925,6 +989,40 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
    */
   const classifiedTurn = classifyCouncilTurn(raelDirectiveText)
   const ebcClassification = classifyEvidenceBoardMission({ commanderMessage: raelDirectiveText })
+  if (stage1?.finalResponse) {
+    const fr = stage1.finalResponse
+    // The reply is the server's own (deterministic) answer; store it so a restart/reopen still shows Council's side of the thread.
+    await persistStage1Assistant(req, stage1RawConversationId, {
+      content: fr.text,
+      family: 'AURORA',
+      metadata: {
+        stage1: true,
+        stage1Mode: fr.mode,
+        stage1Status: fr.status,
+        roundRequestId: stage1.provenance.turnId,
+        providerLabel: fr.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : fr.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : 'Clarification',
+        providerModel: null,
+        backendType: 'LOCAL',
+        backendProvider: null,
+        deterministic: true,
+      },
+    }).catch(() => undefined)
+    return NextResponse.json(withTrace({
+      councilSingleResponse: fr.text,
+      results: [],
+      mode: fr.mode,
+      hardStop: true,
+      showContinue: false,
+      councilStage1: {
+        status: fr.status,
+        understanding: stage1.understanding,
+        decision: stage1.decision,
+        provenance: stage1.provenance,
+        claims: fr.claims,
+        responder: { kind: 'deterministic', label: fr.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : fr.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : 'Clarification', model: null },
+      },
+    }))
+  }
   const giFrontDoor = await maybeHandleGiFrontDoor({
     text: raelDirectiveText,
     conversationId,
@@ -962,7 +1060,28 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     || classifiedTurn.intent === 'SOCIAL_CHECKIN'
     || ((classifiedTurn.intent === 'GREETING' || classifiedTurn.intent === 'STATUS_CHECK') && classifiedTurn.depth === 'FAST')
   const profile = isLightweightGreeting || !shouldInjectCommanderProfile(classifiedTurn) ? '' : rawProfileFromClient
-  const familyDeliberationRequested = familyDeliberationRequestedRaw && shouldRunFamilyDeliberation(classifiedTurn)
+  // Council Stage 1: a question the coordinator gave to exactly one member is run as one real attributed model turn even when
+  // the turn classifier called it FAST (the legacy fast path makes no member call and records a correct answer as FAILED).
+  const stage1SoloOwned = !isLightweightGreeting && !stage1?.finalResponse && !councilCommand.directInvocation && councilCommand.mode !== 'attendance'
+    && stage1?.decision.route === 'direct_member' && stage1.decision.members.length === 1
+  const familyDeliberationRequested = (familyDeliberationRequestedRaw && shouldRunFamilyDeliberation(classifiedTurn)) || stage1SoloOwned
+  // The client gathers a simple turn family by family. When the coordinator gave the question to exactly one member, the
+  // other families' calls are told to stay silent (existing silent-skip protocol) instead of each producing an answer.
+  if (stage1SoloOwned && !familyDeliberationRequestedRaw && councilSingleFamily) {
+    const soloSeats = seatsForParticipatingAgents(stage1!.decision.members.map(m => m.toLowerCase() as NebulaAgentId))
+    const gathered = Array.isArray(body.councilLogicalExpectedFamilies) ? (body.councilLogicalExpectedFamilies as unknown[]).map(String) : []
+    const ownerIsGathered = soloSeats.some(seat => gathered.includes(seat))
+    if (soloSeats.length > 0 && !soloSeats.includes(councilSingleFamily) && ownerIsGathered) {
+      return NextResponse.json(withTrace({
+        councilSingleResponse: '',
+        councilSingleFamily,
+        results: [{ family: displayFamilyName(councilSingleFamily), content: '', status: 'OK' }],
+        showContinue: false,
+        councilGovernorSkipped: true,
+        councilStage1Skipped: { family: councilSingleFamily, reason: `not selected: the coordinator gave this question to ${stage1!.decision.members.join(', ')}` },
+      }))
+    }
+  }
   const nebulaRoundPlan = createCouncilRoundPlan({
     roundId: councilLogicalRequestId || councilTrace.councilTraceId,
     commanderMessage: raelDirectiveText,
@@ -971,9 +1090,33 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     nebulaRoundPlan.participatingAgentIds = [...astraMission.selectedPermanentSeats]
     nebulaRoundPlan.verificationRequested = true
   }
-  const nebulaSelectedSeats = astraMission
+  const nebulaSelectedSeatsBase = astraMission
     ? astraMission.selectedPermanentSeats.map(agentId => SWARM_SEAT_BY_AGENT[agentId])
     : selectedSeatsFromEbc(ebcClassification)
+  // Council Stage 1: a simple question gets the one competent member the coordinator chose, not
+  // the whole plan. Only ever narrows (never adds) and never touches scout-swarm missions.
+  const stage1NarrowedSeats = !astraMission && !shouldDispatchEvidenceBoardCouncil(ebcClassification.mission_class) && stage1?.decision.route === 'direct_member' && stage1.decision.complexity === 'simple'
+    ? seatsForParticipatingAgents(stage1.decision.members.map(m => m.toLowerCase() as NebulaAgentId))
+        .filter(seat => nebulaSelectedSeatsBase.includes(seat))
+    : []
+  const stage1Narrowed = stage1NarrowedSeats.length > 0
+  // Council Stage 1: a substantive or research discussion the coordinator assigned to two or more members is executed
+  // as a real sequential discussion (each member is a model turn that sees the earlier contributions), not handed to
+  // the deterministic evidence-board pipeline, which makes no member model calls.
+  const stage1DiscussionRoute = stage1 && !stage1.finalResponse ? stage1.decision.route : null
+  const stage1DiscussionSeats = !astraMission && (familyDeliberationRequestedRaw || stage1SoloOwned)
+    && (stage1DiscussionRoute === 'group_discussion' || stage1DiscussionRoute === 'small_group' || stage1DiscussionRoute === 'research' || stage1DiscussionRoute === 'direct_member')
+    && (stage1?.decision.members.length ?? 0) >= 1
+    ? seatsForParticipatingAgents(stage1!.decision.members.map(m => m.toLowerCase() as NebulaAgentId))
+    : []
+  const stage1OwnsDiscussion = stage1DiscussionSeats.length >= 1 && familyDeliberationRequested
+  const stage1ResearchRequested = stage1OwnsDiscussion && stage1DiscussionRoute === 'research'
+  const nebulaSelectedSeats = stage1Narrowed ? stage1NarrowedSeats : nebulaSelectedSeatsBase
+  if (stage1Narrowed) {
+    const keepIds = nebulaRoundPlan.participatingAgentIds.filter(id =>
+      stage1!.decision.members.map(m => m.toLowerCase()).includes(id))
+    if (keepIds.length) nebulaRoundPlan.participatingAgentIds = keepIds
+  }
   let nebulaRound: CouncilRound = createCouncilRound({
     roundId: nebulaRoundPlan.roundId,
     requestId: councilTrace.councilTraceId,
@@ -988,6 +1131,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   if (familyDeliberationRequested) {
     // Family deep path expects PHOENIX when floor-eligible; scout missions keep their own roster.
     const includeRedTeam = classifiedTurn.intent !== 'SOCIAL_CHECKIN'
+      && !stage1Narrowed
       && (nebulaSelectedSeats.includes('red_team') || !astraMission)
     const localCouncilLive = localRoutingBypassesCloudFloorGate()
     const nebulaConfigured = Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) as Partial<Record<CouncilOrchestrationFamily, boolean>>
@@ -1683,13 +1827,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         councilResearchPhases: report.phases,
         showContinue: true,
         liveResearchAttempted: true,
-        liveResearchUi: {
-          mode: report.sourcesUnavailable ? 'unavailable' : 'verified',
-          sourcesCount: report.sources.length,
-          label: 'Council Research Team',
-          councilPhase: 'model_running',
-          responseCompletion: 'complete',
-        },
+        liveResearchUi: (() => {
+          const honest = researchUiFromReport(report)
+          return {
+            mode: honest.mode,
+            sourcesCount: honest.sourcesCount,
+            label: honest.label,
+            councilPhase: 'model_running' as const,
+            responseCompletion: 'complete' as const,
+          }
+        })(),
       }))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Council research team failed.'
@@ -2035,7 +2182,17 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     progressTracker: CouncilProgressRuntimeTracker,
   ): Promise<DeliberationSession> => {
     const progress = createDeliberationProgressRecorder(progressTracker)
-    const evidenceReferences = evidenceReferencesFromLiveResearch(liveResearchPacket)
+    if (stage1ResearchRequested && stage1 && !stage1ResearchState.run) {
+      stage1ResearchState.run = await runStage1Research({
+        topic: stage1.understanding.normalized,
+        decreeText: raelDirectiveText,
+        conversationId,
+      })
+    }
+    const evidenceReferences = [
+      ...evidenceReferencesFromLiveResearch(liveResearchPacket),
+      ...(stage1ResearchState.run?.evidenceRefs ?? []),
+    ]
     const session = createDeliberationSession({
       sessionId: conversationId,
       roundId: councilLogicalRequestId,
@@ -2111,7 +2268,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       const sharePriors = opts?.sharePriors !== false
       const prompt = opts?.promptOverride ?? buildDeliberationPrompt({
         role,
-        commanderMessage: raelDirectiveText,
+        commanderMessage: raelDirectiveTextForModel,
         evidenceReferences,
         priorTurns: sharePriors ? session.turns : [],
         targetTurn: opts?.targetTurn,
@@ -2238,6 +2395,85 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       }) },
       stateChange: 'Floor-controlled sequential families using configured providers only.',
     })
+
+    if (stage1OwnsDiscussion) {
+      // Council Stage 1 real discussion: members the coordinator chose speak one at a time (one local model at a
+      // time), each sees what was already said and must respond to it; AURORA integrates and keeps disagreement.
+      const synthSeat: CouncilSingleFamily = 'chatgpt'
+      const seats = Array.from(new Set(stage1DiscussionSeats)).filter((seat): seat is CouncilSingleFamily => seat !== 'baby' && seat !== 'bridge_architect')
+      if (seats.length === 1) {
+        // One competent member was enough: a single real model turn, attributed to the model that produced it.
+        const only = seats[0]
+        const soloTurn = await callTurn(only, 'direct_response', 1, {
+          identityId: nebulaAgentForSeat(only)?.id ?? null,
+          inputMessageIds: [session.commander_message_id],
+          sharePriors: false,
+          extraContextBlock: stage1ResearchState.run ? buildResearchEvidenceBlock(stage1ResearchState.run) : undefined,
+        })
+        session.synthesis_turn_id = soloTurn.turn_id
+        session.completion_status = soloTurn.completion_status === 'complete' ? 'complete' : 'failed'
+        session.diagnostics.push(`Council Stage 1 single-member turn: ${soloTurn.provider_label}.`)
+        applyPipelineProvenance(session)
+        progress.closeIfTerminal()
+        return session
+      }
+      const primarySeats = seats.filter(seat => seat !== synthSeat && seat !== 'red_team').slice(0, 4)
+      const challengeSeat = seats.includes('red_team') ? ('red_team' as CouncilSingleFamily) : null
+      const research = stage1ResearchState.run
+      const evidenceBlock = research ? buildResearchEvidenceBlock(research) : ''
+      let order = 0
+      const spoken: string[] = []
+      let lastPrimary: DeliberationTurn | null = null
+      for (const seat of primarySeats) {
+        order += 1
+        const identity = nebulaAgentForSeat(seat)?.id ?? null
+        const turn = await callTurn(seat, 'direct_response', order, {
+          identityId: identity,
+          inputMessageIds: [session.commander_message_id, ...completedOutputIds()],
+          extraContextBlock: [
+            evidenceBlock,
+            spoken.length
+              ? `Members who already spoke in this discussion: ${spoken.join(', ')}. Respond to what they actually said: name where you agree, where you disagree and why. Do not repeat them.`
+              : 'You speak first. Give your position from your own role; later members will respond to you.',
+            'Speak as yourself only. Do not write other members\' turns and do not claim live research beyond the sources listed.',
+          ].filter(Boolean).join('\n'),
+        })
+        spoken.push(turn.provider_label)
+        if (turn.completion_status === 'complete') lastPrimary = turn
+      }
+      if (challengeSeat && lastPrimary) {
+        order += 1
+        await callTurn(challengeSeat, 'red_team_challenge', order, {
+          identityId: nebulaAgentForSeat(challengeSeat)?.id ?? null,
+          targetTurn: lastPrimary,
+          challengeTargetIds: completedPrimaryTurns(session).map(t => t.output_message_id).filter((id): id is string => Boolean(id)),
+          inputMessageIds: [session.commander_message_id, ...completedOutputIds()],
+          extraContextBlock: evidenceBlock,
+        })
+      }
+      const gate = evaluateSynthesisGate(session)
+      order += 1
+      const synthesis = gate.canSynthesize
+        ? await callTurn(synthSeat, 'council_synthesis', order, {
+            identityId: nebulaAgentForSeat(synthSeat)?.id ?? null,
+            inputMessageIds: synthesisInputMessageIds(session),
+            extraContextBlock: [
+              buildSynthesisContextBlock(session),
+              evidenceBlock,
+              'Keep real disagreement visible and attribute positions to the member who held them. Do not invent a member who did not speak.',
+            ].filter(Boolean).join('\n'),
+          })
+        : appendUnresolvedTurn(synthSeat, 'council_synthesis', order, gate.reasons.join(' ') || 'no completed member contribution to synthesize')
+      session.synthesis_turn_id = synthesis.turn_id
+      const primariesDone = session.turns.filter(t => t.turn_role !== 'council_synthesis').every(t => t.completion_status === 'complete')
+      session.completion_status = synthesis.completion_status === 'complete'
+        ? (primariesDone ? 'complete' : 'partial')
+        : 'failed'
+      session.diagnostics.push(`Council Stage 1 discussion: ${spoken.join(', ') || 'no member'} then ${displayFamilyName(synthSeat)}${research ? `; research ${research.accounting.status} (${research.accounting.acceptedCount} accepted / ${research.accounting.rejectedCount} rejected)` : ''}.`)
+      applyPipelineProvenance(session)
+      progress.closeIfTerminal()
+      return session
+    }
 
     if (astraMission) {
       let speakingOrder = 0
@@ -2368,6 +2604,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       shouldDispatchEvidenceBoardCouncil(ebcClassification.mission_class)
       && !directFamily
       && !isAttendanceFlow
+      && !stage1OwnsDiscussion
       && (!familyDeliberationRequested || evidenceBoardRound)
 
     if (!engine03OwnsExecution) {
@@ -2386,7 +2623,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     }
 
     const baseUserPrompt = buildCouncilUserPrompt({
-      raelDirectiveText,
+      raelDirectiveText: raelDirectiveTextForModel,
       threadBlock: thread,
       augmentBlock,
       intentLabel: intentState.intent,
@@ -2615,13 +2852,32 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         flow: 'family_to_family_deliberation',
         turnCount: familyDeliberation.turns.length,
       })
+      // A single member turn is not written by the client; store it with the model/provider that actually produced it.
+      if (stage1SoloOwned && synthesis && synthesis.completion_status === 'complete' && synthesis.full_response.trim()) {
+        await persistStage1Assistant(req, stage1RawConversationId, {
+          content: `${synthesis.full_response}${stage1ResearchState.run ? `\n\n${renderAccountingMarkdown(stage1ResearchState.run.accounting)}\nTools that ran: ${stage1ResearchState.run.toolsInvoked.join(', ') || 'none'}.` : ''}`,
+          family: synthesis.provider_label || 'AURORA',
+          metadata: {
+            stage1: true,
+            roundRequestId: stage1?.provenance.turnId ?? null,
+            providerLabel: synthesis.provider_label,
+            providerModel: synthesis.provider_model ?? null,
+            backendType: synthesis.backend_type ?? 'LOCAL',
+            backendProvider: synthesis.backend_provider ?? null,
+            backendRuntime: synthesis.backend_runtime ?? null,
+            nebulaId: synthesis.agent_identity ?? null,
+            stage: synthesis.turn_role,
+            turnId: synthesis.turn_id,
+          },
+        }).catch(() => undefined)
+      }
       return NextResponse.json(withTrace(attachShadowMetadata({
         results,
         familyDeliberation,
         scoutSwarm: familyDeliberation.scout_swarm ?? null,
         roundHealth,
         councilRound: nebulaRound,
-        councilSingleResponse: synthesis?.full_response ?? '',
+        councilSingleResponse: `${synthesis?.full_response ?? ''}${stage1ResearchState.run ? `\n\n${renderAccountingMarkdown(stage1ResearchState.run!.accounting)}\nTools that ran: ${stage1ResearchState.run!.toolsInvoked.join(', ') || 'none'}.` : ''}`,
         evidenceBoardCouncil,
         councilIntelligence,
         hardStop: false,
@@ -2632,6 +2888,26 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         durableRound,
         priorRoundId: priorSessionIntelligence?.latestRoundId ?? null,
         ...liveResearchJson(),
+        ...(stage1ResearchState.run
+          ? {
+              councilStage1Research: {
+                accounting: stage1ResearchState.run!.accounting,
+                toolsInvoked: stage1ResearchState.run!.toolsInvoked,
+                providersFailed: stage1ResearchState.run!.providersFailed,
+                durationMs: stage1ResearchState.run!.durationMs,
+                error: stage1ResearchState.run!.error,
+              },
+              liveResearchAttempted: true,
+              liveResearchUi: {
+                mode: stage1ResearchState.run!.accounting.status === 'FAILED' ? 'unavailable' : stage1ResearchState.run!.accounting.status === 'COMPLETED' ? 'verified' : 'partial',
+                sourcesCount: stage1ResearchState.run!.accounting.acceptedCount,
+                label: `Research ${stage1ResearchState.run!.accounting.status.toLowerCase()} — ${stage1ResearchState.run!.accounting.acceptedCount} accepted, ${stage1ResearchState.run!.accounting.rejectedCount} rejected${familyDeliberation.completion_status === 'complete' ? '' : `; Council round ${familyDeliberation.completion_status}`}`,
+                councilPhase: 'model_running' as const,
+                // never claim completion the session did not reach
+                responseCompletion: familyDeliberation.completion_status === 'complete' ? ('complete' as const) : ('partial' as const),
+              },
+            }
+          : {}),
       }, createActualSelectionSnapshot({
         executionMode: 'family_to_family_deliberation',
         actualSelectedFamilies: deliberationFamilies,
@@ -3503,7 +3779,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         }
       } else {
         userPrompt = buildCouncilUserPrompt({
-          raelDirectiveText,
+          raelDirectiveText: raelDirectiveTextForModel,
           threadBlock: thread,
           augmentBlock: grokAugmentBlock,
           intentLabel: intentState.intent,
