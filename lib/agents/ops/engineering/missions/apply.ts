@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, lstatSync, mkdirSync, rmSync, symlinkSync } from 'node:fs'
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { isContained } from '../runtime/safeFs'
 import { Workspace } from '../runtime/workspaceFs'
@@ -75,6 +75,10 @@ export async function integrate(m: MissionRecord, ws: Workspace, created: string
   }
   const nm = path.join(wt, 'node_modules')
   if (existsSync(path.join(src.repo, 'node_modules')) && !existsSync(nm)) symlinkSync(path.join(src.repo, 'node_modules'), nm)
+  // sandboxed code can write into the worktree; host git must never trust a .git pointer or hooks it may have changed
+  const gitPtr = path.join(wt, '.git')
+  const gitPtrBefore = existsSync(gitPtr) ? readFileSync(gitPtr, 'utf8') : null
+  const safeGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', '-c', 'core.attributesFile=/dev/null']
   let ok = true
   const record = (name: string, r: { exitCode: number | null; stdout: string; stderr: string; timedOut: boolean }) => {
     const tail = (r.stdout + '\n' + r.stderr).trim().split('\n').slice(-6).join(' | ').slice(0, 500)
@@ -87,11 +91,12 @@ export async function integrate(m: MissionRecord, ws: Workspace, created: string
     record(`validator ${v}`, await runTool([node, '--loader', './scripts/ts-extension-loader.mjs', '--experimental-transform-types', v], wt, { timeoutMs: 900_000, sandbox: { rw: [wt], ro: [path.join(src.repo, 'node_modules')] } }))
   }
   rmSync(nm, { force: true })
+  if (gitPtrBefore !== null && readFileSync(gitPtr, 'utf8') !== gitPtrBefore) { writeFileSync(gitPtr, gitPtrBefore); out.gates.push({ name: 'worktree integrity', exitCode: -1, summary: 'the worktree .git pointer was modified by sandboxed code; restored and refused' }); return out }
   if (!ok) return out
-  const add = await runTool([git, '--literal-pathspecs', '-C', wt, 'add', '--', ...plan.allowed], wt, { timeoutMs: 60_000 })
+  const add = await runTool([git, ...safeGit, '--literal-pathspecs', '-C', wt, 'add', '--', ...plan.allowed], wt, { timeoutMs: 60_000 })
   if (add.exitCode !== 0) { out.gates.push({ name: 'git add', exitCode: add.exitCode ?? -1, summary: add.stderr.slice(-300) }); return out }
   const msg = `foundry(${m.id}): ${m.title}\n\nEngineering mission ${m.id}. Workspace seed ${m.workspace.seedTreeSha256.slice(0, 12)}; base ${base.slice(0, 12)}.\nFiles: ${plan.allowed.join(', ')}\n\nCo-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>`
-  const cm = await runTool([git, '-C', wt, '-c', 'user.name=Foundry Engineering', '-c', 'user.email=foundry@war-room.local', 'commit', '-m', msg], wt, { timeoutMs: 60_000 })
+  const cm = await runTool([git, ...safeGit, '-C', wt, '-c', 'user.name=Foundry Engineering', '-c', 'user.email=foundry@war-room.local', 'commit', '-m', msg], wt, { timeoutMs: 60_000 })
   if (cm.exitCode !== 0) { out.gates.push({ name: 'git commit', exitCode: cm.exitCode ?? -1, summary: (cm.stderr || cm.stdout).slice(-300) }); return out }
   const c = await runTool([git, '-C', wt, 'rev-parse', 'HEAD'], wt, { timeoutMs: 20_000 })
   const t = await runTool([git, '-C', wt, 'rev-parse', 'HEAD^{tree}'], wt, { timeoutMs: 20_000 })

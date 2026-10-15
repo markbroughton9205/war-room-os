@@ -8,6 +8,7 @@ import path from 'node:path'
  * Uses bubblewrap: the whole filesystem is read-only, HOME is replaced by an empty tmpfs (no keys, no .env files, no other projects),
  * /tmp is private, only the listed directories are writable, PID/IPC/UTS namespaces are private, and the network namespace is
  * private unless the command is a loopback server probed from outside (net: true).
+ * Known limit: with net:true (servers probed over loopback) the host network namespace is shared, so model code could reach localhost services.
  * No privileges are needed and no Electron/Chromium sandbox setting is touched.
  * FOUNDRY_SANDBOX=off disables it explicitly (recorded by callers via `sandboxed:false`); when bwrap is missing the call is refused unless that opt-out is set.
  */
@@ -50,6 +51,8 @@ export function wrapSandboxed(argv: string[], opts: SandboxOpts): { argv: string
   const home = os.homedir()
   const args = ['--die-with-parent', '--new-session', '--unshare-pid', '--unshare-ipc', '--unshare-uts', '--unshare-cgroup-try', '--ro-bind', '/', '/', '--dev', '/dev', '--proc', '/proc', '--tmpfs', '/tmp']
   if (!opts.net) args.push('--unshare-net')
+  // host unix sockets (ssh/gpg agent, dbus, docker) are reachable through the read-only root even without a network namespace
+  for (const d of ['/run', '/mnt', '/media']) if (existsSync(d)) args.push('--tmpfs', d)
   if (home && home !== '/') args.push('--tmpfs', home)
   const ro = new Set<string>([...(opts.ro ?? []), ...homeDirs(process.execPath), ...homeDirs(argv[0].includes('/') ? argv[0] : '')])
   for (const d of ro) if (existsSync(d)) args.push('--ro-bind', d, d)
