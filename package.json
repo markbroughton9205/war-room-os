@@ -399,6 +399,7 @@
     "backfill:recursive-learning": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/recursive-learning/ingestion/backfill.cli.ts",
     "validate:foundry-missions": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/missions/missions.validation.ts",
     "validate:foundry-reverse": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/reverse/reverse.validation.ts",
+    "validate:foundry-sandbox": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/runtime/sandbox.validation.ts",
     "validate:agent-eng-importfix": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/importFix.validation.ts"
   },
   "dependencies": {

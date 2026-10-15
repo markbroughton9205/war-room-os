@@ -1,3 +1,4 @@
+import { wrapSandboxed } from './runtime/sandbox'
 import ts from 'typescript'
 import { execFile } from 'node:child_process'
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
@@ -101,7 +102,7 @@ if (phase === '1') {
 for (const k of Object.keys(mod).filter((k) => isFn(k) && mod[k].length === 0 && ${GETTER}.test(k))) { try { out.snap[k] = JSON.stringify(await mod[k]()) } catch (e) { out.snap[k] = 'THROWS ' + String(e.message).slice(0, 60) } }
 console.log('PROBE ' + JSON.stringify(out))
 `
-const runNode = (cwd: string, args: string[], env: Record<string, string>) => new Promise<string>((resolve) => execFile('node', ['--input-type=module', '-e', SCRIPT, ...args], { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', ...env } as unknown as NodeJS.ProcessEnv, timeout: 15_000 }, (_e, stdout) => resolve(String(stdout))))
+const runNode = (cwd: string, args: string[], env: Record<string, string>) => new Promise<string>((resolve) => execFile(...(() => { const w = wrapSandboxed(['node', '--input-type=module', '-e', SCRIPT, ...args], { rw: [cwd] }).argv; return [w[0], w.slice(1)] as [string, string[]] })(), { cwd, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', ...env } as unknown as NodeJS.ProcessEnv, timeout: 15_000 }, (_e, stdout) => resolve(String(stdout))))
 const parse = (s: string) => { const m = /PROBE (\{.*\})/.exec(s); try { return m ? JSON.parse(m[1]) as { created: { fn: string; args: unknown[] } | null; snap: Record<string, string> } : null } catch { return null } }
 /** Round trip on the real storage module: create, read, then a FRESH process re-imports it and must read the same data back. Works on a private copy; never touches the workspace. */
 export async function persistenceProbe(root: string, acceptance: string[], files: string[], legacyNames: string[] = []): Promise<PersistenceProbe> {

@@ -1,3 +1,4 @@
+import { wrapSandboxed } from './runtime/sandbox'
 import { spawn } from 'node:child_process'
 import { copyTreeNoLinks } from './runtime/safeFs'
 import { existsSync, mkdtempSync, rmSync } from 'node:fs'
@@ -14,7 +15,8 @@ export async function startupProbe(root: string, env: Record<string, string> = {
   try {
     copyTreeNoLinks(root, dir, (rel) => /node_modules/.test(rel))
     return await new Promise((resolve) => {
-      const child = spawn('node', [entry], { cwd: dir, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', PORT: String(30000 + Math.floor(Math.random() * 20000)), ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, path.join(dir, v)])) } as unknown as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] })
+      const wrapped = wrapSandboxed(['node', entry], { rw: [dir] }).argv
+      const child = spawn(wrapped[0], wrapped.slice(1), { cwd: dir, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', PORT: String(30000 + Math.floor(Math.random() * 20000)), ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, path.join(dir, v)])) } as unknown as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] })
       let out = ''
       child.stdout.on('data', (d: Buffer) => { out += d }); child.stderr.on('data', (d: Buffer) => { out += d })
       const t = setTimeout(() => { child.kill('SIGKILL'); resolve({ started: true, output: out.slice(-2000) }) }, windowMs)

@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyTreeNoLinks } from './safeFs'
+import { wrapSandboxed, SandboxUnavailable } from './sandbox'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -27,15 +28,20 @@ export function authorizeCommand(argv: string[], root: string, tools: Engineerin
 const scrubbedEnv = (extra: Record<string, string> = {}): NodeJS.ProcessEnv => ({ PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', LANG: 'C.UTF-8', NODE_ENV: 'test', CI: '1', ...extra })
 
 /** Runs an authorized command in the workspace with a timeout, bounded + redacted output and a scrubbed environment. */
-export function runCommand(root: string, argv: string[], tools: EngineeringTool[], opts: { timeoutMs?: number; env?: Record<string, string> } = {}): Promise<CommandRecord> {
+export function runCommand(root: string, argv: string[], tools: EngineeringTool[], opts: { timeoutMs?: number; env?: Record<string, string>; /** extra writable directories (the private scratch of a hermetic run) */ rwExtra?: string[] } = {}): Promise<CommandRecord> {
   const started = new Date()
   const t0 = Date.now()
   try { authorizeCommand(argv, root, tools) } catch (e) {
     const msg = e instanceof Error ? e.message : 'refused'
     return Promise.resolve({ argv, cwd: root, exitCode: null, timedOut: false, stdout: '', stderr: msg, durationMs: 0, startedAt: started.toISOString(), outputHash: sha(msg), refused: msg })
   }
+  let exec = argv
+  try { exec = wrapSandboxed(argv, { rw: [root, ...(opts.rwExtra ?? [])] }).argv } catch (e) {
+    const msg = e instanceof SandboxUnavailable ? e.message : String(e)
+    return Promise.resolve({ argv, cwd: root, exitCode: null, timedOut: false, stdout: '', stderr: msg, durationMs: 0, startedAt: started.toISOString(), outputHash: sha(msg), refused: msg })
+  }
   return new Promise((resolve) => {
-    execFile(argv[0], argv.slice(1), { cwd: root, env: scrubbedEnv(opts.env), timeout: opts.timeoutMs ?? 60_000, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+    execFile(exec[0], exec.slice(1), { cwd: root, env: scrubbedEnv(opts.env), timeout: opts.timeoutMs ?? 60_000, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
       const clip = (t: string) => redactText(String(t ?? '')).slice(-MAX_OUTPUT)
       const out = clip(stdout); const er = clip(stderr)
       const e = err as (NodeJS.ErrnoException & { killed?: boolean; code?: number | string }) | null
@@ -50,7 +56,8 @@ export async function startWorkspaceServer(root: string, script: string, tools: 
   if (!tools.includes('read_runtime_output')) throw new CommandRefusal('read_runtime_output is not granted')
   if (path.isAbsolute(script) || script.includes('..') || !existsSync(path.join(root, script))) throw new CommandRefusal(`server script not found inside the workspace: ${script}`)
   const port = 20000 + Math.floor(Math.random() * 20000)
-  const child = spawn('node', [script], { cwd: root, env: scrubbedEnv({ PORT: String(port), HOST: '127.0.0.1', ...env }), stdio: ['ignore', 'pipe', 'pipe'] })
+  const wrapped = wrapSandboxed(['node', script], { rw: [root], net: true }).argv
+  const child = spawn(wrapped[0], wrapped.slice(1), { cwd: root, env: scrubbedEnv({ PORT: String(port), HOST: '127.0.0.1', ...env }), stdio: ['ignore', 'pipe', 'pipe'] })
   let buf = ''
   child.stdout.on('data', (d) => { buf += String(d) }); child.stderr.on('data', (d) => { buf += String(d) })
   const baseUrl = `http://127.0.0.1:${port}`
@@ -77,7 +84,7 @@ export async function runHermetic(root: string, argv: string[], tools: Engineeri
     const tmpDir = path.join(scratch, 'tmp'), stateDir = path.join(scratch, 'state')
     mkdirSync(tmpDir, { recursive: true }); mkdirSync(stateDir, { recursive: true })
     const iso: Record<string, string> = { TMPDIR: tmpDir, ...Object.fromEntries((opts.isolateEnv ?? []).map((v) => [v, path.join(stateDir, `${v}.json`)])), ...(opts.env ?? {}) }
-    const rec = await runCommand(copy, argv, tools, { ...opts, env: iso })
+    const rec = await runCommand(copy, argv, tools, { ...opts, env: iso, rwExtra: [scratch] })
     const back = (t: string) => t.split(copy).join(root)
     const stdout = back(rec.stdout), stderr = back(rec.stderr)
     return { ...rec, cwd: root, stdout, stderr, outputHash: sha(stdout + '\n' + stderr) }

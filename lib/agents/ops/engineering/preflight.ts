@@ -11,6 +11,7 @@
  *           required status; defaults and 400/404 rules; exact response shapes; flag actions; filters; data survives a restart; ids advance and are never reused;
  *           the default storage path (and its folder) is created; the existing (compat) endpoints answer.
  */
+import { wrapSandboxed } from './runtime/sandbox'
 import { spawn } from 'node:child_process'
 import { copyTreeNoLinks, removeContained } from './runtime/safeFs'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
@@ -98,7 +99,8 @@ async function startServer(dir: string, entry: string, env: Record<string, strin
   if (!existsSync(dir)) return { error: `the working directory ${dir} does not exist; the server was not started` }
   const port = await freePort()
   let out = '', exited = false
-  const child = spawn('node', [entry], { cwd: dir, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', PORT: String(port), NODE_ENV: 'test', ...env } as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] })
+  const wrapped = wrapSandboxed(['node', entry], { rw: [dir], net: true }).argv
+  const child = spawn(wrapped[0], wrapped.slice(1), { cwd: dir, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', PORT: String(port), NODE_ENV: 'test', ...env } as NodeJS.ProcessEnv, stdio: ['ignore', 'pipe', 'pipe'] })
   child.stdout.on('data', (d) => { out = (out + d).slice(-3000) }); child.stderr.on('data', (d) => { out = (out + d).slice(-3000) })
   child.on('exit', () => { exited = true })
   child.on('error', (e) => { exited = true; out = (out + `\nspawn error: ${String(e)}`).slice(-3000) })

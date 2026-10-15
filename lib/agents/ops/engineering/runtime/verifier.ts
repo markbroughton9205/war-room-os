@@ -1,3 +1,4 @@
+import { wrapSandboxed } from './sandbox'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -19,7 +20,12 @@ export function makeIndependentVerification(label: string, dir: string, scriptNa
     label, argv,
     run: () => new Promise<CommandRecord>((resolve) => {
       const started = new Date(); const t0 = Date.now()
-      execFile('node', [script, workspaceRoot], { cwd: dir, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', LANG: 'C.UTF-8' } as unknown as NodeJS.ProcessEnv, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+      let exec: string[]
+      try { exec = wrapSandboxed(['node', script, workspaceRoot], { rw: [], ro: [dir, workspaceRoot], cwd: dir }).argv } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        return resolve({ argv, cwd: dir, exitCode: null, timedOut: false, stdout: '', stderr: msg, durationMs: 0, startedAt: started.toISOString(), outputHash: createHash('sha256').update(msg).digest('hex'), refused: msg })
+      }
+      execFile(exec[0], exec.slice(1), { cwd: dir, env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: process.env.HOME ?? '/tmp', LANG: 'C.UTF-8' } as unknown as NodeJS.ProcessEnv, timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
         const clip = (t: string) => redactText(String(t ?? '')).slice(-20_000)
         const out = clip(stdout); const er = clip(stderr)
         const e = err as (NodeJS.ErrnoException & { killed?: boolean; code?: number | string }) | null

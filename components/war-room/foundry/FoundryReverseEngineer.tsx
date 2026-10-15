@@ -129,7 +129,7 @@ export function FoundryReverseEngineer() {
               <textarea data-testid="re-build-request" className="bg-gray-800 p-1" rows={2} placeholder="What to change (at least 20 characters)" value={build.request} onChange={(e) => setBuild({ ...build, request: e.target.value })} />
               <textarea data-testid="re-build-acceptance" className="bg-gray-800 p-1" rows={3} placeholder="Acceptance criteria, one per line" value={build.acceptance} onChange={(e) => setBuild({ ...build, acceptance: e.target.value })} />
               <textarea data-testid="re-build-write" className="bg-gray-800 p-1" rows={2} placeholder={open.handoff.targetFiles.length && open.target.basis === 'FACT' ? `Write scope (default: ${open.handoff.targetFiles.slice(0, 3).join(', ')})` : 'Write scope, one path per line (required)'} value={build.write} onChange={(e) => setBuild({ ...build, write: e.target.value })} />
-              <div><button data-testid="re-build-start" type="button" disabled={busy} className="px-3 py-1 bg-sky-700 disabled:opacity-50" onClick={startBuild}>Start build from analysis</button></div>
+              <div><button data-testid="re-build-start" type="button" disabled={busy} className="px-3 py-1 bg-sky-700 disabled:opacity-50" onClick={startBuild}>Start Build From Analysis</button></div>
             </div>
           </Section>
         </div>

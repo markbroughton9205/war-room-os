@@ -81,10 +81,10 @@ export async function integrate(m: MissionRecord, ws: Workspace, created: string
     out.gates.push({ name, exitCode: r.exitCode ?? -1, summary: r.timedOut ? 'TIMED OUT' : tail || 'no output', ...(r.exitCode !== 0 ? { detail: (r.stdout + '\n' + r.stderr).trim().slice(-6000) } : {}) })
     if (r.exitCode !== 0) ok = false
   }
-  if (gates.typecheck) record('typecheck (tsc --noEmit)', await runTool([node, path.join(wt, 'node_modules', 'typescript', 'bin', 'tsc'), '--noEmit', '-p', '.'], wt, { timeoutMs: 900_000 }))
+  if (gates.typecheck) record('typecheck (tsc --noEmit)', await runTool([node, path.join(wt, 'node_modules', 'typescript', 'bin', 'tsc'), '--noEmit', '-p', '.'], wt, { timeoutMs: 900_000, sandbox: { rw: [wt], ro: [path.join(src.repo, 'node_modules')] } }))
   for (const v of gates.validators) {
     if (!/^[\w./-]+\.ts$/.test(v) || v.includes('..') || !existsSync(path.join(wt, v))) { out.gates.push({ name: `validator ${v}`, exitCode: -1, summary: 'not a repository validator file' }); ok = false; continue }
-    record(`validator ${v}`, await runTool([node, '--loader', './scripts/ts-extension-loader.mjs', '--experimental-transform-types', v], wt, { timeoutMs: 900_000 }))
+    record(`validator ${v}`, await runTool([node, '--loader', './scripts/ts-extension-loader.mjs', '--experimental-transform-types', v], wt, { timeoutMs: 900_000, sandbox: { rw: [wt], ro: [path.join(src.repo, 'node_modules')] } }))
   }
   rmSync(nm, { force: true })
   if (!ok) return out
