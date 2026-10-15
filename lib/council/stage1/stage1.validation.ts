@@ -3,7 +3,7 @@ import { answerSelfKnowledge, collectInstalledState, isSelfKnowledgeQuestion } f
 import { coordinate, planSerialExecution, type RosterMember } from './coordinator'
 import { accountResearch, judgeSource } from './research'
 import { createLedger, deriveTurnStatus, modelActor, record, summarizeLedger, COORDINATOR_ACTOR } from './provenance'
-import { buildAttribution } from './attribution'
+import { buildAttribution, isSkippedFamilyCall } from './attribution'
 import { buildContinuationResponse } from './continuation'
 import { runStage1Turn } from './server'
 import { buildTurnRecord, mergeTurnRecord, readStage1Metadata, upsertTurn, STAGE1_MAX_TURNS } from './record'
@@ -295,6 +295,7 @@ const scattered = [
 const coverAcct3 = accountResearch({ topic: coverTopic, sources: scattered, claims: claimsFromSources(scattered, [0, 1]) })
 applyCoverage(coverAcct3, scattered, coverTopic)
 check('coverage: terms scattered across different sources is PARTIAL, not completed', coverAcct3.status === 'PARTIAL' && /address most/.test(coverAcct3.statusReason), coverAcct3.statusReason)
+check('a silent-skipped family call is never recorded as a turn', isSkippedFamilyCall({ councilStage1Skipped: { family: 'claude' } }) && !isSkippedFamilyCall({ results: [] }))
 check('source counts match accepted evidence', acct.acceptedCount === 2 && acct.verdicts.filter(v => v.accepted).length === 2)
 check('research with every provider failing is FAILED, not complete', accountResearch({ topic: 'x battery', sources: [], claims: [], retrievalError: 'all providers failed' }).status === 'FAILED')
 check('attribution: completed turn with no model recorded is not a model-attributed completion', buildAttribution({ familyDeliberation: { turns: [{ turn_id: 't1', output_message_id: 'm1', agent_identity: 'AURORA', provider_label: 'AURORA', provider_family: 'chatgpt', turn_role: 'council_synthesis', completion_status: 'complete', speaking_order: 1, provider_model: null, backend_provider: null, backend_type: 'LOCAL' }] } }, null).contributions[0].status === 'PARTIAL')

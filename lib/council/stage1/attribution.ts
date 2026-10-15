@@ -157,3 +157,8 @@ export function buildAttribution(payload: AnyRec, decision: CoordinatorDecision 
     toolsInvoked: arr(rec(payload.councilStage1Research)?.toolsInvoked).map(String),
   }
 }
+
+/** A family call the coordinator told to stay silent is not a turn and must never be recorded as one. */
+export function isSkippedFamilyCall(payload: Record<string, unknown>): boolean {
+  return Boolean(payload.councilStage1Skipped)
+}

@@ -256,7 +256,7 @@ import {
 } from '@/lib/council/evidence-board'
 import { maybeHandleGiFrontDoor } from '@/lib/council/gi'
 import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/server'
-import { buildAttribution } from '@/lib/council/stage1/attribution'
+import { buildAttribution, isSkippedFamilyCall } from '@/lib/council/stage1/attribution'
 import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
 import { runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
 import { renderAccountingMarkdown } from '@/lib/council/stage1/research'
@@ -801,7 +801,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         }
       } catch { /* attribution must never break a response */ }
     }
-    if (stage1) {
+    // A family call the coordinator told to stay silent is not a turn: it must not be recorded (it would add phantom failed members).
+    if (stage1 && !isSkippedFamilyCall(payload as Record<string, unknown>)) {
       recordStage1Turn({
         req,
         // Local Home ledger ids are not remote UUIDs and are detached above; Stage 1 persistence

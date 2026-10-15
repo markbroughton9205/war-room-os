@@ -1,5 +1,5 @@
 import 'server-only'
-import { buildAttribution } from './attribution'
+import { buildAttribution, isSkippedFamilyCall } from './attribution'
 import { persistStage1Turn } from './persist'
 import { buildTurnRecord, type Stage1ResearchRecord } from './record'
 import { researchUiFromReport } from './researchUi'
@@ -72,6 +72,7 @@ export function recordStage1Turn(args: {
   void (async () => {
     try {
       const { stage1, payload } = args
+      if (isSkippedFamilyCall(payload)) return
       const self = stage1.finalResponse
       const results = Array.isArray(payload.results) ? (payload.results as AnyRec[]) : []
       const responseText = typeof payload.councilSingleResponse === 'string'
