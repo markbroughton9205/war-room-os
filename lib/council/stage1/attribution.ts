@@ -16,6 +16,9 @@ export type Contribution = {
   provider: string | null
   backendType: 'LOCAL' | 'EXTERNAL' | null
   latencyMs: number | null
+  /** When the member's model turn started/finished (ISO); proves sequential, non-overlapping local model use. */
+  startedAt?: string | null
+  completedAt?: string | null
   respondsTo: string[]
   agreements: string[]
   disagreements: string[]
@@ -69,16 +72,24 @@ export function buildAttribution(payload: AnyRec, decision: CoordinatorDecision 
         member,
         seat: str(t.provider_family),
         role: str(t.turn_role) ?? 'contribution',
-        status: mapStatus(str(t.completion_status)),
+        status: mapStatus(str(t.completion_status)) === 'COMPLETED' && !str(t.provider_model) && !str(t.backend_provider) ? 'PARTIAL' : mapStatus(str(t.completion_status)),
         model: str(t.provider_model),
         provider: str(t.backend_provider),
         backendType: t.backend_type === 'LOCAL' || t.backend_type === 'EXTERNAL' ? t.backend_type : null,
-        latencyMs: null,
+        latencyMs: (() => {
+          const a = Date.parse(String(t.started_at ?? ''))
+          const b = Date.parse(String(t.completed_at ?? ''))
+          return Number.isFinite(a) && Number.isFinite(b) && b >= a ? b - a : null
+        })(),
+        startedAt: str(t.started_at),
+        completedAt: str(t.completed_at),
         respondsTo: respondsTo.filter(r => r !== member),
         agreements: arr(t.direct_agreements).map(String).slice(0, 4),
         disagreements: arr(t.direct_disagreements).map(String).slice(0, 4),
         fallbackFrom: null,
-        failureReason: str(t.failure_reason),
+        failureReason: str(t.failure_reason) ?? (mapStatus(str(t.completion_status)) === 'COMPLETED' && !str(t.provider_model) && !str(t.backend_provider)
+          ? 'no model or provider was recorded for this contribution (deterministic or unattributed output)'
+          : null),
       })
     }
   } else {
@@ -142,7 +153,7 @@ export function buildAttribution(payload: AnyRec, decision: CoordinatorDecision 
     distinctModels,
     sharedModelNote,
     missingMembers,
-    externalSourcesConsulted: 0,
-    toolsInvoked: [],
+    externalSourcesConsulted: arr(rec(rec(payload.councilStage1Research)?.accounting)?.verdicts).filter(v => rec(v)?.accepted === true).length,
+    toolsInvoked: arr(rec(payload.councilStage1Research)?.toolsInvoked).map(String),
   }
 }

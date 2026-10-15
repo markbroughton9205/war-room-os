@@ -8,6 +8,7 @@ import type { DialogueAct, HistoryTurn, TurnReference, TurnUnderstanding } from 
 const SLANG: Array<[RegExp, string]> = [
   [/\bwhat'?s\b/g, 'what is'],
   [/\bwhats\b/g, 'what is'],
+  [/\bwhatz\b|\bwuts?\b|\bwut\b|\bwats\b/g, 'what is'],
   [/\bwat\b/g, 'what'],
   [/\bwha\b/g, 'what'],
   [/\bhow'?s\b/g, 'how is'],
@@ -64,10 +65,13 @@ function editDistance(a: string, b: string, max: number): number {
 function repairWord(word: string): string | null {
   if (word.length < 5) return null
   if (DOMAIN_WORDS.includes(word)) return null
-  const max = word.length >= 8 ? 2 : 1
+  // A typo almost never changes the first letter; one edit for ordinary words, two only for long ones.
+  // (An unrestricted distance turned "boundary" into "foundry" and silently changed the Commander's meaning.)
+  const max = word.length >= 10 ? 2 : 1
   let best: string | null = null
   let bestD = max + 1
   for (const cand of DOMAIN_WORDS) {
+    if (cand[0] !== word[0]) continue
     const d = editDistance(word, cand, max)
     if (d < bestD) { bestD = d; best = cand }
   }
@@ -79,6 +83,7 @@ export function normalizeCommanderText(raw: string): { text: string; notes: stri
   let text = raw.toLowerCase().replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/\s+/g, ' ').trim()
   // glued product names
   text = text.replace(/\bwarroom\b/g, () => { notes.push('warroom -> war room'); return 'war room' })
+  text = text.replace(/\bwar[ -]+(?:rom|romm|rooom|roomm|rm|rum|roon|rrom)\b/g, m => { notes.push(`${m} -> war room`); return 'war room' })
   text = text.replace(/\bhvs\b/g, () => { notes.push('hvs -> higher vision studios'); return 'higher vision studios' })
   for (const [re, rep] of SLANG) {
     text = text.replace(re, m => { if (m !== rep) notes.push(`${m} -> ${rep}`); return rep })
@@ -100,7 +105,10 @@ const TOPIC_PATTERNS: Array<[string, RegExp]> = [
   ['research', /\bresearch\b/],
   ['memory', /\b(memory|remember)\b/],
   ['architecture', /\barchitecture\b/],
+  ['sandbox', /\bsandbox(?:es|ed|ing)?\b/],
 ]
+/** Topics that name a War Room subject on their own (a modifier like "sandbox" does not). */
+const PRIMARY_TOPICS = new Set(['war room', 'divine rising council', 'foundry', 'terra', 'higher vision studios', 'research', 'memory', 'architecture'])
 
 const CORRECTION_RE = [
   /^(no|nope|nah|wrong|not quite|incorrect)\b[\s,.!:;-]*/,
@@ -123,6 +131,10 @@ const FOLLOW_STARTER_RE = /^(why|how so|and|but|so|what about|how about|really|t
 /** Only these bare phrasings are recovered deterministically; anything with more content passes through. */
 export const BARE_CONTINUATION_RE = /^(please )?(continue|resume|pick up|carry on|keep going)( (where|from where) (we|i) (left off|stopped|were|left)| from (earlier|last time))?[\s.!?]*$/i
 const SOCIAL_RE = /^(hi+|hello|hey+|yo+|sup|good (morning|afternoon|evening)|thanks|thank you|thanks a lot|cool|nice|ok(ay)?|got it|gm)\b[\s!.?]*$/
+/** Leading filler that carries no meaning ("yo", "ok so", "hey"); stripped only for act detection. */
+const FILLER_RE = /^(?:(?:yo+|hey+|hi+|hello|ok(?:ay)?|so|well|um+|uh+|hmm+|bro|dude|man|alright|like|also|and)[\s,!.:;-]+)+/
+/** The Commander asks what Council said earlier in this conversation. */
+const RECALL_RE = /\b(?:what (?:did|have|had|were) (?:you|we|they|aurora|orion|lumen|pulsar|nova|phoenix)(?: all)? (?:say|said|tell|told|mention|mentioned|answer|answered|discuss|discussed|cover|covered|talk|talking|suggest|suggested)|what (?:was|were) (?:you|they) (?:saying|talking)|(?:remind me|repeat|recap)\b.*\b(?:what|that|earlier|before|you said)|say (?:that|it) again|(?:earlier|before|previously|last time)(?: you| they)? (?:said|told|mentioned)|what (?:was|were) (?:the|your) (?:last|previous|earlier) (?:answer|reply|response))\b/
 const REFERENCE_RE = /\b(the other one|the other|that one|this one|those|these|that|it|them|the same|same thing|the first one|the second one|the last one|former|latter)\b/
 
 function topicsIn(text: string): string[] {
@@ -142,6 +154,17 @@ function enumeratedOptions(text: string): string[] {
   const t = text.toLowerCase()
   for (const [name, re] of TOPIC_PATTERNS) if (re.test(t)) found.push(name)
   return found.filter(x => x !== 'war room')
+}
+
+/** Topics of the most recent Commander turn that named one: the subject the thread is about. */
+function threadTopics(history: HistoryTurn[]): string[] {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const h = history[i]
+    if (h.role !== 'commander') continue
+    const t = topicsIn(normalizeCommanderText(h.text).text)
+    if (t.some(x => PRIMARY_TOPICS.has(x) && x !== 'war room')) return t.filter(x => x !== 'war room' || t.length === 1)
+  }
+  return []
 }
 
 function resolveReferences(norm: string, history: HistoryTurn[]): TurnReference[] {
@@ -168,9 +191,15 @@ function resolveReferences(norm: string, history: HistoryTurn[]): TurnReference[
     refs.push({ phrase, resolvedTo: seen.length >= 2 ? seen[1] : null, basis: seen.length >= 2 ? 'previous_commander_topic' : 'none' })
     return refs
   }
-  const cmdTopics = prevCommander ? topicsIn(normalizeCommanderText(prevCommander.text).text).filter(t => t !== 'war room') : []
+  const cmdTopics = prevCommander ? topicsIn(normalizeCommanderText(prevCommander.text).text).filter(t => t !== 'war room' && PRIMARY_TOPICS.has(t)) : []
   if (cmdTopics.length) {
     refs.push({ phrase, resolvedTo: cmdTopics[0], basis: 'previous_commander_topic' })
+    return refs
+  }
+  // The latest Commander turn named no subject (a correction, a bare follow-up): the thread's subject still holds.
+  const threadSubject = threadTopics(history).filter(t => t !== 'war room' && PRIMARY_TOPICS.has(t))
+  if (threadSubject.length) {
+    refs.push({ phrase, resolvedTo: threadSubject[0], basis: 'previous_commander_topic' })
     return refs
   }
   const memTopics = prevMember ? topicsIn(normalizeCommanderText(prevMember.text).text).filter(t => t !== 'war room') : []
@@ -188,8 +217,11 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
   const correctionRemainder = norm.replace(/^(no|nope|nah|wrong|not quite|incorrect)\b[\s,.!:;-]*/, '')
   const correctionCarriesCommand = isCorrection && COMMAND_VERB_RE.test(correctionRemainder)
   const hasQuestionMark = /\?\s*$/.test(input.text.trim())
-  const questionLike = hasQuestionMark || QUESTION_START_RE.test(norm)
-  const commandLike = COMMAND_VERB_RE.test(norm) && !hasQuestionMark
+  const stripped = norm.replace(FILLER_RE, '')
+  const core = stripped.length >= 3 ? stripped : norm
+  const questionLike = hasQuestionMark || QUESTION_START_RE.test(core)
+  const commandLike = COMMAND_VERB_RE.test(core) && !hasQuestionMark
+  const recall = RECALL_RE.test(norm) && history.length > 0
   const hasRef = REFERENCE_RE.test(norm)
   const ownTopics = topicsIn(norm)
   const shortTurn = words.length <= 6
@@ -200,9 +232,10 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
   else if (isCorrection) act = 'correction'
   else if (continuation && bareContinuation) act = 'continuation'
   else if (commandLike) act = 'command'
-  else if (shortTurn && ownTopics.length === 0 && (hasRef || FOLLOW_STARTER_RE.test(norm) || words.length <= 2)) act = 'follow_up'
+  else if (recall) act = 'question'
+  else if (shortTurn && !ownTopics.some(t => PRIMARY_TOPICS.has(t)) && (hasRef || FOLLOW_STARTER_RE.test(norm) || words.length <= 2)) act = 'follow_up'
   else if (questionLike) act = 'question'
-  else if (shortTurn && history.length > 0 && ownTopics.length === 0) act = 'follow_up'
+  else if (shortTurn && history.length > 0 && !ownTopics.some(t => PRIMARY_TOPICS.has(t))) act = 'follow_up'
   else act = 'statement'
 
   const references = hasRef && history.length ? resolveReferences(norm, history) : []
@@ -218,6 +251,16 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
   }
 
   let topics = ownTopics
+  // A correction refines the subject the thread is already on; it only replaces it when it names another subject itself.
+  if (act === 'correction' && !ownTopics.some(t => PRIMARY_TOPICS.has(t))) {
+    const subject = threadTopics(history)
+    if (subject.length) topics = Array.from(new Set([...subject, ...ownTopics]))
+  }
+  // A short turn that only names a modifier ("and the sandbox part?") stays on the thread's subject.
+  if ((act === 'follow_up' || (act === 'question' && hasRef)) && shortTurn && !ownTopics.some(t => PRIMARY_TOPICS.has(t)) && history.length && !references.some(r => r.resolvedTo)) {
+    const subject = threadTopics(history)
+    if (subject.length) topics = Array.from(new Set([...subject, ...ownTopics]))
+  }
   if (!topics.length) {
     const resolved = references.map(r => r.resolvedTo).filter((x): x is string => Boolean(x))
     if (resolved.length) topics = resolved
@@ -250,6 +293,7 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
     references,
     correction,
     continuation: bareContinuation,
+    recall,
     clarification,
     normalizationNotes: notes,
   }

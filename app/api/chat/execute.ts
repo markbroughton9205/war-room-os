@@ -204,6 +204,7 @@ import {
   applyPipelineProvenance,
   buildDeliberationPrompt,
   buildSynthesisContextBlock,
+  completedPrimaryTurns,
   createDeliberationProgressRecorder,
   createDeliberationSession,
   deriveFamilyDeliberationRoundOutcome,
@@ -257,6 +258,8 @@ import { maybeHandleGiFrontDoor } from '@/lib/council/gi'
 import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/server'
 import { buildAttribution } from '@/lib/council/stage1/attribution'
 import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
+import { runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
+import { renderAccountingMarkdown } from '@/lib/council/stage1/research'
 import { recordStage1Turn } from '@/lib/council/stage1/turn'
 import { readStage1Turns } from '@/lib/council/stage1/persist'
 import { BARE_CONTINUATION_RE } from '@/lib/council/stage1/language'
@@ -771,6 +774,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   // Council Stage 1 analysis; assigned once the decree text is known (declared here so every
   // withTrace call site, including early ones, can read it without a temporal dead zone).
   let stage1: Stage1TurnResult | null = null
+  // Holder object: assigned inside the deliberation closure and read after it (a plain `let` is narrowed to null).
+  const stage1ResearchState: { run: Stage1ResearchRun | null } = { run: null }
   const withTrace = <T extends Record<string, unknown>>(payload: T) => {
     signal.throwIfAborted()
     try {
@@ -995,7 +1000,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         decision: stage1.decision,
         provenance: stage1.provenance,
         claims: fr.claims,
-        responder: { kind: 'deterministic', label: fr.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : 'Clarification', model: null },
+        responder: { kind: 'deterministic', label: fr.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : fr.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : 'Clarification', model: null },
       },
     }))
   }
@@ -1036,7 +1041,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     || classifiedTurn.intent === 'SOCIAL_CHECKIN'
     || ((classifiedTurn.intent === 'GREETING' || classifiedTurn.intent === 'STATUS_CHECK') && classifiedTurn.depth === 'FAST')
   const profile = isLightweightGreeting || !shouldInjectCommanderProfile(classifiedTurn) ? '' : rawProfileFromClient
-  const familyDeliberationRequested = familyDeliberationRequestedRaw && shouldRunFamilyDeliberation(classifiedTurn)
+  // Council Stage 1: a question the coordinator gave to exactly one member is run as one real attributed model turn even when
+  // the turn classifier called it FAST (the legacy fast path makes no member call and records a correct answer as FAILED).
+  const stage1SoloOwned = !isLightweightGreeting && !stage1?.finalResponse && !councilCommand.directInvocation && councilCommand.mode !== 'attendance'
+    && stage1?.decision.route === 'direct_member' && stage1.decision.members.length === 1
+  const familyDeliberationRequested = (familyDeliberationRequestedRaw && shouldRunFamilyDeliberation(classifiedTurn)) || stage1SoloOwned
   const nebulaRoundPlan = createCouncilRoundPlan({
     roundId: councilLogicalRequestId || councilTrace.councilTraceId,
     commanderMessage: raelDirectiveText,
@@ -1055,6 +1064,17 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         .filter(seat => nebulaSelectedSeatsBase.includes(seat))
     : []
   const stage1Narrowed = stage1NarrowedSeats.length > 0
+  // Council Stage 1: a substantive or research discussion the coordinator assigned to two or more members is executed
+  // as a real sequential discussion (each member is a model turn that sees the earlier contributions), not handed to
+  // the deterministic evidence-board pipeline, which makes no member model calls.
+  const stage1DiscussionRoute = stage1 && !stage1.finalResponse ? stage1.decision.route : null
+  const stage1DiscussionSeats = !astraMission && (familyDeliberationRequestedRaw || stage1SoloOwned)
+    && (stage1DiscussionRoute === 'group_discussion' || stage1DiscussionRoute === 'small_group' || stage1DiscussionRoute === 'research' || stage1DiscussionRoute === 'direct_member')
+    && (stage1?.decision.members.length ?? 0) >= 1
+    ? seatsForParticipatingAgents(stage1!.decision.members.map(m => m.toLowerCase() as NebulaAgentId))
+    : []
+  const stage1OwnsDiscussion = stage1DiscussionSeats.length >= 1 && familyDeliberationRequested
+  const stage1ResearchRequested = stage1OwnsDiscussion && stage1DiscussionRoute === 'research'
   const nebulaSelectedSeats = stage1Narrowed ? stage1NarrowedSeats : nebulaSelectedSeatsBase
   if (stage1Narrowed) {
     const keepIds = nebulaRoundPlan.participatingAgentIds.filter(id =>
@@ -2126,7 +2146,17 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     progressTracker: CouncilProgressRuntimeTracker,
   ): Promise<DeliberationSession> => {
     const progress = createDeliberationProgressRecorder(progressTracker)
-    const evidenceReferences = evidenceReferencesFromLiveResearch(liveResearchPacket)
+    if (stage1ResearchRequested && stage1 && !stage1ResearchState.run) {
+      stage1ResearchState.run = await runStage1Research({
+        topic: stage1.understanding.normalized,
+        decreeText: raelDirectiveText,
+        conversationId,
+      })
+    }
+    const evidenceReferences = [
+      ...evidenceReferencesFromLiveResearch(liveResearchPacket),
+      ...(stage1ResearchState.run?.evidenceRefs ?? []),
+    ]
     const session = createDeliberationSession({
       sessionId: conversationId,
       roundId: councilLogicalRequestId,
@@ -2330,6 +2360,94 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       stateChange: 'Floor-controlled sequential families using configured providers only.',
     })
 
+    if (stage1OwnsDiscussion) {
+      // Council Stage 1 real discussion: members the coordinator chose speak one at a time (one local model at a
+      // time), each sees what was already said and must respond to it; AURORA integrates and keeps disagreement.
+      const synthSeat: CouncilSingleFamily = 'chatgpt'
+      const seats = Array.from(new Set(stage1DiscussionSeats)).filter((seat): seat is CouncilSingleFamily => seat !== 'baby' && seat !== 'bridge_architect')
+      if (seats.length === 1) {
+        // One competent member was enough: a single real model turn, attributed to the model that produced it.
+        const only = seats[0]
+        const soloTurn = await callTurn(only, 'direct_response', 1, {
+          identityId: nebulaAgentForSeat(only)?.id ?? null,
+          inputMessageIds: [session.commander_message_id],
+          sharePriors: false,
+        })
+        session.synthesis_turn_id = soloTurn.turn_id
+        session.completion_status = soloTurn.completion_status === 'complete' ? 'complete' : 'failed'
+        session.diagnostics.push(`Council Stage 1 single-member turn: ${soloTurn.provider_label}.`)
+        applyPipelineProvenance(session)
+        progress.closeIfTerminal()
+        return session
+      }
+      const primarySeats = seats.filter(seat => seat !== synthSeat && seat !== 'red_team').slice(0, 4)
+      const challengeSeat = seats.includes('red_team') ? ('red_team' as CouncilSingleFamily) : null
+      const research = stage1ResearchState.run
+      const evidenceBlock = research
+        ? [
+            `STAGE 1 RESEARCH: ${research.accounting.acceptedCount} accepted source(s), ${research.accounting.rejectedCount} rejected, status ${research.accounting.status}.`,
+            ...research.accounting.verdicts.flatMap((v, i) => v.accepted
+              ? [`[s1-evidence-${i + 1}] ${v.title} — ${v.url}`]
+              : []),
+            research.accounting.conflicts.length
+              ? `Accepted sources disagree: ${research.accounting.conflicts.map(c => `${c.claimId} (for: ${c.for.join('; ')} | against: ${c.against.join('; ')})`).join(' ; ')}. Say so; do not pick one silently.`
+              : 'Cite only the accepted sources listed above; anything else is your own judgment and must be labelled so.',
+          ].join('\n')
+        : ''
+      let order = 0
+      const spoken: string[] = []
+      let lastPrimary: DeliberationTurn | null = null
+      for (const seat of primarySeats) {
+        order += 1
+        const identity = nebulaAgentForSeat(seat)?.id ?? null
+        const turn = await callTurn(seat, 'direct_response', order, {
+          identityId: identity,
+          inputMessageIds: [session.commander_message_id, ...completedOutputIds()],
+          extraContextBlock: [
+            evidenceBlock,
+            spoken.length
+              ? `Members who already spoke in this discussion: ${spoken.join(', ')}. Respond to what they actually said: name where you agree, where you disagree and why. Do not repeat them.`
+              : 'You speak first. Give your position from your own role; later members will respond to you.',
+            'Speak as yourself only. Do not write other members\' turns and do not claim live research beyond the sources listed.',
+          ].filter(Boolean).join('\n'),
+        })
+        spoken.push(turn.provider_label)
+        if (turn.completion_status === 'complete') lastPrimary = turn
+      }
+      if (challengeSeat && lastPrimary) {
+        order += 1
+        await callTurn(challengeSeat, 'red_team_challenge', order, {
+          identityId: nebulaAgentForSeat(challengeSeat)?.id ?? null,
+          targetTurn: lastPrimary,
+          challengeTargetIds: completedPrimaryTurns(session).map(t => t.output_message_id).filter((id): id is string => Boolean(id)),
+          inputMessageIds: [session.commander_message_id, ...completedOutputIds()],
+          extraContextBlock: evidenceBlock,
+        })
+      }
+      const gate = evaluateSynthesisGate(session)
+      order += 1
+      const synthesis = gate.canSynthesize
+        ? await callTurn(synthSeat, 'council_synthesis', order, {
+            identityId: nebulaAgentForSeat(synthSeat)?.id ?? null,
+            inputMessageIds: synthesisInputMessageIds(session),
+            extraContextBlock: [
+              buildSynthesisContextBlock(session),
+              evidenceBlock,
+              'Keep real disagreement visible and attribute positions to the member who held them. Do not invent a member who did not speak.',
+            ].filter(Boolean).join('\n'),
+          })
+        : appendUnresolvedTurn(synthSeat, 'council_synthesis', order, gate.reasons.join(' ') || 'no completed member contribution to synthesize')
+      session.synthesis_turn_id = synthesis.turn_id
+      const primariesDone = session.turns.filter(t => t.turn_role !== 'council_synthesis').every(t => t.completion_status === 'complete')
+      session.completion_status = synthesis.completion_status === 'complete'
+        ? (primariesDone ? 'complete' : 'partial')
+        : 'failed'
+      session.diagnostics.push(`Council Stage 1 discussion: ${spoken.join(', ') || 'no member'} then ${displayFamilyName(synthSeat)}${research ? `; research ${research.accounting.status} (${research.accounting.acceptedCount} accepted / ${research.accounting.rejectedCount} rejected)` : ''}.`)
+      applyPipelineProvenance(session)
+      progress.closeIfTerminal()
+      return session
+    }
+
     if (astraMission) {
       let speakingOrder = 0
       const swarm = await runIndependentScoutSwarm({
@@ -2459,6 +2577,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       shouldDispatchEvidenceBoardCouncil(ebcClassification.mission_class)
       && !directFamily
       && !isAttendanceFlow
+      && !stage1OwnsDiscussion
       && (!familyDeliberationRequested || evidenceBoardRound)
 
     if (!engine03OwnsExecution) {
@@ -2712,7 +2831,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         scoutSwarm: familyDeliberation.scout_swarm ?? null,
         roundHealth,
         councilRound: nebulaRound,
-        councilSingleResponse: synthesis?.full_response ?? '',
+        councilSingleResponse: `${synthesis?.full_response ?? ''}${stage1ResearchState.run ? `\n\n${renderAccountingMarkdown(stage1ResearchState.run!.accounting)}\nTools that ran: ${stage1ResearchState.run!.toolsInvoked.join(', ') || 'none'}.` : ''}`,
         evidenceBoardCouncil,
         councilIntelligence,
         hardStop: false,
@@ -2723,6 +2842,25 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         durableRound,
         priorRoundId: priorSessionIntelligence?.latestRoundId ?? null,
         ...liveResearchJson(),
+        ...(stage1ResearchState.run
+          ? {
+              councilStage1Research: {
+                accounting: stage1ResearchState.run!.accounting,
+                toolsInvoked: stage1ResearchState.run!.toolsInvoked,
+                providersFailed: stage1ResearchState.run!.providersFailed,
+                durationMs: stage1ResearchState.run!.durationMs,
+                error: stage1ResearchState.run!.error,
+              },
+              liveResearchAttempted: true,
+              liveResearchUi: {
+                mode: stage1ResearchState.run!.accounting.status === 'FAILED' ? 'unavailable' : stage1ResearchState.run!.accounting.status === 'COMPLETED' ? 'verified' : 'partial',
+                sourcesCount: stage1ResearchState.run!.accounting.acceptedCount,
+                label: `Research ${stage1ResearchState.run!.accounting.status.toLowerCase()} — ${stage1ResearchState.run!.accounting.acceptedCount} accepted, ${stage1ResearchState.run!.accounting.rejectedCount} rejected`,
+                councilPhase: 'model_running' as const,
+                responseCompletion: 'complete' as const,
+              },
+            }
+          : {}),
       }, createActualSelectionSnapshot({
         executionMode: 'family_to_family_deliberation',
         actualSelectedFamilies: deliberationFamilies,

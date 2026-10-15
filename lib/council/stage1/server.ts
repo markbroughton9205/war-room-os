@@ -12,6 +12,7 @@ import { coordinate, type RosterMember } from './coordinator'
 import { COORDINATOR_ACTOR, createLedger, deterministicActor, record, summarizeLedger } from './provenance'
 import { understandTurn } from './language'
 import { buildContinuationResponse } from './continuation'
+import { answerRecall } from './recall'
 import type { Stage1TurnRecord } from './record'
 import type { CoordinatorDecision, HistoryTurn, KnowledgeClaim, Stage1Status, TurnUnderstanding } from './types'
 
@@ -98,7 +99,7 @@ export type Stage1TurnResult = {
     text: string
     status: Stage1Status
     claims: KnowledgeClaim[]
-    mode: 'stage1_self_knowledge' | 'stage1_clarification'
+    mode: 'stage1_self_knowledge' | 'stage1_clarification' | 'stage1_recall'
   }
   /** Decree text with resolved references attached; used by downstream routing. */
   effectiveText: string
@@ -136,7 +137,12 @@ export function runStage1Turn(input: {
     `route=${decision.route}; members=${decision.members.join(',') || 'none'}; ${decision.reasons.join('; ')}`, 'COMPLETED')
 
   let finalResponse: Stage1TurnResult['finalResponse'] = null
-  if (decision.route === 'clarify' && understanding.clarification) {
+  if (understanding.recall && decision.route !== 'handoff') {
+    const rc = answerRecall(understanding, trimmed)
+    finalResponse = { text: rc.text, status: 'COMPLETED', claims: [], mode: 'stage1_recall' }
+    record(ledger, deterministicActor('recall', 'Conversation record (deterministic)'), 'answer',
+      `${rc.found} earlier member reply(ies) quoted; external research: none`, 'COMPLETED')
+  } else if (decision.route === 'clarify' && understanding.clarification) {
     finalResponse = { text: understanding.clarification, status: 'WAITING', claims: [], mode: 'stage1_clarification' }
     record(ledger, deterministicActor('clarify', 'Clarification (deterministic)'), 'ask', understanding.clarification, 'WAITING')
   } else if (decision.route === 'self_knowledge' && isSelfKnowledgeQuestion(understanding)) {

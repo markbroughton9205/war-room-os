@@ -8,6 +8,8 @@ import { buildContinuationResponse } from './continuation'
 import { runStage1Turn } from './server'
 import { buildTurnRecord, mergeTurnRecord, readStage1Metadata, upsertTurn, STAGE1_MAX_TURNS } from './record'
 import { researchUiFromReport } from './researchUi'
+import { applyCoverage, claimsFromSources, sourcesFromRouter } from './researchRun'
+import { answerRecall } from './recall'
 import type { HistoryTurn } from './types'
 
 let pass = 0
@@ -206,7 +208,9 @@ const thread = [{ sender: "RA'EL", content: 'tell me about foundry' }, { sender:
 const t1 = runStage1Turn({ turnId: 'x1', text: "no, that's not what i meant", thread, state: STATE })
 check('bare correction is acknowledged not defended', t1.finalResponse?.status === 'WAITING' && /setting aside my previous reading/.test(t1.finalResponse.text), t1.finalResponse?.text)
 const t2 = runStage1Turn({ turnId: 'x2', text: "no, i meant terra", thread, state: STATE })
-check('correction with content goes to members with context', t2.finalResponse === null && /Commander meant: terra/.test(t2.effectiveText), t2.effectiveText)
+check('correction naming a War Room subject is answered from War Room knowledge, acknowledging the correction', t2.finalResponse?.mode === 'stage1_self_knowledge' && /you meant: terra/.test(t2.finalResponse.text) && /Terra is the earth-intelligence/.test(t2.finalResponse.text), t2.finalResponse?.text)
+const t2b = runStage1Turn({ turnId: 'x2b', text: 'no, i meant the persistence boundary between sessions and missions', thread, state: STATE })
+check('correction with non-War-Room content goes to members with context', t2b.finalResponse === null && /Commander meant: the persistence boundary/.test(t2b.effectiveText), t2b.effectiveText)
 const prior = [buildTurnRecord({ turnId: 'p1', decree: 'design the persistence boundary', responseText: 'we should isolate', mode: null, understanding: understandTurn({ text: 'design the persistence boundary' }), decision: dArch, attribution: att })]
 const t3 = runStage1Turn({ turnId: 'x3', text: 'continue where we stopped', thread: [], state: STATE, priorTurns: prior })
 check('continuation recovers last turn', /design the persistence boundary/.test(t3.finalResponse?.text ?? '') && /PARTIAL/.test(t3.finalResponse?.text ?? ''))
@@ -230,6 +234,57 @@ check('OK without backend is not COMPLETED', buildAttribution({ results: [{ fami
 check('same-host sources are not corroboration', researchUiFromReport({ sourcesUnavailable: false, unknowns: [], sources: [
   { title: 'a', url: 'https://x.example/1', snippet: '', provider: 'p', freshnessStatus: 'unknown', confidence: 1, evidenceLabel: 'LIVE_SIGNAL_BACKED', publishedAt: null },
   { title: 'b', url: 'https://www.x.example/2', snippet: '', provider: 'p', freshnessStatus: 'unknown', confidence: 1, evidenceLabel: 'LIVE_SIGNAL_BACKED', publishedAt: null }] }).mode === 'partial')
+
+{
+// --- installed-acceptance regressions (found by driving the real installed Council UI)
+const slang = understandTurn({ text: 'yo wats foundry do in war rom' })
+check('slang+typo: wats/rom repaired', /what is foundry do in war room/.test(slang.normalized), slang.normalized)
+check('leading filler does not hide a question', slang.act === 'question' && slang.topics.includes('foundry'), `${slang.act} ${slang.topics}`)
+const slangTurn = runStage1Turn({ turnId: 'y1', text: 'yo wats foundry do in war rom', thread: [], state: STATE })
+check('slang question is answered from War Room knowledge, no member call', slangTurn.finalResponse?.mode === 'stage1_self_knowledge' && slangTurn.decision.members.length === 0, slangTurn.decision.route)
+check('typo repair never changes the first letter (boundary stays boundary)', normalizeCommanderText('the persistence boundary design').text.includes('boundary'))
+const thread2 = [
+  { sender: "RA'EL", content: 'yo wats foundry do in war rom' },
+  { sender: 'AURORA', content: 'Foundry runs engineering missions in isolated workspaces. Terra and HVS are separate sections.' },
+  { sender: "RA'EL", content: 'and the sandbox part?' },
+  { sender: 'AURORA', content: 'The sandbox keeps generated code inside the workspace.' },
+]
+const corr = runStage1Turn({ turnId: 'y2', text: 'no i meant the build sandbox not the browser one', thread: thread2, state: STATE })
+check('correction keeps the thread subject', corr.understanding.topics.includes('foundry') && corr.understanding.topics.includes('sandbox'), corr.understanding.topics.join(','))
+check('correction answered from knowledge incl. sandbox', corr.finalResponse?.mode === 'stage1_self_knowledge' && /sandbox/i.test(corr.finalResponse.text) && /you meant/.test(corr.finalResponse.text), corr.finalResponse?.text)
+const threadAfterCorr = [...thread2, { sender: "RA'EL", content: 'no i meant the build sandbox not the browser one' }, { sender: 'AURORA', content: 'Foundry runs model-generated code inside an operating-system sandbox.' }]
+const rec1 = runStage1Turn({ turnId: 'y3', text: 'what did u say before about it', thread: threadAfterCorr, state: STATE })
+check('back-reference resolves to the thread subject, not a member-mentioned one', rec1.understanding.references[0]?.resolvedTo === 'foundry', JSON.stringify(rec1.understanding.references))
+check('recall is answered from the conversation record', rec1.finalResponse?.mode === 'stage1_recall' && /sandbox/i.test(rec1.finalResponse.text) && !rec1.decision.externalResearch, rec1.finalResponse?.text)
+check('recall never invents when nothing was said', /no earlier member reply/.test(answerRecall(understandTurn({ text: 'what did you say before' }), []).text))
+check('recall without history is not a recall turn', understandTurn({ text: 'what did you say before' }).recall !== true)
+
+const routerFixture = {
+  researchEngine: { attempted: true, results: [
+    { providerId: 'arxiv', ok: true, documents: [
+      { canonicalUrl: 'https://arxiv.org/abs/1', title: 'Sodium-ion battery cathodes energy density', contentSnippet: 'Sodium-ion battery cells reach about 120 Wh/kg energy density in this study of cathode materials and cells.' },
+      { canonicalUrl: 'https://arxiv.org/abs/2', title: 'Lithium iron phosphate battery cells energy density', contentSnippet: 'Lithium iron phosphate battery cells reach about 190 Wh/kg energy density; sodium-ion battery cells are lower.' }] },
+    { providerId: 'crossref', ok: false, error: 'timeout' }] },
+  tavily: { ok: false, results: [], error: 'TAVILY_API_KEY missing' },
+  publicRss: { ok: true, results: [{ title: 'Court refuses to stop protest', url: 'https://news.example/protest', snippet: 'Supreme Court issues notices on protest-related petitions in the capital.' }] },
+}
+const mapped = sourcesFromRouter(routerFixture as never)
+check('router mapping: considered sources and failed providers recorded', mapped.sources.length === 3 && mapped.failed.some(f => f.provider === 'crossref') && mapped.failed.some(f => f.provider === 'tavily'))
+const acct0 = accountResearch({ topic: 'sodium-ion battery energy density versus lithium iron phosphate cells', sources: mapped.sources, claims: [] })
+check('off-topic RSS is rejected, not counted', acct0.acceptedCount === 2 && acct0.rejectedCount === 1 && /off-topic/.test(acct0.verdicts[2].reason), JSON.stringify(acct0.verdicts.map(v => v.accepted)))
+const claims = claimsFromSources(mapped.sources, [0, 1])
+const acct = accountResearch({ topic: 'sodium-ion battery energy density versus lithium iron phosphate cells', sources: mapped.sources, claims })
+check('numeric disagreement between accepted sources is a CONFLICT', acct.conflicts.length === 1 && acct.claims.some(c => c.label === 'CONFLICTING'), JSON.stringify(acct.conflicts))
+const coverTopic = 'sodium-ion battery energy density versus lithium iron phosphate cells'
+const coverSources = [{ url: 'https://a.example/1', title: 'Sodium-ion battery cells', excerpt: 'Sodium-ion battery cells are described in this review of lithium iron phosphate and other cathode chemistries.', provider: 'arxiv' }]
+const coverAcct = accountResearch({ topic: coverTopic, sources: coverSources, claims: [{ id: 'S1', text: 'a', supports: [0], contradicts: [] }] })
+check('accounting alone says COMPLETED for an attested source', coverAcct.status === 'COMPLETED')
+applyCoverage(coverAcct, coverSources, coverTopic)
+check('coverage: accepted sources that miss a key term make the run PARTIAL, naming the term', coverAcct.status === 'PARTIAL' && /density/.test(coverAcct.statusReason), coverAcct.statusReason)
+check('source counts match accepted evidence', acct.acceptedCount === 2 && acct.verdicts.filter(v => v.accepted).length === 2)
+check('research with every provider failing is FAILED, not complete', accountResearch({ topic: 'x battery', sources: [], claims: [], retrievalError: 'all providers failed' }).status === 'FAILED')
+check('attribution: completed turn with no model recorded is not a model-attributed completion', buildAttribution({ familyDeliberation: { turns: [{ turn_id: 't1', output_message_id: 'm1', agent_identity: 'AURORA', provider_label: 'AURORA', provider_family: 'chatgpt', turn_role: 'council_synthesis', completion_status: 'complete', speaking_order: 1, provider_model: null, backend_provider: null, backend_type: 'LOCAL' }] } }, null).contributions[0].status === 'PARTIAL')
+}
 
 console.log(`council-stage1 validation: ${pass} passed, ${failures.length} failed`)
 if (failures.length) { for (const f of failures) console.error('FAIL ' + f); process.exit(1) }

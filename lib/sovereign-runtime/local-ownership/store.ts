@@ -775,12 +775,18 @@ export class LocalOwnershipStore {
     const id = newPrefixedId('lmsg', 16)
     const ts = nowIso()
     const metadata = input.metadata ?? {}
+    // Attribution recorded by the Council turn is carried into the indexed columns so a reopened conversation
+    // still says which model/provider produced a member message (it was always in metadata, never in the columns).
+    const metaStr = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null)
+    const actualModel = input.role === 'assistant' ? metaStr(metadata.providerModel) : null
+    const actualProvider = input.role === 'assistant' ? (metaStr(metadata.backendProvider) ?? metaStr(metadata.backendRuntime)) : null
+    const localOrRemote = metadata.backendType === 'EXTERNAL' ? 'REMOTE' : 'LOCAL'
     this.db.prepare(
       `INSERT INTO local_message
        (id, conversation_id, owner_local_identity_id, role, content, created_at,
         actual_provider, actual_model, local_or_remote, fallback_used, intelligence_class, family, metadata_json)
-       VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 'LOCAL', 0, 'council', ?, ?)`,
-    ).run(id, conversationId, ownerId, input.role, String(input.content || ''), ts, input.family ?? null, JSON.stringify(metadata))
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'council', ?, ?)`,
+    ).run(id, conversationId, ownerId, input.role, String(input.content || ''), ts, actualProvider, actualModel, localOrRemote, input.family ?? null, JSON.stringify(metadata))
     const preview = String(input.content || '').trim().slice(0, 160)
     const existing = this.getCouncilConversation(ownerId, conversationId)
     const prev = existing?.metadata ?? {}

@@ -60,6 +60,8 @@ export type TurnUnderstanding = {
     replacement: string | null
   }
   continuation: boolean
+  /** The Commander asks what Council said earlier in this conversation (answered from the record, no model). */
+  recall?: boolean
   /** Set only when missing information materially affects execution. */
   clarification: string | null
   /** Fixes applied to the Commander's wording, for transparency. */

@@ -9,6 +9,29 @@ type AnyRec = Record<string, unknown>
 const rec = (v: unknown): AnyRec | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as AnyRec) : null)
 
 export function researchRecordFromPayload(payload: AnyRec): Stage1ResearchRecord | null {
+  const run = rec(payload.councilStage1Research)
+  const acct = rec(run?.accounting)
+  if (acct && Array.isArray(acct.verdicts)) {
+    const verdicts = acct.verdicts as AnyRec[]
+    const accepted = verdicts.filter(v => v.accepted === true).length
+    const unknowns = Array.isArray(acct.unresolved) ? (acct.unresolved as unknown[]).map(String).slice(0, 8) : []
+    const status = String(acct.status ?? 'FAILED')
+    return {
+      mode: status === 'FAILED' ? 'unavailable' : status === 'COMPLETED' ? 'verified' : 'partial',
+      sourcesCount: accepted,
+      label: `Research ${status.toLowerCase()} — ${accepted} accepted of ${verdicts.length} considered: ${String(acct.statusReason ?? '')}`.slice(0, 240),
+      accepted,
+      considered: verdicts.length,
+      rejected: verdicts.length - accepted,
+      sources: verdicts.map(v => ({
+        url: typeof v.url === 'string' ? v.url : null,
+        title: String(v.title ?? ''),
+        evidenceLabel: v.accepted === true ? 'ACCEPTED' : `REJECTED: ${String(v.reason ?? '')}`.slice(0, 120),
+        accepted: v.accepted === true,
+      })),
+      unknowns,
+    }
+  }
   const report = rec(payload.councilResearchReport)
   if (report && Array.isArray(report.sources)) {
     const sources = (report.sources as AnyRec[]).map(s => ({
@@ -64,7 +87,7 @@ export function recordStage1Turn(args: {
         decision: stage1.decision,
         attribution,
         selfStatus: self?.status,
-        responder: self ? { kind: 'deterministic', label: self.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : 'Clarification', model: null } : null,
+        responder: self ? { kind: 'deterministic', label: self.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : self.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : 'Clarification', model: null } : null,
         research: researchRecordFromPayload(payload),
         localKnowledge: self ? self.claims.map(c => ({ id: c.id, status: c.status, source: c.source })) : [],
       })

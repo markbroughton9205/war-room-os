@@ -52,6 +52,9 @@ export function coordinate(input: CoordinatorInput): CoordinatorDecision {
   if (u.executionRequested) {
     return { ...base, complexity: 'simple', route: 'handoff', members: [], excluded: [], externalResearch: false, reasons: ['execution request: Stage 1 discusses; execution is handed off under Commander authority gates'] }
   }
+  if (u.recall) {
+    return { ...base, serializeHeavyLocal: false, complexity: 'trivial', route: 'self_knowledge', members: [], excluded: input.roster.map(m => ({ member: m.id, reason: 'not needed: answered from this conversation record' })), externalResearch: false, reasons: ['Commander asked what was said earlier; answered from the conversation record with no model call'] }
+  }
   if (isSelfKnowledgeQuestion(u)) {
     return { ...base, serializeHeavyLocal: false, complexity: 'trivial', route: 'self_knowledge', members: [], excluded: input.roster.map(m => ({ member: m.id, reason: 'not needed: answered from installed War Room state' })), externalResearch: false, reasons: ['question about War Room itself; answered from local knowledge with no model call'] }
   }

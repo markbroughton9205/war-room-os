@@ -21,7 +21,7 @@ export type InstalledState = {
 
 type CapabilityEntry = {
   id: string
-  topic: 'war room' | 'divine rising council' | 'foundry' | 'terra' | 'higher vision studios'
+  topic: 'war room' | 'divine rising council' | 'foundry' | 'terra' | 'higher vision studios' | 'sandbox'
   /** What the documentation says it is. */
   text: string
   docSource: string
@@ -48,6 +48,11 @@ export const CAPABILITIES: CapabilityEntry[] = [
     docSource: 'docs/phases/FOUNDRY_LOCAL_COMPLETION.md', probe: 'lib/agents/ops/engineering/missions/service.ts',
   },
   {
+    id: 'sandbox', topic: 'sandbox',
+    text: 'Foundry runs model-generated code (tests, servers, verifiers, type-checks) inside an operating-system sandbox on Linux so a mission cannot reach outside its workspace; it is the build/verification sandbox, separate from any browser workspace (a visible browser workspace is a planned Stage 2 item, not installed).',
+    docSource: 'lib/agents/ops/engineering/runtime/sandbox.ts', probe: 'lib/agents/ops/engineering/runtime/sandbox.ts',
+  },
+  {
     id: 'terra', topic: 'terra',
     text: 'Terra is the earth-intelligence section: a globe view with layered live geographic data (events, aircraft, vessels, cameras) whose selected objects can be handed to the Council as evidence.',
     docSource: 'lib/terra/councilHandoff.ts', probe: 'lib/terra/councilHandoff.ts',
@@ -68,18 +73,23 @@ const SELF_RE = /\b(purpose|role|job|who are you|what are you|what do you do|wha
 
 /** True when the turn is a question about War Room itself (never needs the internet). */
 export function isSelfKnowledgeQuestion(u: TurnUnderstanding): boolean {
-  if (u.act !== 'question' && u.act !== 'follow_up') return false
+  if (u.recall) return false
+  // The replacement itself must name a War Room subject; a topic merely inherited from the thread is not enough.
+  const correctionAboutWarRoom = u.act === 'correction' && !u.executionRequested
+    && /\b(war room|council|foundry|terra|higher vision studios|sandbox)\b/.test(u.correction?.replacement ?? '')
+  if (u.act !== 'question' && u.act !== 'follow_up' && !correctionAboutWarRoom) return false
   const t = u.normalized
   const words = t.split(' ').filter(Boolean)
   // Single short clause only: compound or instruction-bearing turns go to the members.
   if (words.length > 22 || /[;]|\b(and then|then|also|and (install|build|run|deploy|fix|start|update|delete|create))\b/.test(t)) return false
-  if (/\b(install|build|deploy|run|start|fix|delete|update|create|restart|launch|execute)\b.*\b(it|them|this|that|the|a|my)\b/.test(t) && !/\b(what|which|who)\b/.test(t.split(' ').slice(0, 2).join(' '))) return false
+  // An imperative verb that begins a clause is an instruction; the same word used as a noun modifier ("the build sandbox") is not.
+  if (/(?:^|\b(?:and|then|please|to|you|can|could|just)\s+)(?:install|build|deploy|run|start|fix|delete|update|create|restart|launch|execute)\b.*\b(it|them|this|that|the|a|my)\b/.test(t) && !/\b(what|which|who)\b/.test(t.split(' ').slice(0, 2).join(' '))) return false
   // Live runtime state has its own path; never answer it from file probes.
   if (/\b(running|status|health|healthy|online|up|working|alive|right now|currently|available now)\b/.test(t)) return false
   const mentionsSelf = /\b(war room|council|foundry|terra|higher vision studios|you|your)\b/.test(t) || u.topics.length > 0
   if (!mentionsSelf) return false
   if (/\b(news|latest|price of|stock|weather|score|election|compare .* (vendors|products)|according to (the )?(web|internet))\b/.test(t)) return false
-  return SELF_RE.test(t) || (u.act === 'follow_up' && u.topics.length > 0)
+  return SELF_RE.test(t) || ((u.act === 'follow_up' || correctionAboutWarRoom) && u.topics.length > 0)
 }
 
 export type SelfKnowledgeAnswer = {
@@ -100,7 +110,9 @@ function status(entry: CapabilityEntry, state: InstalledState): { status: Knowle
 export function answerSelfKnowledge(u: TurnUnderstanding, state: InstalledState): SelfKnowledgeAnswer {
   const wanted = new Set<string>(u.topics)
   const asksPurpose = /\b(purpose|role|job|who are you|what are you|what do you do|what can you do)\b/.test(u.normalized)
-  const entries = CAPABILITIES.filter(c => wanted.has(c.topic))
+  let entries = CAPABILITIES.filter(c => wanted.has(c.topic))
+  // "what does foundry do in War Room" is about Foundry; the generic War Room description would bury the answer.
+  if (entries.some(c => c.id !== 'war-room' && c.id !== 'council')) entries = entries.filter(c => c.id !== 'war-room')
   const chosen = asksPurpose || entries.length === 0
     ? CAPABILITIES.filter(c => c.id === 'war-room' || c.id === 'council')
     : entries
@@ -109,6 +121,11 @@ export function answerSelfKnowledge(u: TurnUnderstanding, state: InstalledState)
   const lines: string[] = []
   const unknowns: string[] = []
 
+  if (u.correction) {
+    lines.push(u.correction.replacement
+      ? `Understood — you meant: ${u.correction.replacement}. I am setting my earlier reading aside.`
+      : 'Understood — I am setting my earlier reading aside.')
+  }
   if (asksPurpose) {
     lines.push('My purpose inside War Room: I am the Divine Rising Council — the deliberation layer. I take your question, decide which members are actually needed, have them contribute from their own role, keep the disagreement visible, and tell you who produced what.')
   }
