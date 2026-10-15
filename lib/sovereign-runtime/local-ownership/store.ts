@@ -775,6 +775,28 @@ export class LocalOwnershipStore {
     const id = newPrefixedId('lmsg', 16)
     const ts = nowIso()
     const metadata = input.metadata ?? {}
+    // The server already stored this round's reply with its real attribution (Stage 1 owns replies it produced itself);
+    // the client's later write of the same text for the same round must not become a second copy.
+    if (input.role === 'assistant' && typeof metadata.roundRequestId === 'string' && metadata.roundRequestId) {
+      const norm = (t: string) => t.replace(/\s+/g, ' ').trim()
+      const wanted = norm(String(input.content || ''))
+      const existing = this.listCouncilMessages(ownerId, conversationId)?.find(row =>
+        row.role === 'assistant'
+        && row.metadata.stage1 === true
+        && row.metadata.roundRequestId === metadata.roundRequestId
+        && norm(row.content) === wanted)
+      if (existing) {
+        return {
+          id: existing.id,
+          conversation_id: conversationId,
+          role: existing.role,
+          content: existing.content,
+          family: existing.family,
+          metadata: existing.metadata,
+          created_at: existing.created_at,
+        }
+      }
+    }
     // Attribution recorded by the Council turn is carried into the indexed columns so a reopened conversation
     // still says which model/provider produced a member message (it was always in metadata, never in the columns).
     const metaStr = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 200) : null)

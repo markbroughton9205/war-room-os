@@ -776,6 +776,8 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   let stage1: Stage1TurnResult | null = null
   // Holder object: assigned inside the deliberation closure and read after it (a plain `let` is narrowed to null).
   const stage1ResearchState: { run: Stage1ResearchRun | null } = { run: null }
+  // Local Home ledger ids are not remote UUIDs (conversationId above is detached for them); Stage 1 persistence uses the raw id and is owner-scoped.
+  const stage1RawConversationId = typeof body.conversationId === 'string' ? body.conversationId.trim().slice(0, 80) : null
   const withTrace = <T extends Record<string, unknown>>(payload: T) => {
     signal.throwIfAborted()
     try {
@@ -989,7 +991,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   if (stage1?.finalResponse) {
     const fr = stage1.finalResponse
     // The reply is the server's own (deterministic) answer; store it so a restart/reopen still shows Council's side of the thread.
-    await persistStage1Assistant(req, conversationId, {
+    await persistStage1Assistant(req, stage1RawConversationId, {
       content: fr.text,
       family: 'AURORA',
       metadata: {
@@ -1062,6 +1064,21 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   const stage1SoloOwned = !isLightweightGreeting && !stage1?.finalResponse && !councilCommand.directInvocation && councilCommand.mode !== 'attendance'
     && stage1?.decision.route === 'direct_member' && stage1.decision.members.length === 1
   const familyDeliberationRequested = (familyDeliberationRequestedRaw && shouldRunFamilyDeliberation(classifiedTurn)) || stage1SoloOwned
+  // The client gathers a simple turn family by family. When the coordinator gave the question to exactly one member, the
+  // other families' calls are told to stay silent (existing silent-skip protocol) instead of each producing an answer.
+  if (stage1SoloOwned && !familyDeliberationRequestedRaw && councilSingleFamily) {
+    const soloSeats = seatsForParticipatingAgents(stage1!.decision.members.map(m => m.toLowerCase() as NebulaAgentId))
+    if (soloSeats.length > 0 && !soloSeats.includes(councilSingleFamily)) {
+      return NextResponse.json(withTrace({
+        councilSingleResponse: '',
+        councilSingleFamily,
+        results: [{ family: displayFamilyName(councilSingleFamily), content: '', status: 'OK' }],
+        showContinue: false,
+        councilGovernorSkipped: true,
+        councilStage1Skipped: { family: councilSingleFamily, reason: `not selected: the coordinator gave this question to ${stage1!.decision.members.join(', ')}` },
+      }))
+    }
+  }
   const nebulaRoundPlan = createCouncilRoundPlan({
     roundId: councilLogicalRequestId || councilTrace.councilTraceId,
     commanderMessage: raelDirectiveText,
@@ -2846,7 +2863,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       })
       // A single member turn is not written by the client; store it with the model/provider that actually produced it.
       if (stage1SoloOwned && synthesis && synthesis.completion_status === 'complete' && synthesis.full_response.trim()) {
-        await persistStage1Assistant(req, conversationId, {
+        await persistStage1Assistant(req, stage1RawConversationId, {
           content: synthesis.full_response,
           family: synthesis.provider_label || 'AURORA',
           metadata: {
