@@ -134,7 +134,7 @@ const SOCIAL_RE = /^(hi+|hello|hey+|yo+|sup|good (morning|afternoon|evening)|tha
 /** Leading filler that carries no meaning ("yo", "ok so", "hey"); stripped only for act detection. */
 const FILLER_RE = /^(?:(?:yo+|hey+|hi+|hello|ok(?:ay)?|so|well|um+|uh+|hmm+|bro|dude|man|alright|like|also|and)[\s,!.:;-]+)+/
 /** The Commander asks what Council said earlier in this conversation. */
-const RECALL_RE = /\b(?:what (?:did|have|had|were) (?:you|we|they|aurora|orion|lumen|pulsar|nova|phoenix)(?: all)? (?:say|said|tell|told|mention|mentioned|answer|answered|discuss|discussed|cover|covered|talk|talking|suggest|suggested)|what (?:was|were) (?:you|they) (?:saying|talking)|(?:remind me|repeat|recap)\b.*\b(?:what|that|earlier|before|you said)|say (?:that|it) again|(?:earlier|before|previously|last time)(?: you| they)? (?:said|told|mentioned)|what (?:was|were) (?:the|your) (?:last|previous|earlier) (?:answer|reply|response))\b/
+const RECALL_RE = /\b(?:what (?:did|have|had|were) (?:you|we|aurora|orion|lumen|pulsar|nova|phoenix)(?: all)? (?:say|said|tell|told|mention|mentioned|answer|answered|discuss|discussed|cover|covered|suggest|suggested)(?:\b.*\b(?:before|earlier|previously|so far|about (?:it|that|this|them))|\b)|what (?:was|were) (?:you|they) (?:saying|talking)(?:\b.*\b(?:before|earlier|about))?|(?:remind me|recap)\b.*\b(?:earlier|before|previously|you said|we said|in this (?:conversation|session|thread))|repeat (?:that|what you said)|say (?:that|it) again|(?:earlier|before|previously|last time)(?: you| they)? (?:said|told|mentioned)|what (?:was|were) (?:the|your) (?:last|previous|earlier) (?:answer|reply|response))\b/
 const REFERENCE_RE = /\b(the other one|the other|that one|this one|those|these|that|it|them|the same|same thing|the first one|the second one|the last one|former|latter)\b/
 
 function topicsIn(text: string): string[] {
@@ -221,7 +221,7 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
   const core = stripped.length >= 3 ? stripped : norm
   const questionLike = hasQuestionMark || QUESTION_START_RE.test(core)
   const commandLike = COMMAND_VERB_RE.test(core) && !hasQuestionMark
-  const recall = RECALL_RE.test(norm) && history.length > 0
+  const recall = RECALL_RE.test(norm) && history.length > 0 && !COMMAND_VERB_RE.test(core)
   const hasRef = REFERENCE_RE.test(norm)
   const ownTopics = topicsIn(norm)
   const shortTurn = words.length <= 6
@@ -232,7 +232,7 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
   else if (isCorrection) act = 'correction'
   else if (continuation && bareContinuation) act = 'continuation'
   else if (commandLike) act = 'command'
-  else if (recall) act = 'question'
+  else if (recall && !commandLike) act = 'question'
   else if (shortTurn && !ownTopics.some(t => PRIMARY_TOPICS.has(t)) && (hasRef || FOLLOW_STARTER_RE.test(norm) || words.length <= 2)) act = 'follow_up'
   else if (questionLike) act = 'question'
   else if (shortTurn && history.length > 0 && !ownTopics.some(t => PRIMARY_TOPICS.has(t))) act = 'follow_up'

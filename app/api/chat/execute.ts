@@ -258,7 +258,7 @@ import { maybeHandleGiFrontDoor } from '@/lib/council/gi'
 import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/server'
 import { buildAttribution, isSkippedFamilyCall } from '@/lib/council/stage1/attribution'
 import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
-import { runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
+import { buildResearchEvidenceBlock, runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
 import { renderAccountingMarkdown } from '@/lib/council/stage1/research'
 import { recordStage1Turn } from '@/lib/council/stage1/turn'
 import { persistStage1Assistant, readStage1Turns } from '@/lib/council/stage1/persist'
@@ -1069,7 +1069,9 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   // other families' calls are told to stay silent (existing silent-skip protocol) instead of each producing an answer.
   if (stage1SoloOwned && !familyDeliberationRequestedRaw && councilSingleFamily) {
     const soloSeats = seatsForParticipatingAgents(stage1!.decision.members.map(m => m.toLowerCase() as NebulaAgentId))
-    if (soloSeats.length > 0 && !soloSeats.includes(councilSingleFamily)) {
+    const gathered = Array.isArray(body.councilLogicalExpectedFamilies) ? (body.councilLogicalExpectedFamilies as unknown[]).map(String) : []
+    const ownerIsGathered = soloSeats.some(seat => gathered.includes(seat))
+    if (soloSeats.length > 0 && !soloSeats.includes(councilSingleFamily) && ownerIsGathered) {
       return NextResponse.json(withTrace({
         councilSingleResponse: '',
         councilSingleFamily,
@@ -2406,6 +2408,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
           identityId: nebulaAgentForSeat(only)?.id ?? null,
           inputMessageIds: [session.commander_message_id],
           sharePriors: false,
+          extraContextBlock: stage1ResearchState.run ? buildResearchEvidenceBlock(stage1ResearchState.run) : undefined,
         })
         session.synthesis_turn_id = soloTurn.turn_id
         session.completion_status = soloTurn.completion_status === 'complete' ? 'complete' : 'failed'
@@ -2417,20 +2420,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       const primarySeats = seats.filter(seat => seat !== synthSeat && seat !== 'red_team').slice(0, 4)
       const challengeSeat = seats.includes('red_team') ? ('red_team' as CouncilSingleFamily) : null
       const research = stage1ResearchState.run
-      const evidenceBlock = research
-        ? [
-            `STAGE 1 RESEARCH: ${research.accounting.acceptedCount} accepted source(s), ${research.accounting.rejectedCount} rejected, status ${research.accounting.status}.`,
-            ...research.accounting.verdicts.flatMap((v, i) => v.accepted
-              ? [`[s1-evidence-${i + 1}] ${v.title} — ${v.url}`]
-              : []),
-            research.accounting.conflicts.length
-              ? `Accepted sources disagree: ${research.accounting.conflicts.map(c => `${c.claimId} (for: ${c.for.join('; ')} | against: ${c.against.join('; ')})`).join(' ; ')}. Say so; do not pick one silently.`
-              : 'Cite only the accepted sources listed above; anything else is your own judgment and must be labelled so.',
-            research.accounting.status !== 'COMPLETED'
-              ? `The research is ${research.accounting.status}: ${research.accounting.statusReason}. Do not call any conclusion verified or confirmed; say what the accepted sources do and do not establish and what is still unknown.`
-              : '',
-          ].filter(Boolean).join('\n')
-        : ''
+      const evidenceBlock = research ? buildResearchEvidenceBlock(research) : ''
       let order = 0
       const spoken: string[] = []
       let lastPrimary: DeliberationTurn | null = null
@@ -2865,7 +2855,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       // A single member turn is not written by the client; store it with the model/provider that actually produced it.
       if (stage1SoloOwned && synthesis && synthesis.completion_status === 'complete' && synthesis.full_response.trim()) {
         await persistStage1Assistant(req, stage1RawConversationId, {
-          content: synthesis.full_response,
+          content: `${synthesis.full_response}${stage1ResearchState.run ? `\n\n${renderAccountingMarkdown(stage1ResearchState.run.accounting)}\nTools that ran: ${stage1ResearchState.run.toolsInvoked.join(', ') || 'none'}.` : ''}`,
           family: synthesis.provider_label || 'AURORA',
           metadata: {
             stage1: true,
@@ -2911,9 +2901,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
               liveResearchUi: {
                 mode: stage1ResearchState.run!.accounting.status === 'FAILED' ? 'unavailable' : stage1ResearchState.run!.accounting.status === 'COMPLETED' ? 'verified' : 'partial',
                 sourcesCount: stage1ResearchState.run!.accounting.acceptedCount,
-                label: `Research ${stage1ResearchState.run!.accounting.status.toLowerCase()} — ${stage1ResearchState.run!.accounting.acceptedCount} accepted, ${stage1ResearchState.run!.accounting.rejectedCount} rejected`,
+                label: `Research ${stage1ResearchState.run!.accounting.status.toLowerCase()} — ${stage1ResearchState.run!.accounting.acceptedCount} accepted, ${stage1ResearchState.run!.accounting.rejectedCount} rejected${familyDeliberation.completion_status === 'complete' ? '' : `; Council round ${familyDeliberation.completion_status}`}`,
                 councilPhase: 'model_running' as const,
-                responseCompletion: 'complete' as const,
+                // never claim completion the session did not reach
+                responseCompletion: familyDeliberation.completion_status === 'complete' ? ('complete' as const) : ('partial' as const),
               },
             }
           : {}),
