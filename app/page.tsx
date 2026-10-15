@@ -328,6 +328,7 @@ import {
   type DockPanelId,
 } from '@/components/war-room/live-room'
 import { CouncilMissionPanel } from '@/components/war-room/council/CouncilMissionPanel'
+import { CouncilSubsystemsPanel } from '@/components/war-room/council/CouncilSubsystemsPanel'
 import { CouncilSessionNavigator, type CouncilSessionBulkAction, type CouncilSessionCounts, type CouncilSessionListItem, type CouncilSessionView } from '@/components/war-room/council/CouncilSessionNavigator'
 import { CouncilContextInspector } from '@/components/war-room/council/CouncilContextInspector'
 import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
@@ -14336,6 +14337,7 @@ function Home() {
             lastCommanderText={[...paneCouncilMessages].reverse().find(isRaelCouncilMessage)?.content ?? ''}
             onResultReturned={() => { if (liveCouncilConvIdRef.current) void openCouncilSession(liveCouncilConvIdRef.current) }}
           />
+          <CouncilSubsystemsPanel />
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"

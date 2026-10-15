@@ -258,6 +258,8 @@ import { maybeHandleGiFrontDoor } from '@/lib/council/gi'
 import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/server'
 import { buildAttribution, isSkippedFamilyCall } from '@/lib/council/stage1/attribution'
 import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
+import { probeSubsystems, renderSubsystemAnswer, subsystemQuestion } from '@/lib/council/subsystems/probe'
+import { realSubsystemDeps } from '@/lib/council/subsystems/real.server'
 import { buildResearchEvidenceBlock, runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
 import { renderAccountingMarkdown } from '@/lib/council/stage1/research'
 import { recordStage1Turn } from '@/lib/council/stage1/turn'
@@ -989,6 +991,19 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
    */
   const classifiedTurn = classifyCouncilTurn(raelDirectiveText)
   const ebcClassification = classifyEvidenceBoardMission({ commanderMessage: raelDirectiveText })
+  // Council <-> Terra / Terra World / HVS: a state question is answered from live, read-only probes of the real interfaces.
+  if (stage1 && !stage1.finalResponse && !stage1.understanding.executionRequested) {
+    const subsystemIds = subsystemQuestion(stage1.understanding.normalized, stage1.understanding.topics)
+    if (subsystemIds) {
+      try {
+        const states = await probeSubsystems(realSubsystemDeps())
+        stage1.finalResponse = { text: renderSubsystemAnswer(states, subsystemIds), status: 'COMPLETED', claims: [], mode: 'stage1_subsystems' }
+        stage1.decision = { ...stage1.decision, route: 'self_knowledge', members: [], externalResearch: false, reasons: [...stage1.decision.reasons, 'subsystem state question answered from live read-only probes'] }
+      } catch (err) {
+        console.error('[council-subsystems] probe failed; continuing without it:', err instanceof Error ? err.message : err)
+      }
+    }
+  }
   if (stage1?.finalResponse) {
     const fr = stage1.finalResponse
     // The reply is the server's own (deterministic) answer; store it so a restart/reopen still shows Council's side of the thread.
@@ -1000,7 +1015,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         stage1Mode: fr.mode,
         stage1Status: fr.status,
         roundRequestId: stage1.provenance.turnId,
-        providerLabel: fr.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : fr.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : 'Clarification',
+        providerLabel: fr.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : fr.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : fr.mode === 'stage1_subsystems' ? 'Live subsystem probes (read-only)' : 'Clarification',
         providerModel: null,
         backendType: 'LOCAL',
         backendProvider: null,

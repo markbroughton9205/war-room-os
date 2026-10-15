@@ -88,7 +88,7 @@ export function recordStage1Turn(args: {
         decision: stage1.decision,
         attribution,
         selfStatus: self?.status,
-        responder: self ? { kind: 'deterministic', label: self.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : self.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : 'Clarification', model: null } : null,
+        responder: self ? { kind: 'deterministic', label: self.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : self.mode === 'stage1_recall' ? 'Conversation record (deterministic)' : self.mode === 'stage1_subsystems' ? 'Live subsystem probes (read-only)' : 'Clarification', model: null } : null,
         research: researchRecordFromPayload(payload),
         localKnowledge: self ? self.claims.map(c => ({ id: c.id, status: c.status, source: c.source })) : [],
       })

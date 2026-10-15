@@ -99,7 +99,7 @@ export type Stage1TurnResult = {
     text: string
     status: Stage1Status
     claims: KnowledgeClaim[]
-    mode: 'stage1_self_knowledge' | 'stage1_clarification' | 'stage1_recall'
+    mode: 'stage1_self_knowledge' | 'stage1_clarification' | 'stage1_recall' | 'stage1_subsystems'
   }
   /** Decree text with resolved references attached; used by downstream routing. */
   effectiveText: string
