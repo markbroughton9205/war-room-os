@@ -25,7 +25,7 @@ export function FoundryReverseEngineer() {
   const [target, setTarget] = useState('')
   const [depth, setDepth] = useState<Depth>('standard')
   const [outs, setOuts] = useState<OutputOption[]>(['all'])
-  const [build, setBuild] = useState({ title: '', request: '', acceptance: '', write: '' })
+  const [build, setBuild] = useState({ title: '', request: '', acceptance: '', write: '', install: false })
   const [guide, setGuide] = useState(false)
 
   useEffect(() => { try { if (!window.localStorage.getItem(SEEN_KEY)) setGuide(true) } catch { setGuide(true) } }, [])
@@ -61,7 +61,7 @@ export function FoundryReverseEngineer() {
   const startBuild = async () => {
     if (!open) return
     setBusy(true)
-    const { ok, j } = await post({ action: 'start', fromAnalysis: open.id, title: build.title, request: build.request, acceptance: lines(build.acceptance), scope: { paths: [], write: lines(build.write) } })
+    const { ok, j } = await post({ action: 'start', fromAnalysis: open.id, title: build.title, request: build.request, acceptance: lines(build.acceptance), scope: { paths: [], write: lines(build.write) }, install: build.install })
     setNotice(ok ? `Build mission ${String(j.missionId)} started from analysis ${open.id}. Follow it under Engineering missions.` : `Build refused: ${j.error ?? 'error'}${j.code ? ` (${j.code})` : ''}`)
     setBusy(false)
   }
@@ -129,6 +129,7 @@ export function FoundryReverseEngineer() {
               <textarea data-testid="re-build-request" className="bg-gray-800 p-1" rows={2} placeholder="What to change (at least 20 characters)" value={build.request} onChange={(e) => setBuild({ ...build, request: e.target.value })} />
               <textarea data-testid="re-build-acceptance" className="bg-gray-800 p-1" rows={3} placeholder="Acceptance criteria, one per line" value={build.acceptance} onChange={(e) => setBuild({ ...build, acceptance: e.target.value })} />
               <textarea data-testid="re-build-write" className="bg-gray-800 p-1" rows={2} placeholder={open.handoff.targetFiles.length && open.target.basis === 'FACT' ? `Write scope (default: ${open.handoff.targetFiles.slice(0, 3).join(', ')})` : 'Write scope, one path per line (required)'} value={build.write} onChange={(e) => setBuild({ ...build, write: e.target.value })} />
+              <label className="text-xs text-amber-200"><input data-testid="re-build-install" type="checkbox" checked={build.install} onChange={(e) => setBuild({ ...build, install: e.target.checked })} /> Commander approval: after verification, merge and build a new versioned install (the launcher is not changed)</label>
               <div><button data-testid="re-build-start" type="button" disabled={busy} className="px-3 py-1 bg-sky-700 disabled:opacity-50" onClick={startBuild}>Start Build From Analysis</button></div>
             </div>
           </Section>
