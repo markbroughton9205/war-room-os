@@ -752,7 +752,7 @@ export class LocalOwnershipStore {
     if (!existing) return null
     const ts = nowIso()
     const title = typeof patch.title === 'string' ? (patch.title.trim() || existing.title).slice(0, 200) : existing.title
-    const state = patch.state && ['active', 'paused', 'archived'].includes(patch.state) ? patch.state : existing.state
+    const state = patch.state && ['active', 'paused', 'archived', 'trashed'].includes(patch.state) ? patch.state : existing.state
     const metadata = patch.metadata ?? existing.metadata
     const deletedAt = state === 'archived' ? ts : null
     this.db.prepare(
@@ -762,6 +762,126 @@ export class LocalOwnershipStore {
     ).run(title, state, JSON.stringify(metadata), ts, deletedAt, conversationId, ownerId)
     if (state === 'archived') return null
     return this.getCouncilConversation(ownerId, conversationId)
+  }
+
+  /** Rows in any of the given states. Includes soft-deleted (archived) rows that listCouncilConversations hides. */
+  listCouncilConversationsByState(ownerId: string, states: string[]): Array<LocalConversationRecord & {
+    metadata: Record<string, unknown>
+    state: string
+    last_message_at: string | null
+  }> {
+    const rows = this.db.prepare(
+      `SELECT id, owner_local_identity_id, title, origin, data_mode, created_at, updated_at, deleted_at,
+              metadata_json, state, last_message_at
+       FROM local_conversation
+       WHERE owner_local_identity_id = ?
+       ORDER BY updated_at DESC`,
+    ).all(ownerId) as Array<LocalConversationRecord & { metadata_json: string | null; state: string | null; last_message_at: string | null }>
+    return rows
+      .map(row => ({ ...row, metadata: parseJsonObject(row.metadata_json), state: row.state || 'active', last_message_at: row.last_message_at }))
+      .filter(row => states.includes(row.state))
+  }
+
+  /** conversation id -> number of stored messages (owner scoped). */
+  councilMessageCounts(ownerId: string): Map<string, number> {
+    const rows = this.db.prepare(
+      `SELECT conversation_id AS id, COUNT(*) AS n FROM local_message WHERE owner_local_identity_id = ? GROUP BY conversation_id`,
+    ).all(ownerId) as Array<{ id: string; n: number }>
+    return new Map(rows.map(r => [r.id, Number(r.n)]))
+  }
+
+  /** Move conversations to Trash (recoverable). Never touches messages. Only the owner's own ids are considered. */
+  trashCouncilConversations(ownerId: string, ids: string[]): { trashed: string[]; skipped: string[] } {
+    const wanted = new Set(ids)
+    const trashed: string[] = []
+    const skipped: string[] = []
+    const rows = this.listCouncilConversationsByState(ownerId, ['active', 'paused', 'archived'])
+    const byId = new Map(rows.map(r => [r.id, r]))
+    const ts = nowIso()
+    for (const id of wanted) {
+      const row = byId.get(id)
+      if (!row) { skipped.push(id); continue }
+      const metadata = { ...row.metadata, trash: { at: ts, from: row.state } }
+      this.db.prepare(
+        `UPDATE local_conversation SET state = 'trashed', metadata_json = ?, updated_at = ?, deleted_at = NULL
+         WHERE id = ? AND owner_local_identity_id = ?`,
+      ).run(JSON.stringify(metadata), ts, id, ownerId)
+      this.audit(ownerId, 'LOCAL_CONVERSATION_TRASH', id, 'OK')
+      trashed.push(id)
+    }
+    return { trashed, skipped }
+  }
+
+  /** Restore Trash (or archived) conversations to their previous visible state. */
+  restoreCouncilConversations(ownerId: string, ids: string[]): { restored: string[]; skipped: string[] } {
+    const wanted = new Set(ids)
+    const restored: string[] = []
+    const skipped: string[] = []
+    const rows = this.listCouncilConversationsByState(ownerId, ['trashed', 'archived'])
+    const byId = new Map(rows.map(r => [r.id, r]))
+    const ts = nowIso()
+    for (const id of wanted) {
+      const row = byId.get(id)
+      if (!row) { skipped.push(id); continue }
+      const trash = row.metadata.trash && typeof row.metadata.trash === 'object' ? row.metadata.trash as { from?: unknown } : null
+      const next = trash?.from === 'paused' ? 'paused' : 'active'
+      const { trash: _t, ...rest } = row.metadata
+      void _t
+      this.db.prepare(
+        `UPDATE local_conversation SET state = ?, metadata_json = ?, updated_at = ?, deleted_at = NULL
+         WHERE id = ? AND owner_local_identity_id = ?`,
+      ).run(next, JSON.stringify(rest), ts, id, ownerId)
+      this.audit(ownerId, 'LOCAL_CONVERSATION_RESTORE', id, 'OK')
+      restored.push(id)
+    }
+    return { restored, skipped }
+  }
+
+  /** Permanent deletion. Only conversations that are already in Trash can be purged; messages go with them. */
+  purgeCouncilConversations(ownerId: string, ids: string[]): { purged: string[]; skipped: string[]; messagesDeleted: number } {
+    const rows = this.listCouncilConversationsByState(ownerId, ['trashed'])
+    const trashed = new Set(rows.map(r => r.id))
+    const purged: string[] = []
+    const skipped: string[] = []
+    let messagesDeleted = 0
+    for (const id of new Set(ids)) {
+      if (!trashed.has(id)) { skipped.push(id); continue }
+      const del = this.db.prepare(`DELETE FROM local_message WHERE conversation_id = ? AND owner_local_identity_id = ?`).run(id, ownerId)
+      messagesDeleted += Number((del as { changes?: number | bigint }).changes ?? 0)
+      this.db.prepare(`DELETE FROM local_conversation WHERE id = ? AND owner_local_identity_id = ? AND state = 'trashed'`).run(id, ownerId)
+      this.audit(ownerId, 'LOCAL_CONVERSATION_PURGE', id, 'OK')
+      purged.push(id)
+    }
+    return { purged, skipped, messagesDeleted }
+  }
+
+  /**
+   * Conversations that were created and never used: active, default title, no messages, no preview/decree, no Stage 1 turns and no
+   * links of any kind (missions, research, attribution). Anything with content or a link is NOT returned.
+   */
+  findUnusedEmptyCouncilConversations(ownerId: string, opts: { excludeIds?: string[]; minAgeMs?: number } = {}): string[] {
+    const counts = this.councilMessageCounts(ownerId)
+    const exclude = new Set(opts.excludeIds ?? [])
+    const minAge = opts.minAgeMs ?? 0
+    const now = Date.now()
+    const out: string[] = []
+    for (const row of this.listCouncilConversationsByState(ownerId, ['active'])) {
+      if (exclude.has(row.id)) continue
+      if ((counts.get(row.id) ?? 0) > 0) continue
+      if (row.last_message_at) continue
+      const title = (row.title || '').trim()
+      if (title && title !== 'New Council Session') continue
+      const md = row.metadata
+      const council = md.council && typeof md.council === 'object' && !Array.isArray(md.council) ? md.council as Record<string, unknown> : {}
+      if (council.lastPreview || council.lastDecreeAt) continue
+      const turns = (md.councilStage1 as { turns?: unknown[] } | undefined)?.turns
+      if (Array.isArray(turns) && turns.length > 0) continue
+      const extraKeys = Object.keys(md).filter(k => k !== 'council' && k !== 'councilStage1')
+      if (extraKeys.length > 0) continue
+      if (now - Date.parse(row.created_at) < minAge) continue
+      out.push(row.id)
+    }
+    return out
   }
 
   addCouncilMessage(ownerId: string, conversationId: string, input: {

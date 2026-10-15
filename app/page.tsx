@@ -327,7 +327,7 @@ import {
   type AttachmentStatus,
   type DockPanelId,
 } from '@/components/war-room/live-room'
-import { CouncilSessionNavigator, type CouncilSessionListItem } from '@/components/war-room/council/CouncilSessionNavigator'
+import { CouncilSessionNavigator, type CouncilSessionBulkAction, type CouncilSessionCounts, type CouncilSessionListItem, type CouncilSessionView } from '@/components/war-room/council/CouncilSessionNavigator'
 import { CouncilContextInspector } from '@/components/war-room/council/CouncilContextInspector'
 import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
 import { HvsEntryLink } from '@/components/war-room/higher-vision-studios/HvsEntryLink'
@@ -366,7 +366,7 @@ import {
 } from '@/lib/council/commander-chat/sessionTranscript'
 import {
   createLedgerSession,
-  mergeSessionLists,
+  mergeSessionLists, pruneGhostLedgerRows,
   readSessionLedger,
   retitleLedgerSession,
   upsertLedgerSession,
@@ -6471,6 +6471,12 @@ function Home() {
   })
   const autoTitledSessionIdsRef = useRef(new Set<string>())
   const [councilSessionSearch, setCouncilSessionSearch] = useState('')
+  const [sessionView, setSessionView] = useState<CouncilSessionView>('active')
+  const [sessionCounts, setSessionCounts] = useState<CouncilSessionCounts | undefined>(undefined)
+  const [trashSessions, setTrashSessions] = useState<CouncilSessionListItem[]>([])
+  const [archivedSessions, setArchivedSessions] = useState<CouncilSessionListItem[]>([])
+  const [sessionBulkBusy, setSessionBulkBusy] = useState(false)
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null)
   const [councilSessionNavOpen, setCouncilSessionNavOpen] = useState(true)
   const [councilInspectorOpen, setCouncilInspectorOpen] = useState(false)
   const [sessionIntelligence, setSessionIntelligence] = useState<CouncilSessionIntelligenceV1 | null>(null)
@@ -7149,7 +7155,8 @@ function Home() {
             : null,
           metadata: c.metadata ?? null,
         }))
-        const merged = mergeSessionLists(remoteRows, readSessionLedger())
+        const bootActiveId = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem(LIVE_COUNCIL_CONV_STORAGE_KEY) : null
+        const merged = pruneGhostLedgerRows(mergeSessionLists(remoteRows, readSessionLedger()), new Set(remoteRows.map(row => row.id)), bootActiveId)
         writeSessionLedger(merged)
         setCouncilSessionList(merged)
         let id: string | null = typeof sessionStorage !== 'undefined'
@@ -12566,6 +12573,15 @@ function Home() {
   }
 
   const startFreshCouncilSession = async (reason: 'new' | 'archive') => {
+    if (reason === 'new' && liveCouncilConvIdRef.current) {
+      const currentRow = readSessionLedger().find(row => row.id === liveCouncilConvIdRef.current)
+      const hasCommanderMessages = messagesRef.current.some(isRaelCouncilMessage)
+      const defaultTitled = !currentRow || !currentRow.title || currentRow.title === 'New Council Session'
+      if (!hasCommanderMessages && defaultTitled && !currentRow?.preview) {
+        setSessionNotice('You are already in a new, empty session.')
+        return
+      }
+    }
     resetCouncilTemporaryRuntime()
     setNebulaRoundShell(null)
     setLiveResearchHud(null)
@@ -12622,7 +12638,8 @@ function Home() {
       const res = await fetch('/api/conversations', { cache: 'no-store' })
       if (!res.ok) return
       if (res.headers.get('x-war-room-persistence') !== 'available') return
-      const j = await res.json() as { conversations?: CouncilSessionListItem[] }
+      const j = await res.json() as { conversations?: CouncilSessionListItem[]; counts?: CouncilSessionCounts }
+      if (j.counts) setSessionCounts(j.counts)
       const convs = Array.isArray(j.conversations) ? j.conversations : []
       const remote = convs.map(c => ({
         ...c,
@@ -12631,7 +12648,11 @@ function Home() {
           : c.preview ?? null,
       }))
       setCouncilSessionList(prev => {
-        const merged = mergeSessionLists(remote, [...readSessionLedger(), ...prev])
+        const merged = pruneGhostLedgerRows(
+          mergeSessionLists(remote, [...readSessionLedger(), ...prev]),
+          new Set(remote.map(row => row.id)),
+          liveCouncilConvIdRef.current,
+        )
         writeSessionLedger(merged)
         return merged
       })
@@ -12764,9 +12785,85 @@ function Home() {
   }
 
   const archiveCouncilSessionFromList = async (id: string) => {
+    // The sidebar "x" moves the session to Trash (recoverable); nothing is permanently deleted from here.
     await fetch(`/api/conversations/${id}`, { method: 'DELETE' })
     setCouncilSessionList(prev => prev.filter(s => s.id !== id))
+    writeSessionLedger(readSessionLedger().filter(row => row.id !== id))
+    void refreshCouncilSessionList()
     if (id === liveCouncilConvId) void startFreshCouncilSession('new')
+  }
+
+  const mapSessionRows = (convs: CouncilSessionListItem[]): CouncilSessionListItem[] => convs.map(c => ({
+    ...c,
+    preview: typeof (c.metadata as { council?: { lastPreview?: string } } | undefined)?.council?.lastPreview === 'string'
+      ? (c.metadata as { council: { lastPreview: string } }).council.lastPreview
+      : c.preview ?? null,
+  }))
+
+  const loadSessionView = async (view: 'trash' | 'archived') => {
+    try {
+      const res = await fetch(`/api/conversations?view=${view}`, { cache: 'no-store' })
+      if (!res.ok) return
+      const j = await res.json() as { conversations?: CouncilSessionListItem[]; counts?: CouncilSessionCounts }
+      const rows = mapSessionRows(Array.isArray(j.conversations) ? j.conversations : [])
+      if (view === 'trash') setTrashSessions(rows)
+      else setArchivedSessions(rows)
+      if (j.counts) setSessionCounts(j.counts)
+    } catch {
+      /* optional view */
+    }
+  }
+
+  const changeSessionView = (view: CouncilSessionView) => {
+    setSessionView(view)
+    setCouncilSessionSearch('')
+    setSessionNotice(null)
+    if (view !== 'active') void loadSessionView(view)
+  }
+
+  const bulkSessionAction = async (
+    action: CouncilSessionBulkAction,
+    ids: string[],
+    extra?: { mode?: 'set' | 'prefix' | 'suffix'; text?: string; confirm?: string },
+  ) => {
+    setSessionBulkBusy(true)
+    try {
+      const activeId = liveCouncilConvIdRef.current
+      const res = await fetch('/api/conversations/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ids, ...extra, ...(action === 'cleanup-empty' && activeId ? { excludeIds: [activeId] } : {}) }),
+      })
+      const j = await res.json().catch(() => ({})) as Record<string, unknown>
+      if (!res.ok) {
+        setSessionNotice(typeof j.error === 'string' ? j.error : `Session action failed (${res.status}).`)
+        return
+      }
+      const asIds = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+      const gone = new Set<string>([...asIds(j.trashed), ...asIds(j.archived), ...asIds(j.purged)])
+      if (gone.size) {
+        setCouncilSessionList(prev => prev.filter(s => !gone.has(s.id)))
+        writeSessionLedger(readSessionLedger().filter(row => !gone.has(row.id)))
+      }
+      const labels: Record<string, string> = {
+        trash: 'moved to Trash', restore: 'restored', archive: 'archived', unarchive: 'unarchived', rename: 'renamed', purge: 'permanently deleted', 'cleanup-empty': 'unused empty sessions moved to Trash',
+      }
+      const n = asIds(j.trashed).length || asIds(j.restored).length || asIds(j.archived).length || asIds(j.purged).length
+        || (Array.isArray(j.renamed) ? j.renamed.length : 0)
+      setSessionNotice(`${n} session${n === 1 ? '' : 's'} ${labels[action] ?? action}.`)
+      if (action === 'rename' && Array.isArray(j.renamed)) {
+        const titles = new Map((j.renamed as Array<{ id: string; title: string }>).map(r => [r.id, r.title]))
+        setCouncilSessionList(prev => prev.map(s => titles.has(s.id) ? { ...s, title: titles.get(s.id) as string } : s))
+      }
+      await refreshCouncilSessionList()
+      if (sessionView !== 'active') await loadSessionView(sessionView)
+      else if (action === 'restore' || action === 'unarchive') void loadSessionView('trash')
+      if (activeId && gone.has(activeId)) void startFreshCouncilSession('new')
+    } catch (error) {
+      setSessionNotice(error instanceof Error ? error.message : 'Session action failed.')
+    } finally {
+      setSessionBulkBusy(false)
+    }
   }
 
   const clearCouncilSession = () => {
@@ -13919,6 +14016,14 @@ function Home() {
               onSelect={id => { void openCouncilSession(id) }}
               onRename={(id, title) => { void renameCouncilSession(id, title) }}
               onArchive={id => { void archiveCouncilSessionFromList(id) }}
+              view={sessionView}
+              onViewChange={changeSessionView}
+              trashSessions={trashSessions}
+              archivedSessions={archivedSessions}
+              counts={sessionCounts}
+              onBulk={bulkSessionAction}
+              busy={sessionBulkBusy}
+              notice={sessionNotice}
             />
           )}
           rightPanel={(

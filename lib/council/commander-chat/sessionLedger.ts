@@ -60,7 +60,7 @@ export function upsertLedgerSession(rows: readonly LedgerSession[], row: LedgerS
   return next.filter(item => {
     if (seen.has(item.id)) return false
     seen.add(item.id)
-    return item.state !== 'archived'
+    return item.state !== 'archived' && item.state !== 'trashed'
   })
 }
 
@@ -76,7 +76,24 @@ export function mergeSessionLists(remote: readonly LedgerSession[], local: reado
     const prior = byId.get(row.id)
     byId.set(row.id, prior ? { ...prior, ...row, id: row.id } : row)
   }
-  return [...byId.values()].filter(row => row.state !== 'archived')
+  return [...byId.values()].filter(row => row.state !== 'archived' && row.state !== 'trashed')
+}
+
+/**
+ * A browser-ledger row that exists only locally, was never used (default title, no preview, no message time) and is not the bound
+ * session. These are the "New Council Session / Empty session" ghosts: they were minted by a client id and never reached the server.
+ */
+export function isGhostLedgerRow(row: LedgerSession, remoteIds: ReadonlySet<string>, activeId: string | null): boolean {
+  if (remoteIds.has(row.id) || row.id === activeId) return false
+  const title = (row.title ?? '').trim()
+  if (title && title !== 'New Council Session') return false
+  if (row.preview && row.preview.trim()) return false
+  if (row.last_message_at) return false
+  return true
+}
+
+export function pruneGhostLedgerRows(rows: readonly LedgerSession[], remoteIds: ReadonlySet<string>, activeId: string | null): LedgerSession[] {
+  return rows.filter(row => !isGhostLedgerRow(row, remoteIds, activeId))
 }
 
 export function retitleLedgerSession(rows: readonly LedgerSession[], id: string, title: string, preview?: string | null): LedgerSession[] {

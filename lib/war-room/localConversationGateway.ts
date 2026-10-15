@@ -62,12 +62,30 @@ export async function localConversationsGet(req: Request, ownerId: string) {
   if (!available) return jsonWithPersistence({ conversations: [], persistence: health }, false, { status: 503 })
   const url = new URL(req.url)
   const q = url.searchParams.get('q')?.trim().toLowerCase() ?? ''
+  const view = url.searchParams.get('view') ?? 'active'
   const includeArchived = url.searchParams.get('includeArchived') === '1' || url.searchParams.get('archived') === '1'
   const store = getLocalOwnershipStore(dataDir())
-  let rows = store.listCouncilConversations(ownerId)
-  if (!includeArchived) rows = rows.filter(row => row.state !== 'archived')
-  if (q) rows = rows.filter(row => row.title.toLowerCase().includes(q))
-  return jsonWithPersistence({ conversations: rows.map(toPublicConversation), backend: 'local_ownership' }, true)
+  let rows: ReturnType<typeof store.listCouncilConversations>
+  if (view === 'trash') rows = store.listCouncilConversationsByState(ownerId, ['trashed'])
+  else if (view === 'archived') rows = store.listCouncilConversationsByState(ownerId, ['archived'])
+  else {
+    rows = store.listCouncilConversations(ownerId).filter(row => row.state !== 'trashed')
+    if (!includeArchived) rows = rows.filter(row => row.state !== 'archived')
+  }
+  if (q) {
+    rows = rows.filter(row => {
+      const council = row.metadata.council && typeof row.metadata.council === 'object' ? row.metadata.council as Record<string, unknown> : {}
+      const preview = typeof council.lastPreview === 'string' ? council.lastPreview.toLowerCase() : ''
+      return row.title.toLowerCase().includes(q) || preview.includes(q)
+    })
+  }
+  const counts = {
+    active: store.listCouncilConversations(ownerId).filter(row => row.state !== 'trashed' && row.state !== 'archived').length,
+    trashed: store.listCouncilConversationsByState(ownerId, ['trashed']).length,
+    archived: store.listCouncilConversationsByState(ownerId, ['archived']).length,
+    emptyUnused: store.findUnusedEmptyCouncilConversations(ownerId).length,
+  }
+  return jsonWithPersistence({ conversations: rows.map(toPublicConversation), counts, view, backend: 'local_ownership' }, true)
 }
 
 export async function localConversationsPost(req: Request, ownerId: string) {
@@ -75,7 +93,7 @@ export async function localConversationsPost(req: Request, ownerId: string) {
   if (!persistenceAllowsDurableCouncil(health)) {
     return jsonWithPersistence({ error: 'Local persistence is not writable.', persistence: health }, false, { status: 503 })
   }
-  let body: { title?: string; metadata?: Record<string, unknown> } = {}
+  let body: { title?: string; metadata?: Record<string, unknown>; forceNew?: boolean } = {}
   try {
     body = await req.json()
   } catch {
@@ -84,8 +102,96 @@ export async function localConversationsPost(req: Request, ownerId: string) {
   const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : 'New Council Session'
   const metadata = body.metadata && typeof body.metadata === 'object' ? body.metadata : { council: { source: 'live_council' } }
   const store = getLocalOwnershipStore(dataDir())
+  // Never accumulate unused empty sessions: if one already exists, hand that one back instead of creating another.
+  if (!body.forceNew && title === 'New Council Session') {
+    const existingEmpty = store.findUnusedEmptyCouncilConversations(ownerId)
+    if (existingEmpty.length > 0) {
+      const reuse = store.getCouncilConversation(ownerId, existingEmpty[0])
+      if (reuse) {
+        return jsonWithPersistence({ conversation: toPublicConversation(reuse), reused: true, backend: 'local_ownership' }, true, { status: 200 })
+      }
+    }
+  }
   const created = store.createCouncilConversation(ownerId, title, metadata)
   return jsonWithPersistence({ conversation: toPublicConversation(created), backend: 'local_ownership' }, true, { status: 201 })
+}
+
+export type BulkConversationAction = 'trash' | 'restore' | 'archive' | 'unarchive' | 'rename' | 'purge' | 'cleanup-empty'
+
+/**
+ * Bulk Council session operations for the sidebar. Owner scoped; nothing here is ever applied to ids the owner does not hold.
+ * Permanent deletion only touches conversations that are already in Trash and requires an explicit confirmation token.
+ */
+export async function localConversationsBulk(req: Request, ownerId: string) {
+  const health = await collectPersistenceHealth()
+  if (!persistenceAllowsDurableCouncil(health)) {
+    return jsonWithPersistence({ error: 'Local persistence is not writable.', persistence: health }, false, { status: 503 })
+  }
+  let body: { action?: string; ids?: unknown; mode?: string; text?: string; confirm?: string; dryRun?: boolean; excludeIds?: unknown } = {}
+  try {
+    body = await req.json()
+  } catch {
+    return jsonWithPersistence({ error: 'Invalid JSON body.' }, true, { status: 400 })
+  }
+  const action = body.action as BulkConversationAction
+  const ids = Array.isArray(body.ids) ? (body.ids as unknown[]).filter((x): x is string => typeof x === 'string' && x.length > 0 && x.length <= 80).slice(0, 500) : []
+  const store = getLocalOwnershipStore(dataDir())
+  const exclude = Array.isArray(body.excludeIds) ? (body.excludeIds as unknown[]).filter((x): x is string => typeof x === 'string') : []
+
+  if (action === 'cleanup-empty') {
+    const candidates = store.findUnusedEmptyCouncilConversations(ownerId, { excludeIds: exclude })
+    if (body.dryRun) return jsonWithPersistence({ action, dryRun: true, candidates, count: candidates.length }, true)
+    const res = store.trashCouncilConversations(ownerId, candidates)
+    return jsonWithPersistence({ action, ...res, count: res.trashed.length, note: 'moved to Trash; recoverable' }, true)
+  }
+  if (!ids.length) return jsonWithPersistence({ error: 'ids is required' }, true, { status: 400 })
+
+  if (action === 'trash') {
+    const res = store.trashCouncilConversations(ownerId, ids)
+    return jsonWithPersistence({ action, ...res }, true)
+  }
+  if (action === 'restore' || action === 'unarchive') {
+    const res = store.restoreCouncilConversations(ownerId, ids)
+    return jsonWithPersistence({ action, ...res }, true)
+  }
+  if (action === 'archive') {
+    const done: string[] = []
+    const skipped: string[] = []
+    for (const id of ids) {
+      const existing = store.getCouncilConversation(ownerId, id)
+      if (!existing || existing.state === 'trashed') { skipped.push(id); continue }
+      store.patchCouncilConversation(ownerId, id, { state: 'archived' })
+      done.push(id)
+    }
+    return jsonWithPersistence({ action, archived: done, skipped }, true)
+  }
+  if (action === 'rename') {
+    const text = typeof body.text === 'string' ? body.text.trim().slice(0, 120) : ''
+    if (!text) return jsonWithPersistence({ error: 'text is required' }, true, { status: 400 })
+    const mode = body.mode === 'prefix' || body.mode === 'suffix' ? body.mode : 'set'
+    const renamed: Array<{ id: string; title: string }> = []
+    const skipped: string[] = []
+    let n = 0
+    for (const id of ids) {
+      const existing = store.getCouncilConversation(ownerId, id)
+      if (!existing || existing.state === 'trashed') { skipped.push(id); continue }
+      n += 1
+      const next = mode === 'prefix' ? `${text} ${existing.title}`
+        : mode === 'suffix' ? `${existing.title} ${text}`
+        : ids.length > 1 ? `${text} (${n})` : text
+      const updated = store.patchCouncilConversation(ownerId, id, { title: next.slice(0, 200) })
+      renamed.push({ id, title: updated?.title ?? next.slice(0, 200) })
+    }
+    return jsonWithPersistence({ action, renamed, skipped }, true)
+  }
+  if (action === 'purge') {
+    if (body.confirm !== 'DELETE_PERMANENTLY') {
+      return jsonWithPersistence({ error: 'Permanent deletion requires confirm: "DELETE_PERMANENTLY".', code: 'CONFIRMATION_REQUIRED' }, true, { status: 400 })
+    }
+    const res = store.purgeCouncilConversations(ownerId, ids)
+    return jsonWithPersistence({ action, ...res }, true)
+  }
+  return jsonWithPersistence({ error: `Unknown action ${String(body.action)}` }, true, { status: 400 })
 }
 
 export async function localConversationGet(ownerId: string, id: string) {
@@ -153,8 +259,9 @@ export async function localConversationDelete(ownerId: string, id: string) {
   const store = getLocalOwnershipStore(dataDir())
   const existing = store.getCouncilConversation(ownerId, id)
   if (!existing) return jsonWithPersistence({ error: 'Not found' }, true, { status: 404 })
-  store.patchCouncilConversation(ownerId, id, { state: 'archived' })
-  return jsonWithPersistence({ ok: true, id, deleted_at: new Date().toISOString(), backend: 'local_ownership' }, true)
+  // "Delete" from the sidebar moves the session to Trash; it stays recoverable until the Commander empties Trash.
+  store.trashCouncilConversations(ownerId, [id])
+  return jsonWithPersistence({ ok: true, id, trashed: true, deleted_at: new Date().toISOString(), backend: 'local_ownership' }, true)
 }
 
 export async function localConversationMessagePost(req: Request, ownerId: string, conversationId: string) {
