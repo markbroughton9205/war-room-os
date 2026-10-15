@@ -9,7 +9,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { redactSecretsFromOutput } from '@/lib/native-builder/outputRedaction'
-import { chromiumChildEnv, loadPlaywrightChromium, resolvePlaywrightChromiumExecutable } from '@/lib/native-builder/foundryPlaywright'
+import { chromiumChildEnv, loadPlaywrightChromium } from '@/lib/native-builder/foundryPlaywright'
+import { resolveBrokerChromium } from './chromiumExecutable'
 import { classifyBrowserAction } from './actionClassifier'
 import { parseStructuredReleases } from './researchPolicy'
 import { browserBrokerDataDirs, playwrightTmpDir, withPlaywrightTmpDir } from './paths'
@@ -142,7 +143,7 @@ export class BrowserBroker {
   }
 
   private probeConfiguration(): void {
-    const executable = resolvePlaywrightChromiumExecutable()
+    const executable = resolveBrokerChromium().path
     if (!executable || !existsSync(executable)) {
       this.playwrightAvailability = 'unavailable'
       if (!this.browser) this.health = 'MISCONFIGURED'
@@ -235,7 +236,7 @@ export class BrowserBroker {
       })
     }
     this.probeConfiguration()
-    const executable = resolvePlaywrightChromiumExecutable() ?? null
+    const executable = resolveBrokerChromium().path ?? null
     const capable = this.playwrightAvailability === 'available' && Boolean(executable)
     let chromiumState: ChromiumRuntimeState = 'UNKNOWN'
     if (this.health === 'MISCONFIGURED' || this.playwrightAvailability === 'unavailable') chromiumState = 'MISSING'
@@ -252,6 +253,7 @@ export class BrowserBroker {
       chromiumState,
       chromiumPid: this.chromiumPid(),
       chromiumExecutable: executable,
+      chromiumSource: resolveBrokerChromium().source,
       engine: 'playwright-chromium',
       engineVersion: this.engineVersion,
       activeSessions: this.sessions.size,
@@ -289,7 +291,7 @@ export class BrowserBroker {
   async start(): Promise<BrokerResult<{ pid: number | null; executable: string | null }>> {
     if (this.browser?.isConnected()) {
       this.health = this.sessions.size ? 'READY' : 'READY'
-      return { ok: true, result: { pid: this.chromiumPid(), executable: resolvePlaywrightChromiumExecutable() ?? null } }
+      return { ok: true, result: { pid: this.chromiumPid(), executable: resolveBrokerChromium().path ?? null } }
     }
     if (this.startLock) return this.startLock
     this.startLock = this.launchChromium()
@@ -309,7 +311,7 @@ export class BrowserBroker {
       this.recordFailure('PLAYWRIGHT_NOT_INSTALLED', '@playwright/test is not resolvable.')
       return err('PLAYWRIGHT_NOT_INSTALLED: @playwright/test is not resolvable.')
     }
-    const executable = loaded.executablePath
+    const executable = resolveBrokerChromium().path
     if (!executable || !existsSync(executable)) {
       this.health = 'MISCONFIGURED'
       this.playwrightAvailability = 'unavailable'
@@ -1540,6 +1542,54 @@ export class BrowserBroker {
       return { ok: true, result: { degraded: true } }
     }
     return { ok: true, result: { path: shot.result.path, degraded: false } }
+  }
+
+  /**
+   * In-memory JPEG of the active tab for the visible Council computer. Never written to disk (the live view polls it), and it never
+   * mutates the page. Reading a frame is allowed in any control state: the Commander can always watch.
+   */
+  async liveFrame(sessionId: string, tabId?: string): Promise<BrokerResult<{ jpeg: Buffer; width: number; height: number; url: string; title: string }>> {
+    const session = this.sessions.get(sessionId)
+    if (!session || session.controlState === 'CLOSED') return err('SESSION_NOT_FOUND')
+    const tab = this.requireTab(sessionId, tabId)
+    if (!tab.ok) return tab
+    const page = tab.result.page
+    const viewport = page.viewportSize() ?? { width: 1280, height: 720 }
+    const jpeg = await page.screenshot({ type: 'jpeg', quality: 55, fullPage: false, timeout: WAIT_TIMEOUT_MS })
+    return { ok: true, result: { jpeg, width: viewport.width, height: viewport.height, url: redactUrl(page.url()), title: await page.title().catch(() => '') } }
+  }
+
+  /** Coordinate click on the visible frame. Obeys control ownership: only the controlling owner may act. Audit records coordinates only. */
+  async clickAt(input: { owner: BrowserOwner; sessionId: string; tabId?: string; x: number; y: number }): Promise<BrokerResult<{ clicked: boolean }>> {
+    const session = this.sessions.get(input.sessionId)
+    if (!session) return err('SESSION_NOT_FOUND')
+    const control = this.assertControl(session, input.owner, true)
+    if (!control.ok) return control
+    const tab = this.requireTab(input.sessionId, input.tabId)
+    if (!tab.ok) return tab
+    const viewport = tab.result.page.viewportSize() ?? { width: 1280, height: 720 }
+    if (!Number.isFinite(input.x) || !Number.isFinite(input.y) || input.x < 0 || input.y < 0 || input.x > viewport.width || input.y > viewport.height) {
+      return err('CLICK_OUT_OF_BOUNDS')
+    }
+    await tab.result.page.mouse.click(input.x, input.y)
+    this.touchSession(session, 'click_at')
+    void recordBrowserAudit({ owner: input.owner, action_type: 'CLICK_AT', result: 'ok', session_id: input.sessionId, profile_id: session.profileId })
+    return { ok: true, result: { clicked: true } }
+  }
+
+  /** Types into whatever has focus on the page. The audit records only the character count: typed text (passwords) is never logged. */
+  async typeText(input: { owner: BrowserOwner; sessionId: string; tabId?: string; text: string }): Promise<BrokerResult<{ typed: number }>> {
+    const session = this.sessions.get(input.sessionId)
+    if (!session) return err('SESSION_NOT_FOUND')
+    const control = this.assertControl(session, input.owner, true)
+    if (!control.ok) return control
+    const tab = this.requireTab(input.sessionId, input.tabId)
+    if (!tab.ok) return tab
+    const text = input.text.slice(0, 500)
+    await tab.result.page.keyboard.type(text, { delay: 12 })
+    this.touchSession(session, 'type_text')
+    void recordBrowserAudit({ owner: input.owner, action_type: 'TYPE_TEXT', result: `chars=${text.length}`, session_id: input.sessionId, profile_id: session.profileId })
+    return { ok: true, result: { typed: text.length } }
   }
 
   async press(input: { owner: BrowserOwner; sessionId: string; tabId?: string; text: string }): Promise<BrokerResult<{ pressed: boolean }>> {

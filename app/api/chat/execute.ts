@@ -258,6 +258,7 @@ import { maybeHandleGiFrontDoor } from '@/lib/council/gi'
 import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/server'
 import { buildAttribution, isSkippedFamilyCall } from '@/lib/council/stage1/attribution'
 import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
+import { browseMessageText, browseRequestUrl, councilBrowse } from '@/lib/council/computer/browse.server'
 import { probeSubsystems, renderSubsystemAnswer, subsystemQuestion } from '@/lib/council/subsystems/probe'
 import { realSubsystemDeps } from '@/lib/council/subsystems/real.server'
 import { buildResearchEvidenceBlock, runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
@@ -1001,6 +1002,23 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         stage1.decision = { ...stage1.decision, route: 'self_knowledge', members: [], externalResearch: false, reasons: [...stage1.decision.reasons, 'subsystem state question answered from live read-only probes'] }
       } catch (err) {
         console.error('[council-subsystems] probe failed; continuing without it:', err instanceof Error ? err.message : err)
+      }
+    }
+  }
+  // "open https://… and tell me what it says": Council browses in the visible shared browser (real page, real read, shown on the
+  // Council computer). Refused honestly if the Commander holds control or the origin policy denies it.
+  if (stage1 && !stage1.finalResponse && !councilCommand.directInvocation) {
+    const browseUrl = browseRequestUrl(raelDirectiveText)
+    if (browseUrl) {
+      try {
+        const r = await councilBrowse({ url: browseUrl })
+        const text = r.ok
+          ? browseMessageText(r)
+          : `Council could not open ${browseUrl}: ${r.error}${r.verdict ? ` (${r.verdict})` : ''}. Nothing was read.`
+        stage1.finalResponse = { text, status: r.ok ? 'COMPLETED' : 'PARTIAL', claims: [], mode: 'stage1_subsystems' }
+        stage1.decision = { ...stage1.decision, route: 'self_knowledge', members: [], externalResearch: false, reasons: [...stage1.decision.reasons, 'explicit open-this-page request executed in the visible browser'] }
+      } catch (err) {
+        console.error('[council-computer] browse failed; continuing without it:', err instanceof Error ? err.message : err)
       }
     }
   }

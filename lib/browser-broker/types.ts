@@ -125,6 +125,8 @@ export type BrowserBrokerDiagnostics = {
   chromiumState: ChromiumRuntimeState
   chromiumPid: number | null
   chromiumExecutable: string | null
+  /** where the launched Chromium comes from (Playwright cache, explicit env, or an installed system Chrome) */
+  chromiumSource?: 'PLAYWRIGHT_CACHE' | 'EXPLICIT_ENV' | 'SYSTEM_CHROME' | 'NONE'
   engine: 'playwright-chromium'
   engineVersion: string | null
   activeSessions: number

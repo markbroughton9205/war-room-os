@@ -4,6 +4,8 @@
  */
 import assert from 'node:assert/strict'
 import { probeSubsystems, renderSubsystemAnswer, subsystemQuestion, type SubsystemProbeDeps } from './probe'
+import { browseMessageText, browseRequestUrl } from '@/lib/council/computer/browse.server'
+import { resolveBrokerChromium } from '@/lib/browser-broker/chromiumExecutable'
 
 let passed = 0
 const ok = (name: string) => { passed += 1; console.log(`PASS ${name}`) }
@@ -75,5 +77,20 @@ const byId = (states: Awaited<ReturnType<typeof probeSubsystems>>) => Object.fro
   ok('5: state questions are detected narrowly; the answer names status, reason, interface and what is not exposed')
 }
 
-console.log(`\n${passed}/5 council subsystem validations passed`)
-assert.equal(passed, 5)
+// 6. explicit browse requests: only an open/visit-style request with an http(s) URL; text is honest about what was read
+{
+  assert.equal(browseRequestUrl('please open https://example.com/docs and tell me what it says.'), 'https://example.com/docs')
+  assert.equal(browseRequestUrl('visit http://127.0.0.1:4777/ now'), 'http://127.0.0.1:4777/')
+  assert.equal(browseRequestUrl('what is https://example.com'), null, 'a URL without an open/visit request is not a browse request')
+  assert.equal(browseRequestUrl('open the pod bay doors'), null)
+  assert.equal(browseRequestUrl('open javascript:alert(1)'), null)
+  const text = browseMessageText({ ok: true, sessionId: 's', title: 'Example Domain', url: 'https://example.com/', status: 200, excerpt: 'This domain is for use in examples.', citationId: null })
+  assert.match(text, /opened https:\/\/example\.com\//); assert.match(text, /HTTP 200/); assert.match(text, /What it read: This domain/)
+  const chromium = resolveBrokerChromium()
+  assert.ok(['PLAYWRIGHT_CACHE', 'EXPLICIT_ENV', 'SYSTEM_CHROME', 'NONE'].includes(chromium.source))
+  assert.equal(Boolean(chromium.path), chromium.source !== 'NONE', 'the reported source always matches whether a browser was found')
+  ok('6: browse requests are detected narrowly; the message states what was opened and read; the browser source is reported truthfully')
+}
+
+console.log(`\n${passed}/6 council subsystem validations passed`)
+assert.equal(passed, 6)
