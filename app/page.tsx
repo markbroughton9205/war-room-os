@@ -7159,6 +7159,7 @@ function Home() {
         const merged = pruneGhostLedgerRows(mergeSessionLists(remoteRows, readSessionLedger()), new Set(remoteRows.map(row => row.id)), bootActiveId)
         writeSessionLedger(merged)
         setCouncilSessionList(merged)
+        void refreshCouncilSessionList()
         let id: string | null = typeof sessionStorage !== 'undefined'
           ? sessionStorage.getItem(LIVE_COUNCIL_CONV_STORAGE_KEY)
           : null
@@ -12846,7 +12847,7 @@ function Home() {
         writeSessionLedger(readSessionLedger().filter(row => !gone.has(row.id)))
       }
       const labels: Record<string, string> = {
-        trash: 'moved to Trash', restore: 'restored', archive: 'archived', unarchive: 'unarchived', rename: 'renamed', purge: 'permanently deleted', 'cleanup-empty': 'unused empty sessions moved to Trash',
+        trash: 'moved to Trash', restore: 'restored', archive: 'archived', unarchive: 'unarchived', rename: 'renamed', purge: 'permanently deleted', 'cleanup-empty': 'moved to Trash (unused and empty)',
       }
       const n = asIds(j.trashed).length || asIds(j.restored).length || asIds(j.archived).length || asIds(j.purged).length
         || (Array.isArray(j.renamed) ? j.renamed.length : 0)
