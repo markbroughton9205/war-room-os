@@ -132,7 +132,11 @@ export async function localConversationPatch(req: Request, ownerId: string, id: 
         metadata = { ...metadata, council: { ...prevCouncil, ...incomingCouncil as Record<string, unknown> } }
       }
     } else {
-      metadata = body.metadata
+      // councilStage1 is server-owned provenance; a client-side full replace must not erase it.
+      const keep = existing.metadata.councilStage1
+      metadata = keep !== undefined && body.metadata.councilStage1 === undefined
+        ? { ...body.metadata, councilStage1: keep }
+        : body.metadata
     }
   }
   const updated = store.patchCouncilConversation(ownerId, id, {

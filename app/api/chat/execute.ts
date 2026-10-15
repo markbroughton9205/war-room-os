@@ -254,6 +254,10 @@ import {
   type EbcPublicSnapshot,
 } from '@/lib/council/evidence-board'
 import { maybeHandleGiFrontDoor } from '@/lib/council/gi'
+import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/server'
+import { buildAttribution } from '@/lib/council/stage1/attribution'
+import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
+import { recordStage1Turn } from '@/lib/council/stage1/turn'
 import { lightweightIntelligencePublic, runCouncilIntelligenceMission } from '@/lib/council/intelligence'
 import type { CouncilIntelligencePublic } from '@/lib/council/intelligence/types'
 
@@ -762,6 +766,9 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   // conversationId) plus how long assembly took, without needing to touch each of this
   // function's ~20 individual return points. warRoomContextSnapshotId/contextAssemblyDurationMs
   // are assigned once, below, before any provider dispatch happens.
+  // Council Stage 1 analysis; assigned once the decree text is known (declared here so every
+  // withTrace call site, including early ones, can read it without a temporal dead zone).
+  let stage1: Stage1TurnResult | null = null
   const withTrace = <T extends Record<string, unknown>>(payload: T) => {
     signal.throwIfAborted()
     try {
@@ -772,10 +779,35 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         err instanceof Error ? err.message : err,
       )
     }
+    // Council Stage 1: every response carries the truthful attribution record derived from what
+    // the payload proves (deterministic Stage 1 answers already supply their own record).
+    let councilStage1 = (payload as Record<string, unknown>).councilStage1
+    if (!councilStage1 && stage1) {
+      try {
+        councilStage1 = {
+          understanding: stage1.understanding,
+          decision: stage1.decision,
+          provenance: stage1.provenance,
+          attribution: buildAttribution(payload as Record<string, unknown>, stage1.decision),
+        }
+      } catch { /* attribution must never break a response */ }
+    }
+    if (stage1) {
+      recordStage1Turn({
+        req,
+        // Local Home ledger ids are not remote UUIDs and are detached above; Stage 1 persistence
+        // uses the raw id and is gated by owner-scoped lookup in the local store.
+        conversationId: typeof body.conversationId === 'string' ? body.conversationId.trim().slice(0, 80) : null,
+        stage1,
+        payload: payload as Record<string, unknown>,
+        councilStage1: councilStage1 as Record<string, unknown> | undefined,
+      })
+    }
     return attachCouncilTrace(
       attachCouncilProgress(
         {
           ...payload,
+          ...(councilStage1 ? { councilStage1 } : {}),
           conversationId: payload.conversationId ?? conversationId,
           councilRoster: displayCouncilRoster,
           agiContextSnapshotId: warRoomContextSnapshotId,
@@ -875,7 +907,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   })
   const councilGatherPhase = body.councilGatherPhase === 'decree_soft' ? 'decree_soft' : null
   const councilSingleFamilyEarly = body.councilSingleFamily as CouncilSingleFamily | undefined
-  const raelDirectiveText =
+  const raelDirectiveTextBase =
     typeof body.raelDirectiveText === 'string' && body.raelDirectiveText.trim()
       ? body.raelDirectiveText.trim()
       : message.trim()
@@ -883,6 +915,20 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         : conversationalTurn
           ? 'Continue council dialogue on the active topic without a new decree. Respond once; challenge only if material.'
           : message
+  // Council Stage 1: deterministic language understanding + coordination. Folds resolved
+  // references/corrections into the decree and may answer the turn itself (no model call).
+  try {
+    stage1 = conversationalTurn && !message.trim()
+      ? null
+      : runStage1Turn({
+          turnId: typeof body.councilLogicalRequestId === 'string' && body.councilLogicalRequestId ? body.councilLogicalRequestId : `s1-${Date.now().toString(36)}`,
+          text: raelDirectiveTextBase,
+          thread: body.threadHistory,
+        })
+  } catch (err) {
+    console.error('[council-stage1] analysis failed; continuing without it:', err instanceof Error ? err.message : err)
+  }
+  const raelDirectiveText = stage1?.effectiveText ?? raelDirectiveTextBase
 
   if (
     detectUninstalledKimiMoonshotCommand(message)
@@ -925,6 +971,24 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
    */
   const classifiedTurn = classifyCouncilTurn(raelDirectiveText)
   const ebcClassification = classifyEvidenceBoardMission({ commanderMessage: raelDirectiveText })
+  if (stage1?.finalResponse) {
+    const fr = stage1.finalResponse
+    return NextResponse.json(withTrace({
+      councilSingleResponse: fr.text,
+      results: [],
+      mode: fr.mode,
+      hardStop: true,
+      showContinue: false,
+      councilStage1: {
+        status: fr.status,
+        understanding: stage1.understanding,
+        decision: stage1.decision,
+        provenance: stage1.provenance,
+        claims: fr.claims,
+        responder: { kind: 'deterministic', label: fr.mode === 'stage1_self_knowledge' ? 'War Room knowledge (installed state + docs)' : 'Clarification', model: null },
+      },
+    }))
+  }
   const giFrontDoor = await maybeHandleGiFrontDoor({
     text: raelDirectiveText,
     conversationId,
@@ -1683,13 +1747,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         councilResearchPhases: report.phases,
         showContinue: true,
         liveResearchAttempted: true,
-        liveResearchUi: {
-          mode: report.sourcesUnavailable ? 'unavailable' : 'verified',
-          sourcesCount: report.sources.length,
-          label: 'Council Research Team',
-          councilPhase: 'model_running',
-          responseCompletion: 'complete',
-        },
+        liveResearchUi: (() => {
+          const honest = researchUiFromReport(report)
+          return {
+            mode: honest.mode,
+            sourcesCount: honest.sourcesCount,
+            label: honest.label,
+            councilPhase: 'model_running' as const,
+            responseCompletion: 'complete' as const,
+          }
+        })(),
       }))
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Council research team failed.'
