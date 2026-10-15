@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { rowState, filterRows, stateCounts } from '../lib/agents/ops/assignmentFilter.mjs'
+import { rowState, filterRows, stateCounts, stateOptions } from '../lib/agents/ops/assignmentFilter.mjs'
 
 test('[C1] rowState returns state from last segment', () => {
   assert.strictEqual(rowState({ title: 'Task · RUNNING' }), 'RUNNING')
@@ -83,4 +83,23 @@ test('[C3] stateCounts returns counts per state', () => {
   assert.strictEqual(counts.STOPPED, 1)
   assert.strictEqual(Object.keys(counts).length, 2)
   assert.strictEqual(Object.keys(stateCounts([])).length, 0)
+})
+
+test('[C4] stateOptions returns array of {state, count, label} sorted by state', () => {
+  const rows = [
+    { title: 'Task · RUNNING', detail: 'details' },
+    { title: 'Task · STOPPED', detail: 'details' },
+    { title: 'Task · RUNNING', detail: 'details' }
+  ]
+  const options = stateOptions(rows)
+  assert.strictEqual(options.length, 2)
+  assert.deepStrictEqual(options[0], { state: 'RUNNING', count: 2, label: 'RUNNING (2)' })
+  assert.deepStrictEqual(options[1], { state: 'STOPPED', count: 1, label: 'STOPPED (1)' })
+  assert.strictEqual(options[0].state.localeCompare(options[1].state) < 0, true)
+})
+
+test('[C4] stateOptions returns empty array for non-array input', () => {
+  assert.deepStrictEqual(stateOptions(null), [])
+  assert.deepStrictEqual(stateOptions(undefined), [])
+  assert.deepStrictEqual(stateOptions({}), [])
 })

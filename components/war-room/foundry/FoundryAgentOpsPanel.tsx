@@ -7,7 +7,7 @@ import { FoundryEngineeringMissions } from './FoundryEngineeringMissions'
 import { FoundryReverseEngineer } from './FoundryReverseEngineer'
 import { FoundryHelp } from './FoundryHelp'
 import { buildOpsViewModel, type Control, type LoadState, type OpsEnvelope } from '@/lib/agents/ops/uiState'
-import { filterRows, stateCounts } from '@/lib/agents/ops/assignmentFilter.mjs'
+import { filterRows, stateCounts, stateOptions } from '@/lib/agents/ops/assignmentFilter.mjs'
 
 /** Phase 10 operator surface: durable agents, long-lived workers, approvals, actions, errors, usage. Controls call the Commander-gated API. */
 export function FoundryAgentOpsPanel() {
@@ -96,8 +96,8 @@ export function FoundryAgentOpsPanel() {
         <div className="mb-2 flex gap-2">
           <select data-testid="assignment-state-filter" className="text-black text-sm p-1" value={filterState} onChange={(e) => setFilterState(e.target.value)}>
             <option value="ALL">All States</option>
-            {Object.entries(stateCounts(vm.sections.assignments.rows)).map(([state]) => (
-              <option key={state} value={state}>{state}</option>
+            {stateOptions(vm.sections.assignments.rows).map((opt) => (
+              <option key={opt.state} value={opt.state}>{opt.label}</option>
             ))}
           </select>
           <input data-testid="assignment-text-filter" className="text-black text-sm p-1 flex-1" placeholder="Search..." value={filterText} onChange={(e) => setFilterText(e.target.value)} />
