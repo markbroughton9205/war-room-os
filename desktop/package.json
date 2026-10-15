@@ -95,7 +95,6 @@
       "icon": "assets/linux-icons",
       "category": "Utility",
       "executableName": "war-room-os",
-      "syncDesktopName": true,
       "maintainer": "War Room OS <noreply@warroomos.com>",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "synopsis": "Sovereign AI Operations Headquarters",
