@@ -120,6 +120,8 @@ const CONTINUATION_RE = [
 const QUESTION_START_RE = /^(what|why|how|when|where|who|which|whose|is|are|do|does|did|can|could|would|should|will|am|was|were|tell me|explain|describe|define)\b/
 const COMMAND_VERB_RE = /^(please |now |go ahead and |just )?(build|run|start|launch|execute|deploy|install|create|make|fix|delete|remove|stop|cancel|kill|restart|push|commit|merge|write|generate|implement|set up|setup|promote|pull|download|send|email|schedule|apply|patch|refactor|rename)\b/
 const FOLLOW_STARTER_RE = /^(why|how so|and|but|so|what about|how about|really|then|also|meaning|which one|more|elaborate|go on)\b/
+/** Only these bare phrasings are recovered deterministically; anything with more content passes through. */
+export const BARE_CONTINUATION_RE = /^(please )?(continue|resume|pick up|carry on|keep going)( (where|from where) (we|i) (left off|stopped|were|left)| from (earlier|last time))?[\s.!?]*$/i
 const SOCIAL_RE = /^(hi+|hello|hey+|yo+|sup|good (morning|afternoon|evening)|thanks|thank you|thanks a lot|cool|nice|ok(ay)?|got it|gm)\b[\s!.?]*$/
 const REFERENCE_RE = /\b(the other one|the other|that one|this one|those|these|that|it|them|the same|same thing|the first one|the second one|the last one|former|latter)\b/
 
@@ -182,6 +184,9 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
   const words = norm.split(' ').filter(Boolean)
   const isCorrection = CORRECTION_RE.some(r => r.test(norm))
   const continuation = CONTINUATION_RE.some(r => r.test(norm))
+  const bareContinuation = BARE_CONTINUATION_RE.test(norm) || /^(continue|resume|pick up|carry on|keep going) where (we|i) (left off|stopped|were|left)[\s.!?]*$/.test(norm)
+  const correctionRemainder = norm.replace(/^(no|nope|nah|wrong|not quite|incorrect)\b[\s,.!:;-]*/, '')
+  const correctionCarriesCommand = isCorrection && COMMAND_VERB_RE.test(correctionRemainder)
   const hasQuestionMark = /\?\s*$/.test(input.text.trim())
   const questionLike = hasQuestionMark || QUESTION_START_RE.test(norm)
   const commandLike = COMMAND_VERB_RE.test(norm) && !hasQuestionMark
@@ -191,8 +196,9 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
 
   let act: DialogueAct
   if (SOCIAL_RE.test(norm)) act = 'social'
+  else if (correctionCarriesCommand) act = 'command'
   else if (isCorrection) act = 'correction'
-  else if (continuation) act = 'continuation'
+  else if (continuation && bareContinuation) act = 'continuation'
   else if (commandLike) act = 'command'
   else if (shortTurn && ownTopics.length === 0 && (hasRef || FOLLOW_STARTER_RE.test(norm) || words.length <= 2)) act = 'follow_up'
   else if (questionLike) act = 'question'
@@ -202,7 +208,7 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
   const references = hasRef && history.length ? resolveReferences(norm, history) : []
 
   let correction: TurnUnderstanding['correction'] = null
-  if (act === 'correction') {
+  if (act === 'correction' || correctionCarriesCommand) {
     const prevCommander = lastWhere(history, h => h.role === 'commander')
     const rep = norm.match(/.*\b(?:i meant|i mean|i said|i was asking(?: about)?|actually)\b[\s,:]*(.+)$/)
     correction = {
@@ -243,7 +249,7 @@ export function understandTurn(input: { text: string; history?: HistoryTurn[] })
     topics,
     references,
     correction,
-    continuation,
+    continuation: bareContinuation,
     clarification,
     normalizationNotes: notes,
   }

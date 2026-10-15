@@ -207,7 +207,7 @@ export function computeLiveResearchClientUi(
     return { mode: 'partial', sourcesCount, label: `Sources conflict — ${counts}`, ...shared }
   }
   if (packet.usedLiveResearch && packet.confidence >= 0.72 && sourcesCount >= 2 && !packet.researchErrorSummary && failedLegs === 0) {
-    return { mode: 'verified', sourcesCount, label: `Corroborated by ${counts}`, ...shared }
+    return { mode: 'verified', sourcesCount, label: `${counts}; consistent signals, not independently checked`, ...shared }
   }
   if (packet.usedLiveResearch && sourcesCount >= 1) {
     return {

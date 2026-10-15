@@ -214,5 +214,22 @@ check('continuation notes unfinished turn', /did not finish cleanly/.test(t3.fin
 check('continuation without records asks, never invents', buildContinuationResponse([]).status === 'WAITING')
 check('self knowledge via full turn has provenance', runStage1Turn({ turnId: 'x4', text: "What's your purpose inside War Room?", thread: [], state: STATE }).provenance.localKnowledgeCount > 0)
 
+// --- reviewer regressions (commands must never be swallowed into canned answers)
+check('"no, deploy it to staging" is a command', understandTurn({ text: 'No, deploy the fix to staging', history: hist }).act === 'command')
+const swallow = runStage1Turn({ turnId: 'r1', text: 'No, deploy the fix to staging', thread, state: STATE })
+check('command-bearing correction not answered as a bare correction', swallow.finalResponse === null || !/setting aside/.test(swallow.finalResponse.text))
+check('continue-with-instruction not recovered', runStage1Turn({ turnId: 'r2', text: 'continue the build from the last checkpoint', thread, state: STATE, priorTurns: prior }).finalResponse === null)
+check('compound install question not self-knowledge', !isSelfKnowledgeQuestion(understandTurn({ text: 'Can you install the latest build and tell me what is installed?' })))
+check('role statement not self-knowledge', !isSelfKnowledgeQuestion(understandTurn({ text: 'Your role in this mission is to review the installed packages' })))
+check('live status not answered from probes', !isSelfKnowledgeQuestion(understandTurn({ text: 'what is running right now' })))
+const worse = mergeTurnRecord({ ...baseRec, status: 'PARTIAL' }, { ...baseRec, contributions: [], status: 'COMPLETED' })
+check('merge never upgrades PARTIAL', worse.status !== 'COMPLETED', worse.status)
+check('merge with different decree replaces', mergeTurnRecord({ ...baseRec, decree: 'a' }, { ...baseRec, decree: 'b' }).decree === 'b')
+check('SYSTEM result is not a member contribution', buildAttribution({ results: [{ family: 'SYSTEM', status: 'OK', content: 'notice' }] }, null).contributions.length === 0)
+check('OK without backend is not COMPLETED', buildAttribution({ results: [{ family: 'ORION', status: 'OK', content: 'x' }] }, null).contributions[0].status === 'FAILED')
+check('same-host sources are not corroboration', researchUiFromReport({ sourcesUnavailable: false, unknowns: [], sources: [
+  { title: 'a', url: 'https://x.example/1', snippet: '', provider: 'p', freshnessStatus: 'unknown', confidence: 1, evidenceLabel: 'LIVE_SIGNAL_BACKED', publishedAt: null },
+  { title: 'b', url: 'https://www.x.example/2', snippet: '', provider: 'p', freshnessStatus: 'unknown', confidence: 1, evidenceLabel: 'LIVE_SIGNAL_BACKED', publishedAt: null }] }).mode === 'partial')
+
 console.log(`council-stage1 validation: ${pass} passed, ${failures.length} failed`)
 if (failures.length) { for (const f of failures) console.error('FAIL ' + f); process.exit(1) }

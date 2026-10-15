@@ -44,15 +44,17 @@ function key(c: Contribution): string {
 
 /** Per-family continuation calls share a turnId; merge their contributions rather than overwrite. */
 export function mergeTurnRecord(prev: Stage1TurnRecord | undefined, next: Stage1TurnRecord): Stage1TurnRecord {
-  if (!prev) return next
+  if (!prev || prev.decree !== next.decree) return next
   const byKey = new Map<string, Contribution>()
   for (const c of prev.contributions) byKey.set(key(c), c)
   for (const c of next.contributions) byKey.set(key(c), c)
   const contributions = Array.from(byKey.values()).sort((a, b) => a.order - b.order).map((c, i) => ({ ...c, order: i + 1 }))
   const ok = contributions.filter(c => c.status === 'COMPLETED').length
-  const status: Stage1Status = next.status === 'WAITING' || next.status === 'CANCELLED' || next.status === 'INTERRUPTED'
-    ? next.status
-    : contributions.length === 0 ? next.status : ok === contributions.length ? 'COMPLETED' : ok === 0 ? 'FAILED' : 'PARTIAL'
+  const RANK: Record<Stage1Status, number> = { COMPLETED: 0, PARTIAL: 1, WAITING: 2, RUNNING: 2, QUEUED: 2, CANCELLED: 3, INTERRUPTED: 3, FAILED: 4 }
+  const fromContribs: Stage1Status = contributions.length === 0 ? next.status : ok === contributions.length ? 'COMPLETED' : ok === 0 ? 'FAILED' : 'PARTIAL'
+  // A merge may add evidence of completion but never erases an earlier or later failure.
+  const worst = [prev.status, next.status, fromContribs].reduce((a, b) => (RANK[b] > RANK[a] ? b : a))
+  const status: Stage1Status = worst
   return {
     ...next,
     contributions,

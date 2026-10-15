@@ -259,6 +259,7 @@ import { buildAttribution } from '@/lib/council/stage1/attribution'
 import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
 import { recordStage1Turn } from '@/lib/council/stage1/turn'
 import { readStage1Turns } from '@/lib/council/stage1/persist'
+import { BARE_CONTINUATION_RE } from '@/lib/council/stage1/language'
 import { lightweightIntelligencePublic, runCouncilIntelligenceMission } from '@/lib/council/intelligence'
 import type { CouncilIntelligencePublic } from '@/lib/council/intelligence/types'
 
@@ -921,7 +922,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   try {
     const s1ConversationId = typeof body.conversationId === 'string' ? body.conversationId.trim().slice(0, 80) : null
     const s1Text = raelDirectiveTextBase
-    const s1WantsRecovery = /\b(continue|resume|pick up|carry on|keep going)\b/i.test(s1Text) && /\b(where|left|stopped|off|earlier|last)\b/i.test(s1Text)
+    const s1WantsRecovery = BARE_CONTINUATION_RE.test(s1Text.trim())
     const s1PriorTurns = s1WantsRecovery ? await readStage1Turns(req, s1ConversationId) : undefined
     stage1 = conversationalTurn && !message.trim()
       ? null
@@ -934,7 +935,10 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   } catch (err) {
     console.error('[council-stage1] analysis failed; continuing without it:', err instanceof Error ? err.message : err)
   }
-  const raelDirectiveText = stage1?.effectiveText ?? raelDirectiveTextBase
+  // Routing/classification always uses the Commander's own words; the resolved-reference note is
+  // supplied to models only (prompt builders below).
+  const raelDirectiveText = raelDirectiveTextBase
+  const raelDirectiveTextForModel = stage1?.effectiveText ?? raelDirectiveTextBase
 
   if (
     detectUninstalledKimiMoonshotCommand(message)
@@ -1046,15 +1050,16 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     : selectedSeatsFromEbc(ebcClassification)
   // Council Stage 1: a simple question gets the one competent member the coordinator chose, not
   // the whole plan. Only ever narrows (never adds) and never touches scout-swarm missions.
-  const stage1NarrowedSeats = !astraMission && stage1?.decision.route === 'direct_member' && stage1.decision.complexity === 'simple'
+  const stage1NarrowedSeats = !astraMission && !shouldDispatchEvidenceBoardCouncil(ebcClassification.mission_class) && stage1?.decision.route === 'direct_member' && stage1.decision.complexity === 'simple'
     ? seatsForParticipatingAgents(stage1.decision.members.map(m => m.toLowerCase() as NebulaAgentId))
         .filter(seat => nebulaSelectedSeatsBase.includes(seat))
     : []
   const stage1Narrowed = stage1NarrowedSeats.length > 0
   const nebulaSelectedSeats = stage1Narrowed ? stage1NarrowedSeats : nebulaSelectedSeatsBase
   if (stage1Narrowed) {
-    nebulaRoundPlan.participatingAgentIds = nebulaRoundPlan.participatingAgentIds.filter(id =>
+    const keepIds = nebulaRoundPlan.participatingAgentIds.filter(id =>
       stage1!.decision.members.map(m => m.toLowerCase()).includes(id))
+    if (keepIds.length) nebulaRoundPlan.participatingAgentIds = keepIds
   }
   let nebulaRound: CouncilRound = createCouncilRound({
     roundId: nebulaRoundPlan.roundId,
@@ -2197,7 +2202,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       const sharePriors = opts?.sharePriors !== false
       const prompt = opts?.promptOverride ?? buildDeliberationPrompt({
         role,
-        commanderMessage: raelDirectiveText,
+        commanderMessage: raelDirectiveTextForModel,
         evidenceReferences,
         priorTurns: sharePriors ? session.turns : [],
         targetTurn: opts?.targetTurn,
@@ -2472,7 +2477,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     }
 
     const baseUserPrompt = buildCouncilUserPrompt({
-      raelDirectiveText,
+      raelDirectiveText: raelDirectiveTextForModel,
       threadBlock: thread,
       augmentBlock,
       intentLabel: intentState.intent,
@@ -3589,7 +3594,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         }
       } else {
         userPrompt = buildCouncilUserPrompt({
-          raelDirectiveText,
+          raelDirectiveText: raelDirectiveTextForModel,
           threadBlock: thread,
           augmentBlock: grokAugmentBlock,
           intentLabel: intentState.intent,

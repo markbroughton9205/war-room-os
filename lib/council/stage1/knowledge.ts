@@ -68,11 +68,16 @@ const SELF_RE = /\b(purpose|role|job|who are you|what are you|what do you do|wha
 
 /** True when the turn is a question about War Room itself (never needs the internet). */
 export function isSelfKnowledgeQuestion(u: TurnUnderstanding): boolean {
-  if (u.act !== 'question' && u.act !== 'follow_up' && u.act !== 'statement') return false
+  if (u.act !== 'question' && u.act !== 'follow_up') return false
   const t = u.normalized
+  const words = t.split(' ').filter(Boolean)
+  // Single short clause only: compound or instruction-bearing turns go to the members.
+  if (words.length > 22 || /[;]|\b(and then|then|also|and (install|build|run|deploy|fix|start|update|delete|create))\b/.test(t)) return false
+  if (/\b(install|build|deploy|run|start|fix|delete|update|create|restart|launch|execute)\b.*\b(it|them|this|that|the|a|my)\b/.test(t) && !/\b(what|which|who)\b/.test(t.split(' ').slice(0, 2).join(' '))) return false
+  // Live runtime state has its own path; never answer it from file probes.
+  if (/\b(running|status|health|healthy|online|up|working|alive|right now|currently|available now)\b/.test(t)) return false
   const mentionsSelf = /\b(war room|council|foundry|terra|higher vision studios|you|your)\b/.test(t) || u.topics.length > 0
   if (!mentionsSelf) return false
-  // External-world research cues take priority over self-knowledge routing.
   if (/\b(news|latest|price of|stock|weather|score|election|compare .* (vendors|products)|according to (the )?(web|internet))\b/.test(t)) return false
   return SELF_RE.test(t) || (u.act === 'follow_up' && u.topics.length > 0)
 }
@@ -109,29 +114,29 @@ export function answerSelfKnowledge(u: TurnUnderstanding, state: InstalledState)
   }
   for (const c of chosen) {
     const s = status(c, state)
-    claims.push({ id: c.id, text: c.text, status: s.status, tier: s.tier, source: s.tier === 1 ? `installed probe: ${c.probe}` : c.docSource })
-    lines.push(`${s.status === 'FACT' ? '' : '[' + s.status + '] '}${c.text}${s.status === 'FACT' ? '' : ' (' + s.note + ')'}`)
+    claims.push({ id: c.id, text: c.text, status: s.status === 'FACT' ? 'DOCUMENTED' : s.status, tier: s.tier, source: s.tier === 1 ? `docs: ${c.docSource}; install probe: ${c.probe} present` : c.docSource })
+    lines.push(`${c.text} (${s.status === 'FACT' ? 'description from project docs; the matching module is present in this install' : s.note})`)
   }
 
   if (chosen.some(c => c.id === 'council') || asksPurpose || /member|who/.test(u.normalized)) {
     const live = state.roster.filter(r => r.status === 'active')
     const foundation = state.roster.filter(r => r.status !== 'active')
     if (live.length) {
-      claims.push({ id: 'roster', text: `Active members: ${live.map(r => `${r.name} (${r.role})`).join('; ')}`, status: 'FACT', tier: 1, source: 'running code: nebula identity registry' })
-      lines.push(`Active members right now: ${live.map(r => `${r.name} — ${r.role}`).join('; ')}.`)
+      claims.push({ id: 'roster', text: `Registered active members: ${live.map(r => `${r.name} (${r.role})`).join('; ')}`, status: 'FACT', tier: 1, source: 'running code: nebula identity registry' })
+      lines.push(`Registered as active in the Council identity registry: ${live.map(r => `${r.name} — ${r.role}`).join('; ')}. (This is registry state, not a live model health check.)`)
     }
     if (foundation.length) {
       lines.push(`Registered but not yet live: ${foundation.map(r => r.name).join(', ')}.`)
     }
     if (state.sharedLocalModel) {
       claims.push({ id: 'shared-model', text: `Members currently share one local model: ${state.sharedLocalModel}`, status: 'FACT', tier: 1, source: 'running code: nebula model profile' })
-      lines.push(`Honest note: today the members are separate identities and role contracts running on one shared local model (${state.sharedLocalModel}), not separate models. Each member is a separate call with its own role prompt; I will say so in the provenance of every contribution.`)
+      lines.push(`Honest note: today the members are separate identities and role contracts running on one shared local model (${state.sharedLocalModel}), not separate models. Contributions are attributed to the model that actually produced them in the contribution record.`)
     }
   }
 
   if (state.stamp) {
     claims.push({ id: 'install', text: `Installed build ${state.stamp.install_id} (commit ${state.stamp.gitShort}, built ${state.stamp.builtAt})`, status: 'FACT', tier: 1, source: 'INSTALL_STAMP.json' })
-    lines.push(`This install: ${state.stamp.install_id} (commit ${state.stamp.gitShort}, built ${state.stamp.builtAt}).`)
+    lines.push(`Install stamp found for this runtime: ${state.stamp.install_id} (commit ${state.stamp.gitShort}, built ${state.stamp.builtAt}${state.stamp.gitDirty ? ', built from a DIRTY tree' : ''}).`)
   } else {
     unknowns.push('install stamp not found; I cannot state which build is running')
   }

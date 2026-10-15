@@ -2,7 +2,7 @@
 import type { Stage1TurnRecord } from './record'
 
 export function buildContinuationResponse(turns: Stage1TurnRecord[]): { text: string; status: 'COMPLETED' | 'WAITING' } {
-  const usable = turns.filter(t => t.decree && t.status !== 'QUEUED')
+  const usable = turns.filter(t => t.decree && t.status !== 'QUEUED' && t.mode !== 'stage1_clarification' && !t.understanding.continuation)
   if (usable.length === 0) {
     return {
       status: 'WAITING',

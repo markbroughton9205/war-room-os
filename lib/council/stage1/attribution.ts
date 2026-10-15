@@ -85,6 +85,7 @@ export function buildAttribution(payload: AnyRec, decision: CoordinatorDecision 
     let order = 0
     for (const r of arr(payload.results).map(rec)) {
       if (!r) continue
+      if (/^(system|war room|council|stage1)$/i.test(String(r.family ?? ''))) continue
       const b = rec(r.backend)
       order++
       contributions.push({
@@ -92,7 +93,7 @@ export function buildAttribution(payload: AnyRec, decision: CoordinatorDecision 
         member: str(r.family) ?? 'UNKNOWN',
         seat: null,
         role: 'contribution',
-        status: mapStatus(str(r.status)),
+        status: mapStatus(str(r.status)) === 'COMPLETED' && (!str(r.content) || !b) ? 'FAILED' : mapStatus(str(r.status)),
         model: str(b?.model),
         provider: str(b?.provider),
         backendType: b?.backendType === 'LOCAL' || b?.backendType === 'EXTERNAL' ? b.backendType : null,
@@ -101,7 +102,7 @@ export function buildAttribution(payload: AnyRec, decision: CoordinatorDecision 
         agreements: [],
         disagreements: [],
         fallbackFrom: str(b?.fallbackFrom),
-        failureReason: str(r.error),
+        failureReason: str(r.error) ?? (mapStatus(str(r.status)) === 'COMPLETED' && (!str(r.content) || !b) ? 'no content or no backend record for this result' : null),
       })
     }
   }

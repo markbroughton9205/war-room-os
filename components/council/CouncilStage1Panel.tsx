@@ -89,7 +89,7 @@ export function CouncilStage1Panel({ conversationId, refreshKey }: { conversatio
     const abort = new AbortController()
     // Server persists after the response; give it a moment, then read the owner-scoped record.
     const timer = setTimeout(() => {
-      fetch(`/api/conversations/${conversationId}`, { cache: 'no-store', signal: abort.signal })
+      fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, { cache: 'no-store', signal: abort.signal })
         .then(r => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((j: { conversation?: { metadata?: Record<string, unknown> } }) => {
           const raw = j.conversation?.metadata?.councilStage1 as Stage1Metadata | undefined

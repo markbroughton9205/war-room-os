@@ -26,7 +26,8 @@ export function researchUiFromReport(report: Pick<ResearchReport, 'sources' | 's
   if (report.sourcesUnavailable || accepted === 0) {
     return { mode: 'unavailable', sourcesCount: 0, accepted: 0, considered, rejected, label: `Research unavailable — 0 accepted of ${considered} considered${tail}` }
   }
-  if (live >= 2 && report.unknowns.length === 0) {
+  const domains = new Set(acceptedSources.filter(x => x.evidenceLabel === 'LIVE_SIGNAL_BACKED').map(x => { try { return new URL(x.url as string).hostname.replace(/^www\./, '') } catch { return '' } }).filter(Boolean))
+  if (live >= 2 && domains.size >= 2 && (report.unknowns ?? []).length === 0) {
     return { mode: 'verified', sourcesCount: accepted, accepted, considered, rejected, label: `Corroborated — ${accepted} accepted of ${considered} considered${tail}` }
   }
   return { mode: 'partial', sourcesCount: accepted, accepted, considered, rejected, label: `Research partial — ${accepted} accepted of ${considered} considered${tail}` }
