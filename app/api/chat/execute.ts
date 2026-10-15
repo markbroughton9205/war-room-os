@@ -258,6 +258,7 @@ import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/serve
 import { buildAttribution } from '@/lib/council/stage1/attribution'
 import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
 import { recordStage1Turn } from '@/lib/council/stage1/turn'
+import { readStage1Turns } from '@/lib/council/stage1/persist'
 import { lightweightIntelligencePublic, runCouncilIntelligenceMission } from '@/lib/council/intelligence'
 import type { CouncilIntelligencePublic } from '@/lib/council/intelligence/types'
 
@@ -918,9 +919,14 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   // Council Stage 1: deterministic language understanding + coordination. Folds resolved
   // references/corrections into the decree and may answer the turn itself (no model call).
   try {
+    const s1ConversationId = typeof body.conversationId === 'string' ? body.conversationId.trim().slice(0, 80) : null
+    const s1Text = raelDirectiveTextBase
+    const s1WantsRecovery = /\b(continue|resume|pick up|carry on|keep going)\b/i.test(s1Text) && /\b(where|left|stopped|off|earlier|last)\b/i.test(s1Text)
+    const s1PriorTurns = s1WantsRecovery ? await readStage1Turns(req, s1ConversationId) : undefined
     stage1 = conversationalTurn && !message.trim()
       ? null
       : runStage1Turn({
+          priorTurns: s1PriorTurns,
           turnId: typeof body.councilLogicalRequestId === 'string' && body.councilLogicalRequestId ? body.councilLogicalRequestId : `s1-${Date.now().toString(36)}`,
           text: raelDirectiveTextBase,
           thread: body.threadHistory,
@@ -1035,9 +1041,21 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
     nebulaRoundPlan.participatingAgentIds = [...astraMission.selectedPermanentSeats]
     nebulaRoundPlan.verificationRequested = true
   }
-  const nebulaSelectedSeats = astraMission
+  const nebulaSelectedSeatsBase = astraMission
     ? astraMission.selectedPermanentSeats.map(agentId => SWARM_SEAT_BY_AGENT[agentId])
     : selectedSeatsFromEbc(ebcClassification)
+  // Council Stage 1: a simple question gets the one competent member the coordinator chose, not
+  // the whole plan. Only ever narrows (never adds) and never touches scout-swarm missions.
+  const stage1NarrowedSeats = !astraMission && stage1?.decision.route === 'direct_member' && stage1.decision.complexity === 'simple'
+    ? seatsForParticipatingAgents(stage1.decision.members.map(m => m.toLowerCase() as NebulaAgentId))
+        .filter(seat => nebulaSelectedSeatsBase.includes(seat))
+    : []
+  const stage1Narrowed = stage1NarrowedSeats.length > 0
+  const nebulaSelectedSeats = stage1Narrowed ? stage1NarrowedSeats : nebulaSelectedSeatsBase
+  if (stage1Narrowed) {
+    nebulaRoundPlan.participatingAgentIds = nebulaRoundPlan.participatingAgentIds.filter(id =>
+      stage1!.decision.members.map(m => m.toLowerCase()).includes(id))
+  }
   let nebulaRound: CouncilRound = createCouncilRound({
     roundId: nebulaRoundPlan.roundId,
     requestId: councilTrace.councilTraceId,
@@ -1052,6 +1070,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   if (familyDeliberationRequested) {
     // Family deep path expects PHOENIX when floor-eligible; scout missions keep their own roster.
     const includeRedTeam = classifiedTurn.intent !== 'SOCIAL_CHECKIN'
+      && !stage1Narrowed
       && (nebulaSelectedSeats.includes('red_team') || !astraMission)
     const localCouncilLive = localRoutingBypassesCloudFloorGate()
     const nebulaConfigured = Object.fromEntries(nebulaSelectedSeats.map(seat => [seat, true])) as Partial<Record<CouncilOrchestrationFamily, boolean>>

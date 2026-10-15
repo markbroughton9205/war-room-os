@@ -25,4 +25,19 @@ export async function persistStage1Turn(req: Request, conversationId: string | n
   }
 }
 
+/** Owner-scoped read of the persisted turn records (empty when unauthenticated or not found). */
+export async function readStage1Turns(req: Request, conversationId: string | null | undefined): Promise<Stage1TurnRecord[]> {
+  if (!conversationId) return []
+  try {
+    const { localCommanderOwnerId } = await import('@/lib/war-room/localConversationGateway')
+    const ownerId = await localCommanderOwnerId(req)
+    if (!ownerId) return []
+    const store = getLocalOwnershipStore(process.env.WAR_ROOM_LOCAL_DATA_DIR ?? null)
+    const conv = store.getCouncilConversation(ownerId, conversationId)
+    return conv ? readStage1Metadata(conv.metadata)?.turns ?? [] : []
+  } catch {
+    return []
+  }
+}
+
 export { buildTurnRecord }

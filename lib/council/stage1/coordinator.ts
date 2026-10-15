@@ -4,6 +4,7 @@
  */
 import type { CoordinatorDecision, TurnUnderstanding } from './types'
 import { isSelfKnowledgeQuestion } from './knowledge'
+import { classifyAstraIntent, selectAgentsForIntent } from '@/lib/council/nebula/roundFlow'
 
 export type RosterMember = {
   id: string // 'ORION'
@@ -70,15 +71,20 @@ export function coordinate(input: CoordinatorInput): CoordinatorDecision {
     return { ...base, complexity, route: ids.length > 1 ? 'small_group' : 'direct_member', members: ids, excluded, externalResearch: research, reasons: ['Commander addressed specific member(s)'] }
   }
 
-  let want = complexity === 'simple' ? 1 : complexity === 'research' ? 3 : 3
-  want = Math.min(want, cap)
-  const ranked = [...input.roster]
+  // Reuse the existing ASTRA intent plan as the candidate set (no second orchestration system);
+  // Stage 1 only narrows it. Fall back to the whole roster if ASTRA names nobody we can run.
+  const astraNames = selectAgentsForIntent(classifyAstraIntent(input.understanding.normalized)).map(id => id.toUpperCase())
+  const fromAstra = input.roster.filter(r => astraNames.includes(r.id))
+  const candidates = fromAstra.length ? fromAstra : input.roster
+  const want = Math.min(complexity === 'simple' ? 1 : 3, cap, candidates.length)
+  const ranked = [...candidates]
     .map(m => ({ m, s: score(m, text) + (input.priorParticipants?.includes(m.id) ? 0.5 : 0) }))
     .sort((a, b) => b.s - a.s || a.m.id.localeCompare(b.m.id))
   let picked = ranked.slice(0, want).map(x => x.m)
-  // Always keep a synthesizer when more than one voice speaks, so disagreement is integrated, not hidden.
-  const synth = input.roster.find(r => /integrat|synthes/i.test(r.role))
+  // Keep the synthesizer when more than one voice speaks, so disagreement is integrated, not hidden.
+  const synth = candidates.find(r => /integrat|synthes/i.test(r.role))
   if (picked.length > 1 && synth && !picked.includes(synth)) picked = [...picked.slice(0, want - 1), synth]
+  if (fromAstra.length) reasons.push(`ASTRA intent plan offered ${fromAstra.map(f => f.id).join(', ')}`)
   for (const r of input.roster) if (!picked.includes(r)) excluded.push({ member: r.id, reason: complexity === 'simple' ? 'simple question: one competent member is enough' : 'lower relevance to this question' })
   reasons.push(`${complexity} question -> ${picked.length} member(s)`)
   if (research) reasons.push('question requires external evidence')

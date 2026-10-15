@@ -11,6 +11,8 @@ import { answerSelfKnowledge, collectInstalledState, isSelfKnowledgeQuestion, ty
 import { coordinate, type RosterMember } from './coordinator'
 import { COORDINATOR_ACTOR, createLedger, deterministicActor, record, summarizeLedger } from './provenance'
 import { understandTurn } from './language'
+import { buildContinuationResponse } from './continuation'
+import type { Stage1TurnRecord } from './record'
 import type { CoordinatorDecision, HistoryTurn, KnowledgeClaim, Stage1Status, TurnUnderstanding } from './types'
 
 const COMMANDER_SENDERS = /^(ra'?el|commander|user|you|me)$/i
@@ -109,6 +111,8 @@ export function runStage1Turn(input: {
   thread: unknown
   state?: InstalledState
   addressed?: string[]
+  /** Persisted turn records for this owner+conversation (used only to recover "continue"). */
+  priorTurns?: Stage1TurnRecord[]
 }): Stage1TurnResult {
   const history = historyFromThread(input.thread)
   // The thread already contains this very decree when the client appends before sending.
@@ -141,6 +145,21 @@ export function runStage1Turn(input: {
     ledger.localKnowledge.push(...ans.claims.map(c => ({ claimId: c.id, source: c.source, status: c.status })))
     record(ledger, deterministicActor('war-room-knowledge', 'War Room knowledge (installed state + docs)'), 'answer',
       `${ans.claims.length} claims; tiers ${ans.tiersConsulted.join(',')}; external research: none`, 'COMPLETED')
+  }
+
+  if (!finalResponse && understanding.act === 'correction' && !understanding.correction?.replacement
+      && understanding.normalized.split(' ').length <= 9) {
+    const prev = understanding.correction?.supersedes
+    const text = prev
+      ? `Understood — I am setting aside my previous reading of “${prev.slice(0, 160)}”. What did you mean? A few words on the subject, or what you wanted instead, is enough.`
+      : 'Understood. I have no earlier request in this session to correct. What did you mean?'
+    finalResponse = { text, status: 'WAITING', claims: [], mode: 'stage1_clarification' }
+    record(ledger, deterministicActor('correction', 'Correction handling (deterministic)'), 'ask', 'correction without replacement; asked for the intended meaning', 'WAITING')
+  } else if (!finalResponse && understanding.continuation && input.priorTurns) {
+    const cont = buildContinuationResponse(input.priorTurns)
+    finalResponse = { text: cont.text, status: cont.status, claims: [], mode: 'stage1_clarification' }
+    record(ledger, deterministicActor('continuation', 'Session recovery (persisted turn records)'), 'recover',
+      `${input.priorTurns.length} persisted turn(s) read`, cont.status)
   }
 
   let effectiveText = input.text

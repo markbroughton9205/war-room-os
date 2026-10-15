@@ -4,6 +4,8 @@ import { coordinate, planSerialExecution, type RosterMember } from './coordinato
 import { accountResearch, judgeSource } from './research'
 import { createLedger, deriveTurnStatus, modelActor, record, summarizeLedger, COORDINATOR_ACTOR } from './provenance'
 import { buildAttribution } from './attribution'
+import { buildContinuationResponse } from './continuation'
+import { runStage1Turn } from './server'
 import { buildTurnRecord, mergeTurnRecord, readStage1Metadata, upsertTurn, STAGE1_MAX_TURNS } from './record'
 import { researchUiFromReport } from './researchUi'
 import type { HistoryTurn } from './types'
@@ -198,6 +200,19 @@ const hud = researchUiFromReport({
 check('HUD counts only accepted', hud.sourcesCount === 1 && hud.considered === 3 && hud.rejected === 2)
 check('HUD one live source is not verified', hud.mode === 'partial')
 check('HUD none accepted is unavailable', researchUiFromReport({ sourcesUnavailable: false, unknowns: [], sources: [] }).mode === 'unavailable')
+
+// --- correction without content / continuation recovery through the full Stage 1 turn
+const thread = [{ sender: "RA'EL", content: 'tell me about foundry' }, { sender: 'ORION', content: 'Foundry runs engineering missions.' }]
+const t1 = runStage1Turn({ turnId: 'x1', text: "no, that's not what i meant", thread, state: STATE })
+check('bare correction is acknowledged not defended', t1.finalResponse?.status === 'WAITING' && /setting aside my previous reading/.test(t1.finalResponse.text), t1.finalResponse?.text)
+const t2 = runStage1Turn({ turnId: 'x2', text: "no, i meant terra", thread, state: STATE })
+check('correction with content goes to members with context', t2.finalResponse === null && /Commander meant: terra/.test(t2.effectiveText), t2.effectiveText)
+const prior = [buildTurnRecord({ turnId: 'p1', decree: 'design the persistence boundary', responseText: 'we should isolate', mode: null, understanding: understandTurn({ text: 'design the persistence boundary' }), decision: dArch, attribution: att })]
+const t3 = runStage1Turn({ turnId: 'x3', text: 'continue where we stopped', thread: [], state: STATE, priorTurns: prior })
+check('continuation recovers last turn', /design the persistence boundary/.test(t3.finalResponse?.text ?? '') && /PARTIAL/.test(t3.finalResponse?.text ?? ''))
+check('continuation notes unfinished turn', /did not finish cleanly/.test(t3.finalResponse?.text ?? ''))
+check('continuation without records asks, never invents', buildContinuationResponse([]).status === 'WAITING')
+check('self knowledge via full turn has provenance', runStage1Turn({ turnId: 'x4', text: "What's your purpose inside War Room?", thread: [], state: STATE }).provenance.localKnowledgeCount > 0)
 
 console.log(`council-stage1 validation: ${pass} passed, ${failures.length} failed`)
 if (failures.length) { for (const f of failures) console.error('FAIL ' + f); process.exit(1) }

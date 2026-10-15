@@ -85,7 +85,7 @@ export function CouncilStage1Panel({ conversationId, refreshKey }: { conversatio
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!conversationId) { setMeta(null); return }
+    if (!conversationId) return
     const abort = new AbortController()
     // Server persists after the response; give it a moment, then read the owner-scoped record.
     const timer = setTimeout(() => {
@@ -101,7 +101,7 @@ export function CouncilStage1Panel({ conversationId, refreshKey }: { conversatio
     return () => { clearTimeout(timer); abort.abort() }
   }, [conversationId, refreshKey])
 
-  const turns = meta?.turns ?? []
+  const turns = conversationId ? meta?.turns ?? [] : []
   return (
     <div className="mt-2 space-y-2" data-testid="council-stage1-panel">
       <p className="text-[10px] font-bold uppercase tracking-widest text-cyan-300">Who contributed</p>
