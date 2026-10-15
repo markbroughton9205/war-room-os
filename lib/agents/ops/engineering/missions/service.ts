@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { AgentOpsLog } from '../../log'
 import { deriveAssignments } from '../assignments'
@@ -102,9 +102,9 @@ export async function startFromApi(deps: RunnerDeps, body: Record<string, unknow
     request = d.request; paths = d.paths; write = d.write; targets = d.targets
   }
   // existing files named in the write scope are seeded too, otherwise the builder cannot modify them
-  if (analysisId && write.length) { const r0 = engineeringRepo(deps.log); if (r0) paths = [...new Set([...paths, ...write.filter((f) => { try { return existsSync(path.join(r0, f)) && !path.isAbsolute(f) && !f.split('/').includes('..') } catch { return false } })])] }
+  if (analysisId && write.length) { const r0 = engineeringRepo(deps.log); if (r0) paths = [...new Set([...paths, ...write.filter((f) => { try { return !f.includes('\\') && statSync(path.join(r0, f)).isFile() && !path.isAbsolute(f) && !f.split('/').includes('..') } catch { return false } })])] }
   // every declared write path is a build target (modify when it exists in the repository, create otherwise), so the verifier covers all of them
-  if (analysisId && write.length) { const r0 = engineeringRepo(deps.log); const have = new Set(targets.map((t) => t.path)); for (const f of write) if (!have.has(f)) targets = [...targets, { path: f, action: r0 && existsSync(path.join(r0, f)) ? 'modify' as const : 'create' as const }] }
+  if (analysisId && write.length) { const r0 = engineeringRepo(deps.log); const have = new Set(targets.map((t) => t.path)); for (const f of write) if (!have.has(f) && !f.endsWith('/')) targets = [...targets, { path: f, action: r0 && (() => { try { return statSync(path.join(r0, f)).isFile() } catch { return false } })() ? 'modify' as const : 'create' as const }] }
   const repo = paths.length ? engineeringRepo(deps.log) : null
   if (paths.length && !repo) throw new MissionError('SCOPE', 'no engineering repository is configured on this machine (WAR_ROOM_ENGINEERING_REPO or engineering-config.json)')
   const draft: MissionDraft = { title: String(body.title ?? ''), request, acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets, install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths } } : {}) }, analysisId }
