@@ -231,19 +231,24 @@ export async function localConversationPatch(req: Request, ownerId: string, id: 
         ? metadata.council as Record<string, unknown>
         : {}
       const incomingCouncil = body.metadata.council
-      const { council: _drop, councilStage1: _s1, ...rest } = body.metadata
+      const { council: _drop, councilStage1: _s1, councilMissions: _cm0, ...rest } = body.metadata
       void _drop
       void _s1
+      void _cm0
       metadata = { ...metadata, ...rest }
       if (incomingCouncil && typeof incomingCouncil === 'object' && !Array.isArray(incomingCouncil)) {
         metadata = { ...metadata, council: { ...prevCouncil, ...incomingCouncil as Record<string, unknown> } }
       }
     } else {
       // councilStage1 is server-owned provenance: never accept it from a client, always carry over.
-      const { councilStage1: _s1, ...incoming } = body.metadata
+      // councilStage1 and councilMissions are server-owned records: never accepted from a client, always carried over.
+      const { councilStage1: _s1, councilMissions: _cm, ...incoming } = body.metadata
       void _s1
-      const keep = existing.metadata.councilStage1
-      metadata = keep !== undefined ? { ...incoming, councilStage1: keep } : incoming
+      void _cm
+      let kept: Record<string, unknown> = incoming
+      if (existing.metadata.councilStage1 !== undefined) kept = { ...kept, councilStage1: existing.metadata.councilStage1 }
+      if (existing.metadata.councilMissions !== undefined) kept = { ...kept, councilMissions: existing.metadata.councilMissions }
+      metadata = kept
     }
   }
   const updated = store.patchCouncilConversation(ownerId, id, {

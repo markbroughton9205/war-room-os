@@ -17,6 +17,9 @@ const CORE_PERSISTABLE_FAMILY_IDS = new Set<CouncilOrchestrationFamily>([
 
 const PERSISTABLE_FAMILY_LABELS = new Set([
   ...COUNCIL_ROSTER.filter(r => CORE_PERSISTABLE_FAMILY_IDS.has(r.id)).map(r => r.label.toUpperCase()),
+  // Server-originated Council messages: the Foundry result returned into a conversation and the mission-proposal notice.
+  'FOUNDRY',
+  'COUNCIL',
   'AURORA',
   'NOVA',
   'PULSAR',
