@@ -259,6 +259,8 @@ import { runStage1Turn, type Stage1TurnResult } from '@/lib/council/stage1/serve
 import { buildAttribution, isSkippedFamilyCall } from '@/lib/council/stage1/attribution'
 import { researchUiFromReport } from '@/lib/council/stage1/researchUi'
 import { browseMessageText, browseRequestUrl, councilBrowse } from '@/lib/council/computer/browse.server'
+import { decideCouncilModelTurn, deferralNotice, gpuPolicyFromEnv } from '@/lib/council/resources/gpuArbitration'
+import { activeFoundryMission } from '@/lib/council/resources/foundryGpu.server'
 import { probeSubsystems, renderSubsystemAnswer, subsystemQuestion } from '@/lib/council/subsystems/probe'
 import { realSubsystemDeps } from '@/lib/council/subsystems/real.server'
 import { buildResearchEvidenceBlock, runStage1Research, type Stage1ResearchRun } from '@/lib/council/stage1/researchRun'
@@ -1056,6 +1058,28 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       },
     }))
   }
+
+  // One local GPU: while a live Foundry mission holds it, Council model turns are deferred (no member is called; nothing is faked).
+  if (stage1 && !stage1.finalResponse) {
+    const gpu = decideCouncilModelTurn({ policy: gpuPolicyFromEnv(), activeMission: activeFoundryMission() })
+    if (!gpu.run) {
+      const notice = deferralNotice(gpu)
+      await persistStage1Assistant(req, stage1RawConversationId, {
+        content: notice,
+        family: 'COUNCIL',
+        metadata: { stage1: true, roundRequestId: stage1.provenance.turnId, providerLabel: 'Resource discipline (Foundry holds the GPU)', providerModel: null, deterministic: true, councilDeferred: { missionId: gpu.holder.id } },
+      }).catch(() => undefined)
+      return NextResponse.json(withTrace({
+        councilSingleResponse: notice,
+        results: [],
+        mode: 'council_deferred_foundry_busy',
+        hardStop: true,
+        showContinue: false,
+        councilDeferred: { reason: gpu.reason, missionId: gpu.holder.id, state: gpu.holder.state },
+      }))
+    }
+  }
+
   const giFrontDoor = await maybeHandleGiFrontDoor({
     text: raelDirectiveText,
     conversationId,
