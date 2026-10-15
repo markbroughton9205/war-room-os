@@ -101,6 +101,8 @@ export async function startFromApi(deps: RunnerDeps, body: Record<string, unknow
     const d = buildDraftFromAnalysis(a, { request, paths, write, targets }, { derivedFromProse: body.fromAnalysis === undefined && !targets.some((t) => t.path) })
     request = d.request; paths = d.paths; write = d.write; targets = d.targets
   }
+  // existing files named in the write scope are seeded too, otherwise the builder cannot modify them
+  if (analysisId && write.length) { const r0 = engineeringRepo(deps.log); if (r0) paths = [...new Set([...paths, ...write.filter((f) => { try { return existsSync(path.join(r0, f)) && !path.isAbsolute(f) && !f.split('/').includes('..') } catch { return false } })])] }
   const repo = paths.length ? engineeringRepo(deps.log) : null
   if (paths.length && !repo) throw new MissionError('SCOPE', 'no engineering repository is configured on this machine (WAR_ROOM_ENGINEERING_REPO or engineering-config.json)')
   const draft: MissionDraft = { title: String(body.title ?? ''), request, acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets, install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths } } : {}) }, analysisId }

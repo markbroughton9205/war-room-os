@@ -54,7 +54,9 @@ export function wrapSandboxed(argv: string[], opts: SandboxOpts): { argv: string
   // host unix sockets (ssh/gpg agent, dbus, docker) are reachable through the read-only root even without a network namespace
   for (const d of ['/run', '/mnt', '/media']) if (existsSync(d)) args.push('--tmpfs', d)
   if (home && home !== '/') args.push('--tmpfs', home)
-  const ro = new Set<string>([...(opts.ro ?? []), ...homeDirs(process.execPath), ...homeDirs(argv[0].includes('/') ? argv[0] : '')])
+  // executables found through PATH under HOME (nvm, ~/.local/bin) would vanish behind the HOME tmpfs: keep only those toolchain prefixes visible, read-only
+  const pathDirs = (process.env.PATH ?? '').split(path.delimiter).filter((d) => d.startsWith(home + path.sep)).map((d) => path.basename(d) === 'bin' ? path.dirname(d) : d)
+  const ro = new Set<string>([...pathDirs, ...(process.env.WAR_ROOM_ENG_NODE ? homeDirs(process.env.WAR_ROOM_ENG_NODE) : []),...(opts.ro ?? []), ...homeDirs(process.execPath), ...homeDirs(argv[0].includes('/') ? argv[0] : '')])
   for (const d of ro) if (existsSync(d)) args.push('--ro-bind', d, d)
   for (const d of opts.rw) { if (!existsSync(d)) throw new SandboxUnavailable(`sandbox writable directory missing: ${d}`); args.push('--bind', d, d) }
   return { argv: ['bwrap', ...args, '--chdir', opts.cwd ?? opts.rw[0], '--', ...argv], sandboxed: true }
