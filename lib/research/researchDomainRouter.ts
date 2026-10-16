@@ -27,7 +27,7 @@ const DOMAIN_PATTERNS: Record<Exclude<ResearchDomain, 'GENERAL_CURRENT' | 'HYBRI
   ECONOMIC_FINANCIAL:
     /\b(economy|economic|gdp|inflation|interest rate|market(?:s)?|stock|earnings|financ(?:e|ial)|investment|fiscal|monetary)\b/i,
   SCIENCE_ACADEMIC:
-    /\b(research paper|study shows|scientists?|scientific|peer.?reviewed?|journal|preprint|clinical trial|biomedical|academic|arxiv|pubmed|public research|lithium|batter(?:y|ies)|electrochem(?:ical|istry)?|degradation)\b/i,
+    /\b(research paper|study shows|scientists?|scientific|peer.?reviewed?|journal|preprint|clinical trial|biomedical|academic|arxiv|pubmed|public research|lithium|batter(?:y|ies)|electrochem(?:ical|istry)?|degradation|language models?|llms?|machine learning|deep learning|neural networks?|hallucinat\w+|retrieval.augmented|meta.analys[ie]s|systematic review|randomi[sz]ed)\b/i,
 }
 
 /**

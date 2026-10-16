@@ -49,7 +49,7 @@ export const CAPABILITIES: CapabilityEntry[] = [
   },
   {
     id: 'sandbox', topic: 'sandbox',
-    text: 'Foundry runs model-generated code (tests, servers, verifiers, type-checks) inside an operating-system sandbox on Linux so a mission cannot reach outside its workspace; it is the build/verification sandbox, separate from any browser workspace (a visible browser workspace is a planned Stage 2 item, not installed).',
+    text: 'Foundry runs model-generated code (tests, servers, verifiers, type-checks) inside an operating-system sandbox on Linux so a mission cannot reach outside its workspace; it is the build/verification sandbox, separate from any browser workspace (the visible Council computer is a separate browser workspace).',
     docSource: 'lib/agents/ops/engineering/runtime/sandbox.ts', probe: 'lib/agents/ops/engineering/runtime/sandbox.ts',
   },
   {
@@ -62,10 +62,25 @@ export const CAPABILITIES: CapabilityEntry[] = [
     text: 'Higher Vision Studios (HVS) is the AI-native media-production section of War Room; its master directive defines it as separate from the radio media player and from Terra.',
     docSource: 'docs/HIGHER_VISION_STUDIOS_MASTER_DIRECTIVE.md', probe: 'app/higher-vision-studios/page.tsx',
   },
+  {
+    id: 'council-missions', topic: 'foundry',
+    text: 'Council can propose a Foundry engineering mission from a discussion; nothing runs until the Commander approves it, and the mission status and result shown are only what Foundry\'s own mission record, verifier and receipt report, returned into the same conversation.',
+    docSource: 'lib/council/missions/service.ts', probe: 'lib/council/missions/service.ts',
+  },
+  {
+    id: 'council-subsystems', topic: 'terra',
+    text: 'Council has read-only live connections to Terra, Terra World and Higher Vision Studios; each reports AVAILABLE, DEGRADED or UNAVAILABLE with the reason from a bounded live probe, and unavailable capabilities are stated as unavailable.',
+    docSource: 'lib/council/subsystems/probe.ts', probe: 'lib/council/subsystems/probe.ts',
+  },
+  {
+    id: 'council-computer', topic: 'war room',
+    text: 'The Council computer is a visible browser work screen: Council browsing is shown live, control ownership (Council or Commander) is explicit, the Commander can take over, and secure sign-in is typed only by the Commander into the browser (the Council never sees the secret).',
+    docSource: 'lib/council/computer/browse.server.ts', probe: 'lib/council/computer/browse.server.ts',
+  },
 ]
 
 export const ROADMAP: KnowledgeClaim[] = [
-  { id: 'plan-stage2', text: 'Council Operations (Council -> Foundry -> tested result back into the same discussion, Terra/HVS integration, visible browser workspace, approved external AI consultation) is planned for Stage 2 and is not installed.', status: 'PLANNED', tier: 2, source: 'Commander directive, Council Stage 1' },
+  { id: 'plan-stage2', text: 'Approved external AI consultation (asking another AI service on the Commander\'s approval) is not installed.', status: 'PLANNED', tier: 2, source: 'Commander directive, Council Stage 1' },
   { id: 'plan-stage3', text: 'The immersive Council (materializing text, planetary navigation, truthful progress stars, Matrix-style environment, VR) is planned for Stage 3 and is not installed.', status: 'PLANNED', tier: 2, source: 'Commander directive, Council Stage 1' },
 ]
 

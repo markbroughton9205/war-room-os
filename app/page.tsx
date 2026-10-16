@@ -14333,6 +14333,7 @@ function Home() {
       )}
           preamble={(
         <>
+          <div className="max-h-[42vh] overflow-y-auto overscroll-contain pr-1" data-testid="council-ops-panels">
           <CouncilMissionPanel
             conversationId={liveCouncilConvId}
             lastCommanderText={[...paneCouncilMessages].reverse().find(isRaelCouncilMessage)?.content ?? ''}
@@ -14343,6 +14344,7 @@ function Home() {
             conversationId={liveCouncilConvId}
             onPosted={() => { if (liveCouncilConvIdRef.current) void openCouncilSession(liveCouncilConvIdRef.current) }}
           />
+          </div>
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"

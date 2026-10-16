@@ -44,7 +44,9 @@ export function buildProposal(input: ProposalInput): CouncilMissionProposal {
   const request = String(input.request ?? '').trim()
   if (request.length < 10) throw new CouncilMissionError('INVALID', 'The mission request needs at least a sentence describing what to build or fix.')
   if (request.length > 4000) throw new CouncilMissionError('INVALID', 'The mission request is too long (4000 characters max).')
-  const acceptance = (input.acceptance ?? []).map(a => String(a).trim()).filter(Boolean).slice(0, 10).map(a => a.slice(0, 300))
+  const stated = (input.acceptance ?? []).map(a => String(a).trim()).filter(Boolean).slice(0, 10).map(a => a.slice(0, 300))
+  // Foundry requires at least one testable criterion; when the Commander gave none, state the default one explicitly rather than failing at start.
+  const acceptance = stated.length ? stated : ['The change described in the request is implemented and the repository\'s own tests and checks pass.']
   const targets: CouncilMissionTarget[] = []
   for (const t of (input.targets ?? []).slice(0, 20)) {
     const p = safeRelativePath(String(t.path ?? ''))

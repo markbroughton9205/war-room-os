@@ -159,7 +159,7 @@ export function CouncilMissionPanel({
             value={acceptance}
             onChange={e => setAcceptance(e.target.value)}
             rows={2}
-            placeholder="Acceptance criteria, one per line (optional)"
+            placeholder="Acceptance criteria, one per line (default: the change is made and the repository tests pass)"
             className="w-full rounded border border-cyan-900/50 bg-black/40 px-2 py-1 text-[11px] text-cyan-50 outline-none focus:border-cyan-400/50"
             data-testid="council-mission-acceptance"
           />
