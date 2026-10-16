@@ -22,6 +22,10 @@ const nextConfig: NextConfig = {
   allowedDevOrigins: ["127.0.0.1"],
   // Standalone output supports desktop packaging of local Next server artifacts.
   // Does not remove or break `next start` / production web deployment.
+  // `/foundry` has no page: the Foundry workspace is /war-room/engineering. Keep old links and bookmarks working (assets under /foundry/* are untouched).
+  async redirects() {
+    return [{ source: '/foundry', destination: '/war-room/engineering', permanent: false }]
+  },
   output: "standalone",
   outputFileTracingRoot: path.dirname(new URL(import.meta.url).pathname),
   outputFileTracingExcludes: {

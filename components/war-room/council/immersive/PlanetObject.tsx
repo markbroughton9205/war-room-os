@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import type { PlanetStatus, PlanetHealth } from '@/lib/council/immersive/planets'
+import { readFoundryResumeHref } from '@/lib/native-builder/foundryNavigation'
 
 const THEME: Record<PlanetStatus['id'], { a: string; b: string; ring: string }> = {
   foundry: { a: '#fbbf24', b: '#7c2d12', ring: '#fb923c' },
@@ -51,6 +52,8 @@ export function PlanetObject({ status, error, onOpen, reducedMotion, size = 'cla
 
 export function PlanetPanel({ status, onClose }: { status: PlanetStatus | null; onClose: () => void }) {
   if (!status) return <p className="p-4 text-sm text-slate-400">Planet status has not been read yet.</p>
+  // Foundry reopens where the Commander left off (same resume logic as the home Foundry icon); every other planet uses its own route.
+  const href = status.id === 'foundry' ? readFoundryResumeHref() : status.href
   const tone = { ok: 'text-emerald-300', active: 'text-cyan-300', warn: 'text-amber-300', bad: 'text-red-300', neutral: 'text-slate-400' } as const
   return (
     <div className="space-y-3 p-4" data-testid={`planet-panel-${status.id}`}>
@@ -70,7 +73,7 @@ export function PlanetPanel({ status, onClose }: { status: PlanetStatus | null; 
         </ul>
       ) : null}
       <div className="flex gap-2 pt-1">
-        <Link href={status.href} className="rounded-full border border-cyan-300/40 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-100 hover:bg-cyan-300/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300" data-testid={`planet-open-${status.id}`}>
+        <Link href={href} className="rounded-full border border-cyan-300/40 px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-100 hover:bg-cyan-300/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300" data-testid={`planet-open-${status.id}`}>
           Open {status.name}
         </Link>
         <button type="button" onClick={onClose} className="rounded-full border border-white/15 px-3 py-1.5 text-[10px] uppercase tracking-widest text-slate-300 hover:bg-white/10">Close</button>

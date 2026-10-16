@@ -2,6 +2,8 @@
  * Planet status for the immersive Council: Foundry, Higher Vision Studios and Terra.
  * Pure builders over real records. When a source cannot be read the planet says UNAVAILABLE and why; nothing is inferred or invented.
  */
+import { FOUNDRY_CANONICAL_PATH } from '@/lib/native-builder/foundryNavigation'
+
 export type PlanetId = 'foundry' | 'hvs' | 'terra'
 export type PlanetHealth = 'ACTIVE' | 'READY' | 'DEGRADED' | 'UNAVAILABLE'
 
@@ -37,7 +39,7 @@ const WORKING_STATES = new Set(['RUNNING', 'VERIFYING', 'APPLYING', 'INSTALLING'
 const LIVE_STATES = new Set(['QUEUED', ...WORKING_STATES])
 
 export function foundryPlanet(input: { available: boolean; reason?: string | null; missions: FoundryMissionSummary[] | null }): PlanetStatus {
-  const base = { id: 'foundry' as const, name: 'Foundry', href: '/foundry' }
+  const base = { id: 'foundry' as const, name: 'Foundry', href: FOUNDRY_CANONICAL_PATH }
   if (input.missions === null) return { ...base, health: 'UNAVAILABLE', headline: `Foundry status could not be read${input.reason ? `: ${input.reason}` : ''}`, facts: [], items: [], activity: false }
   // Activity (ring, pause) only for a worker that is demonstrably alive; queued, stalled and dead runs are stated as such.
   const live = input.missions.filter(m => WORKING_STATES.has(m.state) && m.liveness === 'ALIVE')

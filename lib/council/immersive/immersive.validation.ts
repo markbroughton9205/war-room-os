@@ -2,6 +2,8 @@
 import assert from 'node:assert/strict'
 import { deriveProgressStars, roundPhaseFrom, type StarMissionInput } from './signals'
 import { foundryPlanet, hvsPlanet, terraPlanet } from './planets'
+import { existsSync } from 'node:fs'
+import path from 'node:path'
 import { buildSceneModel, xrReadiness } from './scene'
 
 let passed = 0
@@ -139,5 +141,19 @@ const star = (stars: ReturnType<typeof deriveProgressStars>, id: string) => star
   ok('9: stalled/queued/stale/unreadable sources never light a planet; research "responded" is not "accepted"; pending Council requests get a star')
 }
 
-console.log(`\n${passed}/9 immersive council validations passed`)
-assert.equal(passed, 9)
+// 10. every planet link points at a route that exists in the app (a 404 from the Foundry planet was caused by a hard-coded /foundry)
+{
+  const root = process.cwd()
+  const pageFor = (href: string) => path.join(root, 'app', href.replace(/^\//, ''), 'page.tsx')
+  const planets = [
+    foundryPlanet({ available: true, missions: [] }),
+    hvsPlanet({ projects: 0, jobs: [], toolsOk: true }),
+    terraPlanet({ terra: { status: 'AVAILABLE', reasons: [] }, world: { status: 'AVAILABLE', reasons: [] } }),
+  ]
+  for (const p of planets) assert.ok(existsSync(pageFor(p.href)), `${p.id} planet link ${p.href} must be an existing page`)
+  assert.equal(planets[0].href, '/war-room/engineering')
+  ok('10: every planet link resolves to an existing page; Foundry opens /war-room/engineering')
+}
+
+console.log(`\n${passed}/10 immersive council validations passed`)
+assert.equal(passed, 10)
