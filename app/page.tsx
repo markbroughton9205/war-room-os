@@ -330,6 +330,10 @@ import {
 import { CouncilMissionPanel } from '@/components/war-room/council/CouncilMissionPanel'
 import { CouncilSubsystemsPanel } from '@/components/war-room/council/CouncilSubsystemsPanel'
 import { CouncilComputerPanel } from '@/components/war-room/council/CouncilComputerPanel'
+import type { MotionPref, ImmersiveCouncilLayerProps } from '@/components/war-room/council/immersive/ImmersiveCouncilLayer'
+import type { MaterializingBlock } from '@/components/war-room/council/immersive/MaterializingText'
+import { deriveProgressStars, roundPhaseFrom } from '@/lib/council/immersive/signals'
+import type { CouncilMissionProposal } from '@/lib/council/missions/types'
 import { CouncilSessionNavigator, type CouncilSessionBulkAction, type CouncilSessionCounts, type CouncilSessionListItem, type CouncilSessionView } from '@/components/war-room/council/CouncilSessionNavigator'
 import { CouncilContextInspector } from '@/components/war-room/council/CouncilContextInspector'
 import { FoundryEntryLink } from '@/components/war-room/foundry/FoundryEntryLink'
@@ -6481,6 +6485,25 @@ function Home() {
   const [sessionBulkBusy, setSessionBulkBusy] = useState(false)
   const [sessionNotice, setSessionNotice] = useState<string | null>(null)
   const [councilSessionNavOpen, setCouncilSessionNavOpen] = useState(true)
+  // Immersive Council (Stage 3): the default view; the classic panel layout stays one click away and keeps every control.
+  const [councilViewMode, setCouncilViewMode] = useState<'immersive' | 'classic'>('immersive')
+  const [councilMotionPref, setCouncilMotionPref] = useState<MotionPref>('auto')
+  const [councilMissionRows, setCouncilMissionRows] = useState<CouncilMissionProposal[]>([])
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('war-room.council.view') === 'classic') queueMicrotask(() => setCouncilViewMode('classic'))
+      const m = localStorage.getItem('war-room.council.motion')
+      if (m === 'reduced' || m === 'full') queueMicrotask(() => setCouncilMotionPref(m))
+    } catch { /* storage unavailable: defaults apply */ }
+  }, [])
+  const changeCouncilView = useCallback((v: 'immersive' | 'classic') => {
+    setCouncilViewMode(v)
+    try { localStorage.setItem('war-room.council.view', v) } catch { /* optional */ }
+  }, [])
+  const changeCouncilMotion = useCallback((m: MotionPref) => {
+    setCouncilMotionPref(m)
+    try { localStorage.setItem('war-room.council.motion', m) } catch { /* optional */ }
+  }, [])
   const [councilInspectorOpen, setCouncilInspectorOpen] = useState(false)
   const [sessionIntelligence, setSessionIntelligence] = useState<CouncilSessionIntelligenceV1 | null>(null)
   const [liveCouncilLoadState, setLiveCouncilLoadState] = useState<'restoring' | 'ready' | 'session_only' | 'error'>('restoring')
@@ -13097,6 +13120,7 @@ function Home() {
 
   const pendingNeedsRael = raelActions.some(a => a.status === 'pending')
   const isUnifiedLiveRoom = operatorTab === 'command'
+
   const visibleOperatorTabs = useMemo(() => {
     const base = OPERATOR_TABS.filter(tab => uiMode === 'advanced' || !ENGINEERING_TABS.includes(tab.id))
     if (operatorTab === 'command') {
@@ -13237,6 +13261,124 @@ function Home() {
     }),
     [councilRoster, commanderPresencePhase, chatHealthLabel, liveCouncilLoadState, runtimeTruth?.persistence?.status],
   )
+  const immersiveActive = councilViewMode === 'immersive' && isUnifiedLiveRoom
+  const councilSessionNavigatorNode = (
+    <CouncilSessionNavigator
+      sessions={councilSessionList}
+      activeId={liveCouncilConvId}
+      search={councilSessionSearch}
+      onSearch={setCouncilSessionSearch}
+      onNewChat={() => startTransition(() => { void startFreshCouncilSession('new') })}
+      onSelect={id => { void openCouncilSession(id) }}
+      onRename={(id, title) => { void renameCouncilSession(id, title) }}
+      onArchive={id => { void archiveCouncilSessionFromList(id) }}
+      view={sessionView}
+      onViewChange={changeSessionView}
+      trashSessions={trashSessions}
+      archivedSessions={archivedSessions}
+      counts={sessionCounts}
+      onBulk={bulkSessionAction}
+      busy={sessionBulkBusy}
+      notice={sessionNotice}
+    />
+  )
+  const councilMissionNode = (
+    <CouncilMissionPanel
+      conversationId={liveCouncilConvId}
+      lastCommanderText={[...paneCouncilMessages].reverse().find(isRaelCouncilMessage)?.content ?? ''}
+      onResultReturned={() => { if (liveCouncilConvIdRef.current) void openCouncilSession(liveCouncilConvIdRef.current) }}
+      onProposals={setCouncilMissionRows}
+    />
+  )
+  const councilSubsystemsNode = <CouncilSubsystemsPanel />
+  const councilComputerNode = (
+    <CouncilComputerPanel
+      conversationId={liveCouncilConvId}
+      onPosted={() => { if (liveCouncilConvIdRef.current) void openCouncilSession(liveCouncilConvIdRef.current) }}
+    />
+  )
+  const immersiveBlocks: MaterializingBlock[] = (() => {
+    if (!immersiveActive) return []
+    const rows = paneCouncilMessages
+    let from = -1
+    for (let i = rows.length - 1; i >= 0; i -= 1) { if (isRaelCouncilMessage(rows[i])) { from = i; break } }
+    const slice = (from >= 0 ? rows.slice(from) : rows.slice(-6)).filter(m => m.messageType !== 'system' && m.familyName !== 'SYSTEM')
+    return slice.slice(-8).map((m): MaterializingBlock => {
+      const commander = isRaelCouncilMessage(m)
+      return {
+        id: m.id,
+        role: commander ? 'commander' : 'member',
+        label: commander ? 'You' : (m.familyName || 'Council'),
+        detail: commander ? null : [m.roleLabel, m.provider && m.provider !== 'unknown' ? m.provider : null].filter(Boolean).join(' · ') || null,
+        color: commander ? '#94a3b8' : (m.color || undefined),
+        text: toDisplayText(m.content),
+        streaming: m.streaming === true,
+      }
+    })
+  })()
+  const immersiveStars = (() => {
+    if (!immersiveActive) return []
+    const hud = liveResearchHud
+    const researchActive = hud?.mode === 'active' || hud?.mode === 'sources_queried' || hud?.mode === 'completing'
+    const failedRound = String(nebulaRoundShell?.status ?? '').toUpperCase() === 'FAILED'
+    const lastMembers = Array.from(new Set(immersiveBlocks.filter(b => b.role === 'member').map(b => b.label)))
+    const phase = roundPhaseFrom({
+      loading, presence: commanderPresencePhase, researchActive, failed: failedRound,
+      hasReply: immersiveBlocks.some(b => b.role === 'member'),
+    })
+    const accepted = hud?.sourcesCount ?? 0
+    const research = !hud || hud.mode === 'inactive'
+      ? null
+      : researchActive
+        ? { active: true }
+        : hud.mode === 'verified' ? { active: false, status: 'COMPLETED' as const, accepted, considered: accepted }
+          : hud.mode === 'partial' ? { active: false, status: 'PARTIAL' as const, accepted, considered: accepted }
+            : hud.mode === 'failed' || hud.mode === 'unavailable' ? { active: false, status: 'FAILED' as const, accepted: 0 }
+              : null
+    return deriveProgressStars({
+      round: { phase: phase.phase, reason: phase.reason, members: lastMembers },
+      research,
+      missions: councilMissionRows.map(m => ({
+        proposalId: m.proposalId, title: m.title, status: m.status,
+        foundry: m.foundry ? { missionId: m.foundry.missionId, state: m.foundry.state, verifierExit: typeof m.foundry.receipt?.verifier.exitCode === 'number' ? m.foundry.receipt.verifier.exitCode : null, receiptVerified: m.foundry.receipt?.receiptVerified === true } : null,
+      })),
+    })
+  })()
+  const immersiveProps: Omit<ImmersiveCouncilLayerProps, 'composer' | 'globe'> | null = immersiveActive ? {
+    blocks: immersiveBlocks,
+    stars: immersiveStars,
+    presenceLabel: PRESENCE_LABEL[commanderPresencePhase],
+    sessionTitle: activeCouncilSession?.title,
+    badges: {
+      sessions: sessionCounts?.active ?? councilSessionList.length,
+      trash: sessionCounts?.trashed ?? 0,
+      archived: sessionCounts?.archived ?? 0,
+      pendingMissions: councilMissionRows.filter(m => m.status === 'PROPOSED').length,
+      liveMissions: councilMissionRows.filter(m => m.status === 'RUNNING').length,
+      research: liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : null,
+    },
+    modelBusy: loading || commanderPresencePhase !== 'idle',
+    motionPref: councilMotionPref,
+    onMotionPref: changeCouncilMotion,
+    onClassicView: () => changeCouncilView('classic'),
+    onOpenCouncilSettings: () => setDockPanelId('live-council'),
+    panels: {
+      sessions: councilSessionNavigatorNode,
+      missions: councilMissionNode,
+      systems: councilSubsystemsNode,
+      computer: councilComputerNode,
+      research: (
+        <div data-testid="immersive-research">
+          <p className="font-semibold text-cyan-200">{liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : 'No research on this turn.'}</p>
+          {liveResearchHud?.intelligence?.sourcesPreview ? <p className="mt-2 text-slate-300">{liveResearchHud.intelligence.sourcesPreview}</p> : null}
+          {liveResearchHud?.intelligence ? <p className="mt-2 text-slate-400">Freshness {liveResearchHud.intelligence.freshness}. Contradictions {liveResearchHud.intelligence.contradictionWarnings}.</p> : null}
+          <p className="mt-3 text-[11px] text-slate-500">Evidence accounting (considered / accepted / rejected, with reasons) is recorded with each turn and shown in the Advanced inspector.</p>
+        </div>
+      ),
+      conversation: null,
+    },
+  } : null
+
   const providerHealthLabel = coreProviderStates.some(status => status === 'online' || status === 'standby')
     ? 'Ready'
     : 'Degraded'
@@ -13972,7 +14114,7 @@ function Home() {
         <LiveRoomShell
           systemHealthGapCount={operatorGapCount}
           chatExpanded={isChatExpanded}
-          sessionNavOpen={councilSessionNavOpen}
+          sessionNavOpen={councilSessionNavOpen && !immersiveActive}
           inspectorOpen={councilInspectorOpen}
           showDock={councilInspectorOpen || Boolean(dockPanelId)}
           header={(
@@ -14010,26 +14152,7 @@ function Home() {
               sourcesPreview={liveResearchHud?.intelligence?.sourcesPreview ?? null}
             />
           )}
-          leftNav={(
-            <CouncilSessionNavigator
-              sessions={councilSessionList}
-              activeId={liveCouncilConvId}
-              search={councilSessionSearch}
-              onSearch={setCouncilSessionSearch}
-              onNewChat={() => startTransition(() => { void startFreshCouncilSession('new') })}
-              onSelect={id => { void openCouncilSession(id) }}
-              onRename={(id, title) => { void renameCouncilSession(id, title) }}
-              onArchive={id => { void archiveCouncilSessionFromList(id) }}
-              view={sessionView}
-              onViewChange={changeSessionView}
-              trashSessions={trashSessions}
-              archivedSessions={archivedSessions}
-              counts={sessionCounts}
-              onBulk={bulkSessionAction}
-              busy={sessionBulkBusy}
-              notice={sessionNotice}
-            />
-          )}
+          leftNav={immersiveActive ? null : councilSessionNavigatorNode}
           rightPanel={(
             councilInspectorOpen ? (
             <CouncilContextInspector
@@ -14288,6 +14411,8 @@ function Home() {
             </div>
           ) : (
         <GodsEyeCommandCenter
+          immersive={immersiveProps}
+          onImmersiveView={() => changeCouncilView('immersive')}
           onTerraContextChange={handleTerraContextChange}
           chatExpanded={isChatExpanded}
           onToggleChatExpanded={() => setIsChatExpanded(prev => !prev)}
@@ -14333,18 +14458,13 @@ function Home() {
       )}
           preamble={(
         <>
-          <div className="max-h-[42vh] overflow-y-auto overscroll-contain pr-1" data-testid="council-ops-panels">
-          <CouncilMissionPanel
-            conversationId={liveCouncilConvId}
-            lastCommanderText={[...paneCouncilMessages].reverse().find(isRaelCouncilMessage)?.content ?? ''}
-            onResultReturned={() => { if (liveCouncilConvIdRef.current) void openCouncilSession(liveCouncilConvIdRef.current) }}
-          />
-          <CouncilSubsystemsPanel />
-          <CouncilComputerPanel
-            conversationId={liveCouncilConvId}
-            onPosted={() => { if (liveCouncilConvIdRef.current) void openCouncilSession(liveCouncilConvIdRef.current) }}
-          />
-          </div>
+          {immersiveActive ? null : (
+            <div className="max-h-[42vh] overflow-y-auto overscroll-contain pr-1" data-testid="council-ops-panels">
+              {councilMissionNode}
+              {councilSubsystemsNode}
+              {councilComputerNode}
+            </div>
+          )}
           {continuationRequests.some(c => c.status === 'pending') ? (
             <div
               className="mt-2 rounded border border-amber-900/40 px-3 py-2"

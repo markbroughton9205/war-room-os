@@ -79,6 +79,7 @@
     "validate:foundry-capability-aware-routing": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/native-builder/foundryCapabilityAwareRouting.validation.ts",
     "validate:foundry": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-foundry-validation.mjs",
     "validate:council-gpu-arbitration": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/resources/gpuArbitration.validation.ts",
+    "validate:council-immersive": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/immersive/immersive.validation.ts",
     "validate:council-subsystems": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/subsystems/subsystems.validation.ts",
     "validate:council-missions": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/missions/missions.validation.ts",
     "validate:council-session-management": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/council/sessions/sessionManagement.validation.ts",

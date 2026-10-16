@@ -30,10 +30,13 @@ export function CouncilMissionPanel({
   conversationId,
   lastCommanderText = '',
   onResultReturned,
+  onProposals,
 }: {
   conversationId: string | null
   lastCommanderText?: string
   onResultReturned?: () => void
+  /** Lets the host (immersive progress stars) read the same authoritative proposal records this panel shows. */
+  onProposals?: (rows: CouncilMissionProposal[]) => void
 }) {
   const [proposals, setProposals] = useState<CouncilMissionProposal[]>([])
   const [foundry, setFoundry] = useState<{ ok: boolean; reason?: string } | null>(null)
@@ -46,13 +49,14 @@ export function CouncilMissionPanel({
   const returnedRef = useRef<Set<string>>(new Set())
 
   const load = useCallback(async () => {
-    if (!conversationId) { setProposals([]); return }
+    if (!conversationId) { setProposals([]); onProposals?.([]); return }
     try {
       const res = await fetch(`/api/council/missions?conversationId=${encodeURIComponent(conversationId)}`, { cache: 'no-store' })
       if (!res.ok) return
       const j = await res.json() as { proposals?: CouncilMissionProposal[]; foundry?: { ok: boolean; reason?: string } }
       const rows = Array.isArray(j.proposals) ? j.proposals : []
       setProposals(rows)
+      onProposals?.(rows)
       if (j.foundry) setFoundry(j.foundry)
       for (const p of rows) {
         if (p.resultReturned && !returnedRef.current.has(p.proposalId)) {
@@ -61,7 +65,7 @@ export function CouncilMissionPanel({
         }
       }
     } catch { /* panel is optional */ }
-  }, [conversationId, onResultReturned])
+  }, [conversationId, onResultReturned, onProposals])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set from the response
   useEffect(() => { void load() }, [load])

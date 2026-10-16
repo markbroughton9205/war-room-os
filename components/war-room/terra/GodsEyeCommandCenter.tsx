@@ -19,6 +19,7 @@ import { useApplicationActivity } from '@/lib/ui/applicationActivity'
 import { TerraHomeGlobePreview } from './TerraHomeGlobePreview'
 import { FoundryHomeAppIcon } from '@/components/war-room/foundry/FoundryHomeAppIcon'
 import { HvsHomeAppIcon } from '@/components/war-room/higher-vision-studios/HvsHomeAppIcon'
+import { ImmersiveCouncilLayer, type ImmersiveCouncilLayerProps } from '@/components/war-room/council/immersive/ImmersiveCouncilLayer'
 
 /** Short, human labels for the "War Room Terra Linked" pill -- covers every selectable Terra
  * object kind (location search, vessel, aircraft, traffic camera/event, and the rest of the
@@ -261,11 +262,14 @@ function ActiveTerraContextPill() {
 }
 
 export function GodsEyeCommandCenter({
-  council, councilComposer, intelOverlay, onTerraContextChange,
+  council, councilComposer, intelOverlay, onTerraContextChange, immersive, onImmersiveView,
   chatExpanded, onToggleChatExpanded,
   sessionTitle, sessionStatus, sessionMessageCount,
 }: {
   council: ReactNode; councilComposer?: ReactNode; intelOverlay?: ReactNode
+  /** Stage 3: when provided (and Terra is not the active workspace) the immersive layer replaces the side chat card; `council` becomes its Conversation drawer. */
+  immersive?: Omit<ImmersiveCouncilLayerProps, 'composer' | 'globe'> | null
+  onImmersiveView?: () => void
   onTerraContextChange?: (context: string | null) => void
   /**
    * Optional external control for the expanded/compact state, so a toolbar button rendered inside
@@ -289,6 +293,21 @@ export function GodsEyeCommandCenter({
   const [intelOpen, setIntelOpen] = useState(false)
   const restoreConversation = () => setMinimized(false)
   const minimizeConversation = () => setMinimized(true)
+  if (immersive && !terraRuntimeActive) {
+    return (
+      <TerraActiveLocationProvider>
+        <TerraCouncilContextBridge onContextChange={onTerraContextChange} />
+        <section className="relative h-full min-h-0 overflow-hidden bg-black" data-testid="gods-eye-command-center" data-conversation-minimized="false">
+          <ImmersiveCouncilLayer
+            {...immersive}
+            composer={councilComposer}
+            globe={<TerraHomeGlobePreview />}
+            panels={{ ...immersive.panels, conversation: council }}
+          />
+        </section>
+      </TerraActiveLocationProvider>
+    )
+  }
   return (
     <TerraActiveLocationProvider>
       <TerraCouncilContextBridge onContextChange={onTerraContextChange} />
@@ -317,6 +336,9 @@ export function GodsEyeCommandCenter({
             <button type="button" onClick={() => setIntelOpen(value => !value)} className="rounded-full border border-cyan-300/25 bg-slate-950/70 px-2.5 py-1 text-[8px] font-bold uppercase tracking-[0.18em] text-cyan-200/80 backdrop-blur-xl" aria-expanded={intelOpen}>Live globe intel {intelOpen ? '−' : '+'}</button>
             {intelOpen ? <div className="w-[min(42rem,calc(100vw-1.5rem))] overflow-hidden rounded-xl border border-cyan-300/20 bg-black/80 shadow-2xl backdrop-blur-xl">{intelOverlay}</div> : null}
           </div> : null}
+          {onImmersiveView ? (
+            <button type="button" onClick={onImmersiveView} className="absolute left-3 top-3 z-30 rounded-full border border-cyan-300/30 bg-black/60 px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest text-cyan-200 hover:bg-cyan-300/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300" data-testid="switch-immersive">Immersive view</button>
+          ) : null}
           <Link href="/terra" className="absolute bottom-3 left-3 z-20 rounded-full border border-cyan-400/20 bg-black/55 px-2.5 py-1 text-[8px] font-bold uppercase tracking-widest text-cyan-300/80 backdrop-blur-sm">
             Terra workspace
           </Link>
