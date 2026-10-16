@@ -15,6 +15,10 @@ Earlier stages of the evidence: `e065c055` was Electron-verified first; at the w
 
 **VR: foundation and plan only; no headset test.**
 
+## Addendum — Foundry planet 404 (fixed in `6964268d`, canonical)
+
+Root cause: the Foundry planet panel hard-coded `/foundry`, which has no page (the workspace is `/war-room/engineering`). Fix: link via `FOUNDRY_CANONICAL_PATH` with the Foundry resume href, a `/foundry` → `/war-room/engineering` redirect in `next.config.ts`, and a validator that every planet link resolves to an existing page. Verified in the real Electron window on the canonical `6964268d` install: Foundry planet → "Open Foundry" → the real Foundry workspace (the Commander's projects) with no 404; "← War Room" returns to the immersive Council, still authenticated. Foundry mission records unchanged (5 COMPLETED, 5 FAILED, 1 CANCELLED).
+
 ## What was built (on top of the unchanged Stage 2 operations layer)
 
 - **Immersive Council view (default; "Classic panel view" one click away in Settings, and "Immersive view" button in Classic).** Deep-space canvas (≈120 stars, 12 fps, static when reduced-motion/hidden/unfocused/model-busy/mission-live), the real Terra globe in the centre, **materializing Council text** near the bottom (only text that arrives while the view is open animates; history appears instantly; full text always available to screen readers), a **compact floating Commander input** (the existing composer, same attachments/commands), contributing members shown as labelled chips with their role/provider.
