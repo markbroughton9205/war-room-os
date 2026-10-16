@@ -13326,18 +13326,21 @@ function Home() {
       loading, presence: commanderPresencePhase, researchActive, failed: failedRound,
       hasReply: immersiveBlocks.some(b => b.role === 'member'),
     })
-    const accepted = hud?.sourcesCount ?? 0
+    const responded = hud?.sourcesCount ?? 0
+    // The live HUD counts source legs that responded, not accepted sources; it is shown as "responded", never as verified or accepted.
     const research = !hud || hud.mode === 'inactive'
       ? null
       : researchActive
         ? { active: true }
-        : hud.mode === 'verified' ? { active: false, status: 'COMPLETED' as const, accepted, considered: accepted }
-          : hud.mode === 'partial' ? { active: false, status: 'PARTIAL' as const, accepted, considered: accepted }
-            : hud.mode === 'failed' || hud.mode === 'unavailable' ? { active: false, status: 'FAILED' as const, accepted: 0 }
-              : null
+        : hud.mode === 'verified' ? { active: false, status: 'RESPONDED' as const, responded }
+          : hud.mode === 'partial' ? { active: false, status: 'PARTIAL' as const, accepted: responded, considered: responded }
+            : hud.mode === 'failed' ? { active: false, status: 'FAILED' as const, accepted: 0 }
+              : hud.mode === 'unavailable' ? { active: false, status: 'UNAVAILABLE' as const }
+                : null
     return deriveProgressStars({
       round: { phase: phase.phase, reason: phase.reason, members: lastMembers },
       research,
+      pendingRequests: continuationRequests.filter(c => c.status === 'pending').length,
       missions: councilMissionRows.map(m => ({
         proposalId: m.proposalId, title: m.title, status: m.status,
         foundry: m.foundry ? { missionId: m.foundry.missionId, state: m.foundry.state, verifierExit: typeof m.foundry.receipt?.verifier.exitCode === 'number' ? m.foundry.receipt.verifier.exitCode : null, receiptVerified: m.foundry.receipt?.receiptVerified === true } : null,
@@ -13354,6 +13357,7 @@ function Home() {
       trash: sessionCounts?.trashed ?? 0,
       archived: sessionCounts?.archived ?? 0,
       pendingMissions: councilMissionRows.filter(m => m.status === 'PROPOSED').length,
+      requests: continuationRequests.filter(c => c.status === 'pending').length,
       liveMissions: councilMissionRows.filter(m => m.status === 'RUNNING').length,
       research: liveResearchHud && liveResearchHud.mode !== 'inactive' ? liveResearchHud.label : null,
     },

@@ -91,7 +91,7 @@ const star = (stars: ReturnType<typeof deriveProgressStars>, id: string) => star
   assert.match(proven.facts.join(' '), /1 mission\(s\) completed with verifier exit 0/)
   const noTools = hvsPlanet({ projects: 3, jobs: [], toolsOk: false, toolsReason: 'missing: ffmpeg' })
   assert.equal(noTools.health, 'DEGRADED'); assert.match(noTools.facts.join(' '), /rendering cannot run/)
-  const rendering = hvsPlanet({ projects: 3, jobs: [{ status: 'running' }, { status: 'queued' }], toolsOk: true })
+  const rendering = hvsPlanet({ projects: 3, jobs: [{ status: 'running', updatedAt: new Date().toISOString() }, { status: 'queued' }], toolsOk: true })
   assert.equal(rendering.health, 'ACTIVE'); assert.match(rendering.facts.join(' '), /1 running, 1 queued/)
   assert.equal(hvsPlanet({ projects: null, jobs: null, toolsOk: null, error: 'catalog unreadable' }).health, 'UNAVAILABLE')
   assert.equal(terraPlanet({ terra: { status: 'AVAILABLE', reasons: [] }, world: { status: 'AVAILABLE', reasons: [] } }).health, 'READY')
@@ -114,5 +114,30 @@ const star = (stars: ReturnType<typeof deriveProgressStars>, id: string) => star
   ok('8: the scene model is seated, no-locomotion and comfort-bounded; XR readiness never claims headset acceptance')
 }
 
-console.log(`\n${passed}/8 immersive council validations passed`)
-assert.equal(passed, 8)
+// 9. review findings: stale/unconfirmed activity, research wording, pending requests
+{
+  const stalled = foundryPlanet({ available: true, missions: [{ id: 'm', title: 't', state: 'RUNNING', liveness: 'STALLED' }] })
+  assert.equal(stalled.activity, false); assert.equal(stalled.health, 'DEGRADED'); assert.match(stalled.headline, /stalled/)
+  const queued = foundryPlanet({ available: true, missions: [{ id: 'm', title: 't', state: 'QUEUED', liveness: null }] })
+  assert.equal(queued.activity, false); assert.match(queued.headline, /queued, none running/)
+  const unchecked = foundryPlanet({ available: true, missions: [{ id: 'm', title: 't', state: 'COMPLETED', verifierExit: 0, receiptVerified: false, receiptChecked: false }] })
+  assert.match(unchecked.items[0].detail, /not checked/)
+  const now = Date.parse('2026-10-16T12:00:00Z')
+  const staleJob = hvsPlanet({ now, projects: 1, jobs: [{ status: 'running', updatedAt: '2026-10-16T09:00:00Z' }], toolsOk: true })
+  assert.equal(staleJob.activity, false); assert.match(staleJob.facts.join(' '), /unconfirmed/)
+  const freshJob = hvsPlanet({ now, projects: 1, jobs: [{ status: 'running', updatedAt: '2026-10-16T11:58:00Z' }], toolsOk: true })
+  assert.equal(freshJob.activity, true)
+  assert.equal(hvsPlanet({ now, projects: 2, jobs: null, toolsOk: null }).health, 'DEGRADED')
+  assert.equal(hvsPlanet({ now, projects: 2, jobs: [], toolsOk: null }).health, 'DEGRADED')
+  const base = { round: { phase: 'done' as const } }
+  const resp = star(deriveProgressStars({ ...base, research: { active: false, status: 'RESPONDED', responded: 3 } }), 'research')!
+  assert.equal(resp.state, 'partial'); assert.match(resp.label, /not independently checked/)
+  assert.equal(star(deriveProgressStars({ ...base, research: { active: false, status: 'UNAVAILABLE' } }), 'research')!.state, 'blocked')
+  const req = star(deriveProgressStars({ ...base, pendingRequests: 2 }), 'requests')!
+  assert.equal(req.state, 'pending'); assert.match(req.label, /2 Council requests waiting for you/)
+  assert.equal(star(deriveProgressStars({ ...base, pendingRequests: 0 }), 'requests'), undefined)
+  ok('9: stalled/queued/stale/unreadable sources never light a planet; research "responded" is not "accepted"; pending Council requests get a star')
+}
+
+console.log(`\n${passed}/9 immersive council validations passed`)
+assert.equal(passed, 9)

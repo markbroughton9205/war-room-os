@@ -48,27 +48,39 @@ export function CouncilMissionPanel({
   const [error, setError] = useState<string | null>(null)
   const returnedRef = useRef<Set<string>>(new Set())
 
+  // Host callbacks are held in refs so `load` depends only on the conversation (an inline callback must never retrigger the fetch).
+  const onResultReturnedRef = useRef(onResultReturned)
+  const onProposalsRef = useRef(onProposals)
+  useEffect(() => { onResultReturnedRef.current = onResultReturned; onProposalsRef.current = onProposals })
+  const lastReported = useRef<string>('')
+  const report = useCallback((rows: CouncilMissionProposal[]) => {
+    const sig = JSON.stringify(rows)
+    if (sig === lastReported.current) return
+    lastReported.current = sig
+    onProposalsRef.current?.(rows)
+  }, [])
+
   const load = useCallback(async () => {
-    if (!conversationId) { setProposals([]); onProposals?.([]); return }
+    if (!conversationId) { setProposals(prev => (prev.length ? [] : prev)); report([]); return }
     try {
       const res = await fetch(`/api/council/missions?conversationId=${encodeURIComponent(conversationId)}`, { cache: 'no-store' })
-      if (!res.ok) return
+      if (!res.ok) { setProposals([]); report([]); return }
       const j = await res.json() as { proposals?: CouncilMissionProposal[]; foundry?: { ok: boolean; reason?: string } }
       const rows = Array.isArray(j.proposals) ? j.proposals : []
       setProposals(rows)
-      onProposals?.(rows)
+      report(rows)
       if (j.foundry) setFoundry(j.foundry)
       for (const p of rows) {
         if (p.resultReturned && !returnedRef.current.has(p.proposalId)) {
           returnedRef.current.add(p.proposalId)
-          onResultReturned?.()
+          onResultReturnedRef.current?.()
         }
       }
-    } catch { /* panel is optional */ }
-  }, [conversationId, onResultReturned, onProposals])
+    } catch { setProposals([]); report([]) /* unreadable: show nothing rather than stale states */ }
+  }, [conversationId, report])
 
-  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set from the response
-  useEffect(() => { void load() }, [load])
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- reset on conversation change so another session's missions are never shown
+  useEffect(() => { setProposals([]); report([]); void load() }, [load, report])
   useEffect(() => {
     if (!proposals.some(p => ACTIVE.has(p.status))) return
     const t = window.setInterval(() => { void load() }, 4000)

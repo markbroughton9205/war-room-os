@@ -30,7 +30,7 @@ export type ImmersiveCouncilLayerProps = {
   composer: ReactNode
   globe: ReactNode
   panels: ImmersivePanels
-  badges: { sessions: number; trash: number; archived: number; pendingMissions: number; liveMissions: number; research: string | null }
+  badges: { sessions: number; trash: number; archived: number; pendingMissions: number; requests: number; liveMissions: number; research: string | null }
   /** True while a local model turn is running (animations drop to static so they never compete with inference). */
   modelBusy: boolean
   motionPref: MotionPref
@@ -99,7 +99,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
   const stars = mounted ? [...props.stars, ...computerStar] : []
   const presenceLabel = mounted ? props.presenceLabel : 'Idle'
   const sessionTitle = mounted ? props.sessionTitle : undefined
-  const badges = mounted ? props.badges : { sessions: 0, trash: 0, archived: 0, pendingMissions: 0, liveMissions: 0, research: null }
+  const badges = mounted ? props.badges : { sessions: 0, trash: 0, archived: 0, pendingMissions: 0, requests: 0, liveMissions: 0, research: null }
   const modelBusy = mounted ? props.modelBusy : false
   const activity = useApplicationActivity()
   const { planets, error: planetError, refreshedAt } = usePlanets()
@@ -144,6 +144,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return
       if (e.key === 'Escape' && drawer) { e.preventDefault(); close(); return }
       if (e.altKey && !e.ctrlKey && !e.metaKey) {
         const d = DOCK.find(x => x.key === e.key)
@@ -157,9 +158,10 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
   useEffect(() => { if (drawer) queueMicrotask(() => drawerRef.current?.focus()) }, [drawer])
 
   const badgeFor = (id: string): string | null => {
-    if (id === 'sessions') return badges.trash || badges.archived ? `${badges.sessions} · ${badges.trash} trash` : String(badges.sessions)
+    if (id === 'sessions') return badges.trash ? `${badges.sessions} · ${badges.trash} trash` : String(badges.sessions)
     if (id === 'missions') return badges.pendingMissions ? `${badges.pendingMissions} to approve` : badges.liveMissions ? `${badges.liveMissions} running` : null
     if (id === 'research') return badges.research
+    if (id === 'conversation') return badges.requests ? `${badges.requests} waiting` : null
     return null
   }
 
@@ -176,14 +178,8 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
       <div className="absolute inset-0" data-testid="immersive-terra">{globe}</div>
 
       {/* Planets */}
-      <div className="pointer-events-none absolute inset-y-0 left-[9%] z-20 flex items-center max-md:left-1 max-md:items-start max-md:pt-24"><PlanetObject status={planet('foundry')} reducedMotion={reducedMotion} onOpen={() => open('planet-foundry')} /></div>
-      <div className="pointer-events-none absolute inset-y-0 right-[9%] z-20 flex items-center max-md:right-1 max-md:items-start max-md:pt-24"><PlanetObject status={planet('hvs')} reducedMotion={reducedMotion} onOpen={() => open('planet-hvs')} /></div>
-      <div className="pointer-events-none absolute left-1/2 top-[3.2rem] z-20 -translate-x-1/2">
-        <button type="button" onClick={() => open('planet-terra')} className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-white/10 bg-black/55 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300" data-testid="planet-terra" data-health={planet('terra')?.health ?? 'LOADING'} aria-label={`Terra: ${planet('terra')?.headline ?? 'reading status'}. Open Terra panel`}>
-          Terra · {planet('terra') ? planet('terra')!.health.toLowerCase() : 'reading…'}
-        </button>
-      </div>
-
+      <div className="pointer-events-none absolute inset-y-0 left-[12%] z-20 flex items-center max-md:left-1 max-md:items-start max-md:pt-24"><PlanetObject error={planetError} status={planet('foundry')} reducedMotion={reducedMotion} onOpen={() => open('planet-foundry')} /></div>
+      <div className="pointer-events-none absolute inset-y-0 right-[12%] z-20 flex items-center max-md:right-1 max-md:items-start max-md:pt-24"><PlanetObject error={planetError} status={planet('hvs')} reducedMotion={reducedMotion} onOpen={() => open('planet-hvs')} /></div>
       {/* Header: session, presence, progress stars */}
       <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex flex-col items-center gap-1 px-14 pt-2 max-md:px-2">
         <div className="pointer-events-auto flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-slate-300">
@@ -192,10 +188,15 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
           {speakers.length ? <span className="hidden text-slate-400 sm:inline" data-testid="immersive-speakers">· {speakers.join(', ')}</span> : null}
         </div>
         <div className="pointer-events-auto"><ProgressStars stars={stars} reducedMotion={reducedMotion} /></div>
+        <div className="pointer-events-auto">
+        <button type="button" onClick={() => open('planet-terra')} className="pointer-events-auto flex items-center gap-1.5 rounded-full border border-white/10 bg-black/55 px-2.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.2em] text-slate-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300" data-testid="planet-terra" data-health={planet('terra')?.health ?? 'LOADING'} aria-label={`Terra: ${planet('terra')?.headline ?? 'reading status'}. Open Terra panel`}>
+          Terra · {planet('terra') ? planet('terra')!.health.toLowerCase() : planetError ? 'unavailable' : 'reading…'}
+        </button>
+        </div>
       </div>
 
       {/* Dock */}
-      <nav className="absolute left-2 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1.5" aria-label="Council controls" data-testid="immersive-dock">
+      <nav className="absolute left-2 top-1/2 z-40 flex -translate-y-1/2 flex-col gap-1.5" aria-label="Council controls" data-testid="immersive-dock" inert={drawer ? true : undefined}>
         {DOCK.map(d => {
           const badge = badgeFor(d.id)
           const active = drawer === d.id
@@ -211,7 +212,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
               title={`${d.label} — Alt+${d.key}`}
             >
               <span aria-hidden="true" className="w-4 text-center">{d.glyph}</span>
-              <span className="hidden max-w-[10rem] truncate lg:inline">{d.label}</span>
+              <span className="hidden max-w-[10rem] truncate xl:inline">{d.label}</span>
               {badge ? <span className="rounded-full bg-cyan-300/15 px-1.5 text-[9px] text-cyan-200" data-testid={`dock-badge-${d.id}`}>{badge}</span> : null}
             </button>
           )
@@ -219,7 +220,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
       </nav>
 
       {/* Materializing text + floating input */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col items-center gap-2 px-3 pb-12 sm:px-16">
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col items-center gap-2 px-3 pb-12 sm:px-16" inert={drawer ? true : undefined}>
         <div className="pointer-events-auto w-full max-w-3xl"><MaterializingText blocks={blocks} reducedMotion={reducedMotion} maxHeight="30vh" /></div>
         <div className="immersive-composer pointer-events-auto w-full max-w-2xl overflow-hidden rounded-3xl border border-cyan-300/25 bg-[rgba(3,8,14,0.88)] shadow-[0_10px_40px_rgba(0,0,0,0.6)] backdrop-blur-md" data-testid="immersive-input">{composer}</div>
       </div>
@@ -273,7 +274,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
                 </div>
                 <p className="mt-1 text-[11px] text-slate-400">Animation stops by itself while a local model turn or a Foundry mission is running, when the window is hidden, and when the system asks for reduced motion.</p>
               </section>
-              {onOpenCouncilSettings ? <section><button type="button" onClick={onOpenCouncilSettings} className="rounded-full border border-white/20 px-3 py-1 text-xs hover:bg-white/10" data-testid="open-council-settings">Council settings</button></section> : null}
+              {onOpenCouncilSettings ? <section><button type="button" onClick={() => { close(); onOpenCouncilSettings() }} className="rounded-full border border-white/20 px-3 py-1 text-xs hover:bg-white/10" data-testid="open-council-settings">Council settings</button></section> : null}
               <section>
                 <h3 className="text-[11px] font-bold uppercase tracking-[0.2em] text-slate-300">Keyboard</h3>
                 <ul className="mt-1 space-y-0.5 text-xs text-slate-300">

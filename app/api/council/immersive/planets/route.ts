@@ -11,10 +11,21 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
+const TTL_MS = 10_000
+let cached: { at: number; body: unknown } | null = null
+let inflight: Promise<unknown> | null = null
+
 /** Read-only planet status for the immersive Council. Every value comes from Foundry's mission records, the HVS catalog/render queue or the subsystem probes. */
 export async function GET() {
   const commander = await requireCommanderSession('Council planets')
   if (!commander.ok) return commander.response
+  // Short server-side cache plus in-flight sharing: several open views never multiply the file/probe reads.
+  if (cached && Date.now() - cached.at < TTL_MS) return NextResponse.json(cached.body, { headers: { 'cache-control': 'no-store' } })
+  if (!inflight) inflight = readPlanets().then(body => { cached = { at: Date.now(), body }; return body }).finally(() => { inflight = null })
+  return NextResponse.json(await inflight, { headers: { 'cache-control': 'no-store' } })
+}
+
+async function readPlanets() {
 
   // Foundry
   let foundryMissions: FoundryMissionSummary[] | null = null
@@ -28,9 +39,11 @@ export async function GET() {
     let detailReads = 0
     foundryMissions = listed.map(m => {
       let receiptVerified = false
+      let receiptChecked = false
       // The listing does not re-verify receipts on disk; a detail read does. Verify the few most recent completed missions, never assume.
       if (m.state === 'COMPLETED' && detailReads < 5) {
         detailReads += 1
+        receiptChecked = true
         const d = getMission(deps, m.id)
         receiptVerified = d?.receiptCheck !== undefined && d.receiptCheck !== 'NO_RECEIPT' && d.receiptCheck.ok === true
       }
@@ -41,10 +54,11 @@ export async function GET() {
         worker: m.worker ? { workerId: m.worker.workerId, heartbeatAgeSec: m.worker.heartbeatAgeSec } : null,
         verifierExit: typeof m.receipt?.verifier?.exitCode === 'number' ? m.receipt.verifier.exitCode : null,
         receiptVerified,
+        receiptChecked,
       }
     })
-  } catch (e) {
-    foundryReason = e instanceof Error ? e.message.slice(0, 120) : 'read failed'
+  } catch {
+    foundryReason = 'the Foundry mission records could not be read'
   }
 
   // HVS
@@ -61,14 +75,14 @@ export async function GET() {
     const all: HvsRenderJob[] = []
     for (const entry of catalog.slice(0, 40)) {
       const p = await loadProject(entry.id)
-      if (p) for (const j of p.renderJobs ?? []) all.push({ status: j.status })
+      if (p) for (const j of p.renderJobs ?? []) all.push({ status: j.status, updatedAt: j.updatedAt ?? null })
     }
     jobs = all
     const tools = await resolveFfmpegTools()
     toolsOk = Boolean(tools.ffmpeg && tools.ffprobe)
     if (!toolsOk) toolsReason = `missing: ${[!tools.ffmpeg && 'ffmpeg', !tools.ffprobe && 'ffprobe'].filter(Boolean).join(', ')}`
-  } catch (e) {
-    hvsError = e instanceof Error ? e.message.slice(0, 120) : 'read failed'
+  } catch {
+    hvsError = 'the HVS catalog could not be read'
   }
 
   // Terra
@@ -83,12 +97,12 @@ export async function GET() {
     terra = pick('terra'); world = pick('terra_world')
   } catch { /* planet reports UNAVAILABLE */ }
 
-  return NextResponse.json({
+  return {
     generatedAt: new Date().toISOString(),
     planets: [
       foundryPlanet({ available: foundryAvailable, reason: foundryReason, missions: foundryMissions }),
       hvsPlanet({ projectNames, projects, jobs, toolsOk, toolsReason, error: hvsError }),
       terraPlanet({ terra, world }),
     ],
-  }, { headers: { 'cache-control': 'no-store' } })
+  }
 }

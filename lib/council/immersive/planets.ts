@@ -28,21 +28,28 @@ export type FoundryMissionSummary = {
   progress?: { stepsDone: number; stepsTotal: number; modelCalls?: number } | null
   worker?: { workerId?: string | null; heartbeatAgeSec?: number | null } | null
   receiptVerified?: boolean
+  /** True only when the receipt was actually re-verified for this mission (listing views do not verify). */
+  receiptChecked?: boolean
   verifierExit?: number | null
 }
 
-const LIVE_STATES = new Set(['QUEUED', 'RUNNING', 'VERIFYING', 'APPLYING', 'INSTALLING'])
+const WORKING_STATES = new Set(['RUNNING', 'VERIFYING', 'APPLYING', 'INSTALLING'])
+const LIVE_STATES = new Set(['QUEUED', ...WORKING_STATES])
 
 export function foundryPlanet(input: { available: boolean; reason?: string | null; missions: FoundryMissionSummary[] | null }): PlanetStatus {
   const base = { id: 'foundry' as const, name: 'Foundry', href: '/foundry' }
   if (input.missions === null) return { ...base, health: 'UNAVAILABLE', headline: `Foundry status could not be read${input.reason ? `: ${input.reason}` : ''}`, facts: [], items: [], activity: false }
-  const live = input.missions.filter(m => LIVE_STATES.has(m.state) && m.liveness !== 'DEAD')
+  // Activity (ring, pause) only for a worker that is demonstrably alive; queued, stalled and dead runs are stated as such.
+  const live = input.missions.filter(m => WORKING_STATES.has(m.state) && m.liveness === 'ALIVE')
+  const stalled = input.missions.filter(m => WORKING_STATES.has(m.state) && m.liveness === 'STALLED')
+  const queued = input.missions.filter(m => m.state === 'QUEUED')
   const facts: string[] = []
-  if (live.length) {
-    const m = live[0]
-    facts.push(`Mission ${m.id}: ${m.state}${m.liveness === 'STALLED' ? ' (stalled: no recent progress)' : ''}${m.progress ? `, step ${m.progress.stepsDone}/${m.progress.stepsTotal}` : ''}`)
-    if (m.worker?.workerId) facts.push(`Worker ${m.worker.workerId}${typeof m.worker.heartbeatAgeSec === 'number' ? `, heartbeat ${m.worker.heartbeatAgeSec}s ago` : ''}`)
+  const lead = live[0] ?? stalled[0]
+  if (lead) {
+    facts.push(`Mission ${lead.id}: ${lead.state}${lead.liveness === 'STALLED' ? ' (stalled: no recent progress)' : ''}${lead.progress ? `, step ${lead.progress.stepsDone}/${lead.progress.stepsTotal}` : ''}`)
+    if (lead.worker?.workerId) facts.push(`Worker ${lead.worker.workerId}${typeof lead.worker.heartbeatAgeSec === 'number' ? `, heartbeat ${lead.worker.heartbeatAgeSec}s ago` : ''}`)
   }
+  if (queued.length) facts.push(`${queued.length} mission(s) queued`)
   const proven = input.missions.filter(m => m.state === 'COMPLETED' && m.verifierExit === 0 && m.receiptVerified)
   const failed = input.missions.filter(m => m.state === 'FAILED').length
   facts.push(`${proven.length} mission(s) completed with verifier exit 0 and a verified receipt; ${failed} failed (of the last ${input.missions.length})`)
@@ -51,30 +58,40 @@ export function foundryPlanet(input: { available: boolean; reason?: string | nul
     const done = m.state === 'COMPLETED'
     const provenM = done && m.verifierExit === 0 && m.receiptVerified === true
     const detail = done
-      ? `COMPLETED · verifier exit ${m.verifierExit ?? 'n/a'} · receipt ${m.receiptVerified ? 'verified' : 'not verified'}`
+      ? `COMPLETED · verifier exit ${m.verifierExit ?? 'n/a'} · receipt ${m.receiptChecked ? (m.receiptVerified ? 'verified' : 'NOT verified') : 'not checked'}`
       : `${m.state}${m.liveness === 'DEAD' ? ' (worker not alive)' : ''}${m.progress ? ` · step ${m.progress.stepsDone}/${m.progress.stepsTotal}` : ''}`
     const tone = provenM ? 'ok' as const : done ? 'warn' as const : m.state === 'FAILED' ? 'bad' as const : LIVE_STATES.has(m.state) ? 'active' as const : 'neutral' as const
     return { label: `${m.id} — ${m.title}`.slice(0, 90), detail, tone }
   })
   if (live.length) return { ...base, health: 'ACTIVE', headline: `${live.length} mission${live.length === 1 ? '' : 's'} running`, facts, items, activity: true }
+  if (stalled.length) return { ...base, health: 'DEGRADED', headline: `${stalled.length} mission${stalled.length === 1 ? '' : 's'} stalled — no recent progress`, facts, items, activity: false }
+  if (queued.length) return { ...base, health: input.available ? 'READY' : 'DEGRADED', headline: `${queued.length} mission${queued.length === 1 ? '' : 's'} queued, none running`, facts, items, activity: false }
   return { ...base, health: input.available ? 'READY' : 'DEGRADED', headline: input.available ? 'No mission running' : 'Cannot start missions on this machine', facts, items, activity: false }
 }
 
-export type HvsRenderJob = { status: string }
-export function hvsPlanet(input: { projectNames?: string[]; projects: number | null; jobs: HvsRenderJob[] | null; toolsOk: boolean | null; toolsReason?: string | null; error?: string | null }): PlanetStatus {
+export type HvsRenderJob = { status: string; updatedAt?: string | null }
+const HVS_FRESH_MS = 15 * 60_000
+export function hvsPlanet(input: { now?: number; projectNames?: string[]; projects: number | null; jobs: HvsRenderJob[] | null; toolsOk: boolean | null; toolsReason?: string | null; error?: string | null }): PlanetStatus {
   const base = { id: 'hvs' as const, name: 'Higher Vision Studios', href: '/higher-vision-studios' }
   if (input.projects === null) return { ...base, health: 'UNAVAILABLE', headline: `HVS status could not be read${input.error ? `: ${input.error}` : ''}`, facts: [], items: [], activity: false }
   const facts = [`${input.projects} project${input.projects === 1 ? '' : 's'} in the catalog`]
   const jobs = input.jobs ?? []
-  const running = jobs.filter(j => j.status === 'running').length
+  const now = input.now ?? Date.now()
+  const marked = jobs.filter(j => j.status === 'running')
+  // A persisted 'running' flag survives a crash; only a recent update counts as a render in progress.
+  const running = marked.filter(j => j.updatedAt && now - Date.parse(j.updatedAt) <= HVS_FRESH_MS).length
+  const unconfirmed = marked.length - running
   const queued = jobs.filter(j => j.status === 'queued').length
   const failed = jobs.filter(j => j.status === 'failed').length
   const completed = jobs.filter(j => j.status === 'completed').length
   facts.push(input.jobs ? `Render jobs: ${running} running, ${queued} queued, ${completed} completed, ${failed} failed` : 'Render jobs could not be read')
+  if (unconfirmed > 0) facts.push(`${unconfirmed} job(s) are marked running but have not updated for over 15 minutes (unconfirmed; not counted as active)`)
   if (input.toolsOk === false) facts.push(`Media toolchain unavailable${input.toolsReason ? `: ${input.toolsReason}` : ''} — rendering cannot run on this machine`)
   const items = (input.projectNames ?? []).slice(0, 5).map(n => ({ label: n, detail: 'project in the catalog', tone: 'neutral' as const }))
-  const health: PlanetHealth = running > 0 ? 'ACTIVE' : input.toolsOk === false ? 'DEGRADED' : 'READY'
-  return { ...base, health, headline: running > 0 ? `${running} render${running === 1 ? '' : 's'} running` : input.toolsOk === false ? 'Production available only without rendering' : 'Production ready', facts, items, activity: running > 0 }
+  const unreadable = input.jobs === null || input.toolsOk === null
+  if (input.toolsOk === null) facts.push('Media toolchain status could not be read')
+  const health: PlanetHealth = running > 0 ? 'ACTIVE' : unreadable || input.toolsOk === false ? 'DEGRADED' : 'READY'
+  return { ...base, health, headline: running > 0 ? `${running} render${running === 1 ? '' : 's'} running` : unreadable ? 'Some HVS sources could not be read' : input.toolsOk === false ? 'Production available only without rendering' : 'Production ready', facts, items, activity: running > 0 }
 }
 
 export function terraPlanet(input: { terra: { status: string; reasons: string[] } | null; world: { status: string; reasons: string[] } | null }): PlanetStatus {

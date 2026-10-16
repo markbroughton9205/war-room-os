@@ -4,7 +4,7 @@
  * state/result/receipt, the browser broker control state). Nothing here animates on a timer or implies success: `verified` is only
  * produced when the record itself carries the evidence (verifier exit 0 AND a verified receipt), and every star states its evidence.
  */
-export type StarKind = 'council' | 'research' | 'mission' | 'computer'
+export type StarKind = 'council' | 'research' | 'mission' | 'computer' | 'request'
 export type StarState = 'idle' | 'active' | 'pending' | 'partial' | 'done' | 'verified' | 'blocked' | 'failed'
 
 export type ProgressStar = {
@@ -33,7 +33,10 @@ export type StarMissionInput = {
 
 export type StarInput = {
   round: { phase: RoundPhase; reason?: string | null; members?: string[] }
-  research?: { active: boolean; mode?: string | null; status?: 'COMPLETED' | 'PARTIAL' | 'FAILED' | null; accepted?: number; considered?: number } | null
+  /** RESPONDED: sources answered but nothing was independently checked (the live HUD's own wording). UNAVAILABLE: could not run, which is not the same as failing. */
+  research?: { active: boolean; mode?: string | null; status?: 'COMPLETED' | 'PARTIAL' | 'FAILED' | 'RESPONDED' | 'UNAVAILABLE' | null; accepted?: number; considered?: number; responded?: number } | null
+  /** Council continuation requests (Allow / Summarize / Hold / Deny) waiting on the Commander. */
+  pendingRequests?: number
   missions?: StarMissionInput[]
   computer?: { controlState: string; url?: string | null } | null
 }
@@ -63,6 +66,10 @@ export function deriveProgressStars(input: StarInput): ProgressStar[] {
     } else if (r.status === 'COMPLETED') {
       const ok = (r.accepted ?? 0) >= 2
       stars.push({ id: 'research', kind: 'research', state: ok ? 'verified' : 'partial', label: ok ? `Research complete — ${r.accepted} accepted source(s)` : 'Research marked complete without enough accepted sources', evidence: `Research accounting: ${r.accepted ?? 0} accepted of ${r.considered ?? 0} considered` })
+    } else if (r.status === 'RESPONDED') {
+      stars.push({ id: 'research', kind: 'research', state: 'partial', label: `Research: ${r.responded ?? 0} source(s) responded — not independently checked`, evidence: 'Live research HUD (sources responded; no accepted-source accounting)' })
+    } else if (r.status === 'UNAVAILABLE') {
+      stars.push({ id: 'research', kind: 'research', state: 'blocked', label: 'Research unavailable for this turn', evidence: 'Live research HUD (unavailable)' })
     } else if (r.status === 'PARTIAL') {
       stars.push({ id: 'research', kind: 'research', state: 'partial', label: `Research partial — ${r.accepted ?? 0} accepted of ${r.considered ?? 0}`, evidence: 'Research accounting (status PARTIAL)' })
     } else {
@@ -96,6 +103,11 @@ export function deriveProgressStars(input: StarInput): ProgressStar[] {
         ? { id, kind: 'mission', state: 'verified', label: `Mission verified: ${title}`, evidence: `Foundry mission ${f.missionId}: verifier exit 0 and receipt verified` }
         : { id, kind: 'mission', state: 'partial', label: `Mission reported complete but not proven: ${title}`, evidence: 'Foundry record lacks verifier exit 0 and/or a verified receipt' })
     }
+  }
+
+  if ((input.pendingRequests ?? 0) > 0) {
+    const n = input.pendingRequests!
+    stars.push({ id: 'requests', kind: 'request', state: 'pending', label: `${n} Council request${n === 1 ? '' : 's'} waiting for you`, evidence: 'Continuation request records with status pending (open Conversation to answer)' })
   }
 
   const c = input.computer

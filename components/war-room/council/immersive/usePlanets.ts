@@ -19,11 +19,11 @@ export function usePlanets(): { planets: PlanetStatus[] | null; error: string | 
     const load = async () => {
       try {
         const res = await fetch('/api/council/immersive/planets', { cache: 'no-store' })
-        if (!res.ok) { if (!stop) setError(`Planet status unavailable (HTTP ${res.status})`); return }
+        if (!res.ok) { if (!stop) { setPlanets(null); setError(`Planet status unavailable (HTTP ${res.status})`) } return }
         const j = await res.json() as { planets?: PlanetStatus[]; generatedAt?: string }
         if (!stop && Array.isArray(j.planets)) { setPlanets(j.planets); setError(null); setRefreshedAt(j.generatedAt ?? null) }
       } catch (e) {
-        if (!stop) setError(e instanceof Error ? e.message : 'Planet status unavailable')
+        if (!stop) { setPlanets(null); setError('Planet status unavailable') }
       }
     }
     void load()

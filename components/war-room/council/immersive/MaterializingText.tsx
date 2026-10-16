@@ -26,7 +26,11 @@ export function MaterializingText({ blocks, reducedMotion, maxHeight = '38vh' }:
   const scroller = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    if (seen.current === null) { seen.current = new Set(blocks.map(b => b.id)); return }
+    // History present when the view first has content (open, restore, session switch) appears instantly; only later arrivals animate.
+    if (seen.current === null) { if (blocks.length) seen.current = new Set(blocks.map(b => b.id)); return }
+    const ids = new Set(blocks.map(b => b.id))
+    if (blocks.length && !blocks.some(b => seen.current!.has(b.id))) { seen.current = ids; queueMicrotask(() => setAnimated(new Set())); return }
+    for (const id of [...seen.current]) if (!ids.has(id)) seen.current.delete(id)
     const fresh = blocks.filter(b => !seen.current!.has(b.id) && b.role !== 'commander')
     if (!fresh.length) return
     for (const b of fresh) seen.current.add(b.id)
@@ -48,7 +52,7 @@ export function MaterializingText({ blocks, reducedMotion, maxHeight = '38vh' }:
       style={{ maxHeight }}
       role="log"
       aria-label="Council conversation, latest round"
-      aria-live="polite"
+      aria-live={blocks.some(b => b.streaming) ? 'off' : 'polite'}
       tabIndex={0}
       data-testid="immersive-text"
     >

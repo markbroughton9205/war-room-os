@@ -12,11 +12,11 @@ const HEALTH_WORD: Record<PlanetHealth, string> = { ACTIVE: 'active', READY: 're
 const HEALTH_COLOR: Record<PlanetHealth, string> = { ACTIVE: '#22d3ee', READY: '#34d399', DEGRADED: '#f59e0b', UNAVAILABLE: '#f87171' }
 
 /** A navigable planet. The ring pulses ONLY while the source reports real activity; every other state is a static, labelled badge. */
-export function PlanetObject({ status, onOpen, reducedMotion, size = 'clamp(5.5rem, 13vmin, 8rem)' }: { status: PlanetStatus | null; onOpen: () => void; reducedMotion: boolean; size?: string }) {
+export function PlanetObject({ status, error, onOpen, reducedMotion, size = 'clamp(5.5rem, 13vmin, 8rem)' }: { status: PlanetStatus | null; error?: string | null; onOpen: () => void; reducedMotion: boolean; size?: string }) {
   const id = status?.id ?? 'foundry'
   const t = THEME[id]
   const health = status?.health ?? 'UNAVAILABLE'
-  const label = status ? `${status.name}: ${status.headline}` : 'Loading status'
+  const label = status ? `${status.name}: ${status.headline}` : error ? 'Status could not be read' : 'Loading status'
   return (
     <button
       type="button"
@@ -24,7 +24,7 @@ export function PlanetObject({ status, onOpen, reducedMotion, size = 'clamp(5.5r
       className="group pointer-events-auto flex flex-col items-center gap-1.5 rounded-2xl p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300"
       aria-label={`${label}. Open ${status?.name ?? id} panel`}
       data-testid={`planet-${id}`}
-      data-health={status ? health : 'LOADING'}
+      data-health={status ? health : error ? 'UNAVAILABLE' : 'LOADING'}
       data-activity={status?.activity ? 'true' : 'false'}
     >
       <span
@@ -43,7 +43,7 @@ export function PlanetObject({ status, onOpen, reducedMotion, size = 'clamp(5.5r
       <span className="max-w-[11rem] text-center text-[10px] font-bold uppercase tracking-[0.18em] text-slate-100">{status?.name ?? id}</span>
       <span className="flex items-center gap-1 rounded-full border border-white/10 bg-black/55 px-2 py-0.5 text-[9px] uppercase tracking-wider" style={{ color: HEALTH_COLOR[health] }}>
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: HEALTH_COLOR[health] }} aria-hidden="true" />
-        {status ? HEALTH_WORD[health] : 'reading…'}
+        {status ? HEALTH_WORD[health] : error ? 'unavailable' : 'reading…'}
       </span>
     </button>
   )
