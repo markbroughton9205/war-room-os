@@ -117,6 +117,7 @@ export function CouncilSessionNavigator({
   }, [search, liveSessions])
 
   // Selection only ever holds ids that are visible in the current view, and resets when the view changes.
+  /* eslint-disable react-hooks/set-state-in-effect -- selection is derived UI state that must reset when the view or visible rows change */
   useEffect(() => { setSelected(new Set()); setConfirm(null); setBulkRenameOpen(false) }, [view])
   useEffect(() => {
     setSelected(prev => {
@@ -125,6 +126,7 @@ export function CouncilSessionNavigator({
       return next.size === prev.size ? prev : next
     })
   }, [liveSessions])
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const grouped = useMemo(() => {
     const buckets: Record<SessionDayGroup, CouncilSessionListItem[]> = { Today: [], Yesterday: [], Earlier: [] }

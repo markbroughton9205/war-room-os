@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- validator inspects loosely typed JSON responses */
 /**
  * Council session management: unused empty sessions are never accumulated, Trash is recoverable, restore returns the same rows with
  * their messages, permanent deletion only works from Trash with an explicit confirmation, and bulk archive/rename work.

@@ -63,6 +63,7 @@ export function CouncilMissionPanel({
     } catch { /* panel is optional */ }
   }, [conversationId, onResultReturned])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set from the response
   useEffect(() => { void load() }, [load])
   useEffect(() => {
     if (!proposals.some(p => ACTIVE.has(p.status))) return

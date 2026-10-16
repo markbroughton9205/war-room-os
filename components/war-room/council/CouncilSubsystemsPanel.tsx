@@ -23,6 +23,7 @@ export function CouncilSubsystemsPanel() {
     }
   }, [])
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- fetch on mount; state is set from the response
   useEffect(() => { void load() }, [load])
 
   return (

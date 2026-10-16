@@ -46,7 +46,6 @@ export function CouncilComputerPanel({ conversationId, onPosted }: { conversatio
   const [error, setError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const frameRef = useRef<HTMLImageElement | null>(null)
-  const prevUrl = useRef<string | null>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -61,6 +60,7 @@ export function CouncilComputerPanel({ conversationId, onPosted }: { conversatio
 
   useEffect(() => {
     if (!open) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- poll starts with an immediate fetch
     void refresh()
     const t = window.setInterval(() => { void refresh() }, 2500)
     return () => window.clearInterval(t)
@@ -68,6 +68,7 @@ export function CouncilComputerPanel({ conversationId, onPosted }: { conversatio
 
   // live frame
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the frame when the view closes
     if (!open || !sessionId) { setFrameUrl(null); return }
     let stop = false
     const tick = async () => {
