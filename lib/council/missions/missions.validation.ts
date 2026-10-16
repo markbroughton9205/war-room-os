@@ -189,5 +189,14 @@ const INPUT = { conversationId: 'lcnv_fixture', request: 'Fix add() in calc.mjs 
   ok('8: proposals persist in the conversation, ignore client overwrites, and survive Trash/Restore; the result sits in the same thread')
 }
 
-console.log(`\n${passed}/8 council mission validations passed`)
-assert.equal(passed, 8)
+// 9. no acceptance criteria given -> an explicit default is stated, so Foundry (which requires one) can start
+{
+  const m = memoryStorage(); const f = fakeFoundry()
+  const svc = createCouncilMissionService({ storage: m.storage, foundry: f.port })
+  const p = svc.propose({ ...INPUT, acceptance: [] })
+  assert.equal(p.acceptance.length, 1); assert.match(p.acceptance[0], /tests and checks pass/)
+  ok('9: a proposal without acceptance criteria carries one explicit default criterion')
+}
+
+console.log(`\n${passed}/9 council mission validations passed`)
+assert.equal(passed, 9)
