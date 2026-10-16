@@ -68,7 +68,7 @@ export async function POST(req: Request) {
         const model = typeof m.metadata.providerModel === 'string' ? (m.metadata.providerModel as string) : null
         return [m.family ?? 'COUNCIL', { member: m.family ?? 'COUNCIL', model }] as const
       })).values())
-      const lastAssistant = [...recent].reverse().find(m => m.role === 'assistant')
+      const lastAssistant = [...recent].reverse().find(m => m.role === 'assistant' && !m.metadata.councilBrowse)
       const proposal = ctx.service.propose({
         conversationId,
         title: typeof body.title === 'string' ? body.title : undefined,

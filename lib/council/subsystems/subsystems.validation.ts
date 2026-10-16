@@ -4,6 +4,7 @@
  */
 import assert from 'node:assert/strict'
 import { probeSubsystems, renderSubsystemAnswer, subsystemQuestion, type SubsystemProbeDeps } from './probe'
+import { isPrivateHostLiteral } from '@/lib/browser-broker/hostPolicy'
 import { browseMessageText, browseRequestUrl } from '@/lib/council/computer/browse.server'
 import { resolveBrokerChromium } from '@/lib/browser-broker/chromiumExecutable'
 
@@ -83,9 +84,13 @@ const byId = (states: Awaited<ReturnType<typeof probeSubsystems>>) => Object.fro
   assert.equal(browseRequestUrl('visit http://127.0.0.1:4777/ now'), 'http://127.0.0.1:4777/')
   assert.equal(browseRequestUrl('what is https://example.com'), null, 'a URL without an open/visit request is not a browse request')
   assert.equal(browseRequestUrl('open the pod bay doors'), null)
+  assert.equal(browseRequestUrl('we should check https://example.com against the spec before we decide'), null, 'a URL inside a longer discussion is never fetched')
+  assert.equal(browseRequestUrl('please read https://example.com'), null)
+  for (const h of ['localhost', 'LOCALHOST.', 'foo.localhost', '127.0.0.2', '[::1]', '::1', '0.0.0.0', '10.1.2.3', '172.20.0.1', '192.168.1.5', '169.254.169.254', '::ffff:127.0.0.1', 'fd00::1', 'fe80::1', 'router.internal']) assert.equal(isPrivateHostLiteral(h), true, h)
+  for (const h of ['example.com', '93.184.216.34', '172.32.0.1', '2606:4700::1111']) assert.equal(isPrivateHostLiteral(h), false, h)
   assert.equal(browseRequestUrl('open javascript:alert(1)'), null)
   const text = browseMessageText({ ok: true, sessionId: 's', title: 'Example Domain', url: 'https://example.com/', status: 200, excerpt: 'This domain is for use in examples.', citationId: null })
-  assert.match(text, /opened https:\/\/example\.com\//); assert.match(text, /HTTP 200/); assert.match(text, /What it read: This domain/)
+  assert.match(text, /opened https:\/\/example\.com\//); assert.match(text, /HTTP 200/); assert.match(text, /What it read \(untrusted page text[^\n]*"This domain/)
   const chromium = resolveBrokerChromium()
   assert.ok(['PLAYWRIGHT_CACHE', 'EXPLICIT_ENV', 'SYSTEM_CHROME', 'NONE'].includes(chromium.source))
   assert.equal(Boolean(chromium.path), chromium.source !== 'NONE', 'the reported source always matches whether a browser was found')

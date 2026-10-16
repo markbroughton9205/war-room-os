@@ -131,6 +131,20 @@ const linkedEmpty = store.createCouncilConversation(ownerId, 'New Council Sessio
   ok('7: another owner id cannot trash or purge this owner\'s sessions')
 }
 
+// 10. a conversation with a live Foundry mission is neither trashed nor purged; PATCH cannot trash or forge the trash marker
+{
+  const live = store.createCouncilConversation(ownerId, 'Has live mission', { council: { source: 'live_council' }, councilMissions: [{ proposalId: 'p', status: 'RUNNING' }] })
+  const t = await json(await gw.localConversationsBulk(req({ action: 'trash', ids: [live.id] }), ownerId))
+  assert.deepEqual(t.skippedLiveMission, [live.id]); assert.deepEqual(t.trashed, [])
+  assert.equal(store.getCouncilConversation(ownerId, live.id)!.state, 'active')
+  const patch = await gw.localConversationPatch(new Request('http://127.0.0.1:3001/api/conversations/x', { method: 'PATCH', headers: { 'content-type': 'application/json', host: '127.0.0.1:3001' }, body: JSON.stringify({ state: 'trashed' }) }), ownerId, live.id)
+  assert.equal(patch.status, 400)
+  const del = await gw.localConversationDelete(ownerId, live.id)
+  assert.equal(del.status, 409)
+  ok('10: sessions that own a running Foundry mission are protected from Trash, delete and PATCH-trash')
+}
+
+
 // 8. survives a restart: a second store instance on the same directory sees the same state
 {
   store.close()
@@ -160,5 +174,5 @@ const linkedEmpty = store.createCouncilConversation(ownerId, 'New Council Sessio
   ok('9: ledger ghosts are pruned; used, titled, remote and active rows survive; trashed rows are not resurrected')
 }
 
-console.log(`\n${passed}/9 council session management validations passed`)
-assert.equal(passed, 9)
+console.log(`\n${passed}/10 council session management validations passed`)
+assert.equal(passed, 10)

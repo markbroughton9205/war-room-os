@@ -100,6 +100,10 @@ export async function POST(req: Request) {
   const out = (r: { ok: boolean; error?: string } & Record<string, unknown>, status?: number) =>
     NextResponse.json(r.ok ? r : { ok: false, error: r.error ?? 'failed', verdict: (r as { verdict?: string }).verdict ?? null }, { status: status ?? (r.ok ? 200 : 409), headers: { 'cache-control': 'no-store' } })
 
+  // Commander-only input (click, type, press, navigate-as-commander) is accepted only while the Commander holds control of the session,
+  // so it can never interleave with a Council action that is mid-navigation.
+  const requireCommanderControl = () => (broker.getSession(sessionId)?.controlState === 'COMMANDER_CONTROL' ? null : out({ ok: false, error: 'COMMANDER_CONTROL_REQUIRED' }, 409))
+
   switch (action) {
     case 'open': {
       // With a profileId, Council uses a signed-in trusted profile the Commander created (the broker enforces allow_council and origins).
@@ -129,6 +133,7 @@ export async function POST(req: Request) {
               content: browseMessageText(result),
               metadata: {
                 responseSuccessful: true,
+                untrusted: true,
                 councilBrowse: { sessionId: result.sessionId, url: result.url, title: result.title, status: result.status, citationId: result.citationId },
               },
             })
@@ -151,20 +156,24 @@ export async function POST(req: Request) {
     case 'navigate': {
       // `as: 'commander'` is accepted only while the Commander holds control (the broker enforces ownership either way).
       const asCommander = body.as === 'commander'
+      if (asCommander) { const gate = requireCommanderControl(); if (gate) return gate }
       const url = String(body.url ?? '')
       if (!/^https?:\/\//i.test(url) || url.length > 1000) return fail('url must be http(s)')
       const r = await broker.navigate({ owner: asCommander ? 'commander' : 'council', sessionId, url, commanderApproved: asCommander })
       return out(r.ok ? { ok: true, ...r.result } : r)
     }
     case 'click': {
+      { const gate = requireCommanderControl(); if (gate) return gate }
       const r = await broker.clickAt({ owner: 'commander', sessionId, x: Number(body.x), y: Number(body.y) })
       return out(r.ok ? { ok: true, ...r.result } : r)
     }
     case 'type': {
+      { const gate = requireCommanderControl(); if (gate) return gate }
       const r = await broker.typeText({ owner: 'commander', sessionId, text: String(body.text ?? '') })
       return out(r.ok ? { ok: true, ...r.result } : r)
     }
     case 'press': {
+      { const gate = requireCommanderControl(); if (gate) return gate }
       const r = await broker.press({ owner: 'commander', sessionId, text: String(body.key ?? 'Enter') })
       return out(r.ok ? { ok: true, ...r.result } : r)
     }

@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { redactSecretsFromOutput } from '@/lib/native-builder/outputRedaction'
 import { chromiumChildEnv, loadPlaywrightChromium } from '@/lib/native-builder/foundryPlaywright'
 import { resolveBrokerChromium } from './chromiumExecutable'
+import { hostIsPrivate, isPrivateHostLiteral } from './hostPolicy'
 import { classifyBrowserAction } from './actionClassifier'
 import { parseStructuredReleases } from './researchPolicy'
 import { browserBrokerDataDirs, playwrightTmpDir, withPlaywrightTmpDir } from './paths'
@@ -118,8 +119,7 @@ function redactUrl(url: string): string {
 }
 
 function isLoopbackHost(hostname: string): boolean {
-  const host = hostname.toLowerCase()
-  return host === '127.0.0.1' || host === 'localhost' || host === '::1'
+  return isPrivateHostLiteral(hostname)
 }
 
 export class BrowserBroker {
@@ -506,6 +506,19 @@ export class BrowserBroker {
       lastAction: 'session.create',
       lastActionAt: new Date().toISOString(),
       missionId: input.missionId ?? null,
+    }
+    if (!session.allowLocalhost) {
+      // Every request (sub-resources, redirects, script navigations) is re-checked, not only the first URL.
+      await (context as unknown as { route: (m: string, h: (r: { request(): { url(): string }; abort(c?: string): Promise<void>; continue(): Promise<void> }) => Promise<void>) => Promise<void> })
+        .route('**/*', async route => {
+          let blocked = false
+          try {
+            const u = new URL(route.request().url())
+            if (u.protocol === 'http:' || u.protocol === 'https:') blocked = await hostIsPrivate(u.hostname)
+          } catch { blocked = true }
+          if (blocked) { await route.abort('blockedbyclient').catch(() => undefined); return }
+          await route.continue().catch(() => undefined)
+        })
     }
     const tab = await this.openTabOn(session)
     this.sessions.set(sessionId, session)
@@ -1563,6 +1576,7 @@ export class BrowserBroker {
   async clickAt(input: { owner: BrowserOwner; sessionId: string; tabId?: string; x: number; y: number }): Promise<BrokerResult<{ clicked: boolean }>> {
     const session = this.sessions.get(input.sessionId)
     if (!session) return err('SESSION_NOT_FOUND')
+    if (input.owner !== 'commander') return err('COMMANDER_ONLY')
     const control = this.assertControl(session, input.owner, true)
     if (!control.ok) return control
     const tab = this.requireTab(input.sessionId, input.tabId)
@@ -1581,6 +1595,7 @@ export class BrowserBroker {
   async typeText(input: { owner: BrowserOwner; sessionId: string; tabId?: string; text: string }): Promise<BrokerResult<{ typed: number }>> {
     const session = this.sessions.get(input.sessionId)
     if (!session) return err('SESSION_NOT_FOUND')
+    if (input.owner !== 'commander') return err('COMMANDER_ONLY')
     const control = this.assertControl(session, input.owner, true)
     if (!control.ok) return control
     const tab = this.requireTab(input.sessionId, input.tabId)

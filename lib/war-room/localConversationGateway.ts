@@ -122,6 +122,13 @@ export type BulkConversationAction = 'trash' | 'restore' | 'archive' | 'unarchiv
  * Bulk Council session operations for the sidebar. Owner scoped; nothing here is ever applied to ids the owner does not hold.
  * Permanent deletion only touches conversations that are already in Trash and requires an explicit confirmation token.
  */
+const LIVE_MISSION = new Set(['RUNNING', 'INTERRUPTED'])
+/** A conversation that still owns a live Foundry mission is never trashed or purged: its Council record would be lost while Foundry keeps running. */
+function hasLiveMission(store: ReturnType<typeof getLocalOwnershipStore>, ownerId: string, id: string): boolean {
+  const m = store.getCouncilConversation(ownerId, id)?.metadata?.councilMissions
+  return Array.isArray(m) && m.some(p => p && typeof p === 'object' && LIVE_MISSION.has(String((p as { status?: unknown }).status)))
+}
+
 export async function localConversationsBulk(req: Request, ownerId: string) {
   const health = await collectPersistenceHealth()
   if (!persistenceAllowsDurableCouncil(health)) {
@@ -147,8 +154,9 @@ export async function localConversationsBulk(req: Request, ownerId: string) {
   if (!ids.length) return jsonWithPersistence({ error: 'ids is required' }, true, { status: 400 })
 
   if (action === 'trash') {
-    const res = store.trashCouncilConversations(ownerId, ids)
-    return jsonWithPersistence({ action, ...res }, true)
+    const blocked = ids.filter(id => hasLiveMission(store, ownerId, id))
+    const res = store.trashCouncilConversations(ownerId, ids.filter(id => !blocked.includes(id)))
+    return jsonWithPersistence({ action, ...res, skippedLiveMission: blocked }, true)
   }
   if (action === 'restore' || action === 'unarchive') {
     const res = store.restoreCouncilConversations(ownerId, ids)
@@ -188,8 +196,9 @@ export async function localConversationsBulk(req: Request, ownerId: string) {
     if (body.confirm !== 'DELETE_PERMANENTLY') {
       return jsonWithPersistence({ error: 'Permanent deletion requires confirm: "DELETE_PERMANENTLY".', code: 'CONFIRMATION_REQUIRED' }, true, { status: 400 })
     }
-    const res = store.purgeCouncilConversations(ownerId, ids)
-    return jsonWithPersistence({ action, ...res }, true)
+    const blocked = ids.filter(id => hasLiveMission(store, ownerId, id))
+    const res = store.purgeCouncilConversations(ownerId, ids.filter(id => !blocked.includes(id)))
+    return jsonWithPersistence({ action, ...res, skippedLiveMission: blocked }, true)
   }
   return jsonWithPersistence({ error: `Unknown action ${String(body.action)}` }, true, { status: 400 })
 }
@@ -221,6 +230,7 @@ export async function localConversationPatch(req: Request, ownerId: string, id: 
   } catch {
     return jsonWithPersistence({ error: 'Invalid JSON body.' }, true, { status: 400 })
   }
+  if (body.state === 'trashed') return jsonWithPersistence({ error: 'Use the Trash action to move a session to Trash.' }, true, { status: 400 })
   const store = getLocalOwnershipStore(dataDir())
   const existing = store.getCouncilConversation(ownerId, id)
   if (!existing) return jsonWithPersistence({ error: 'Not found' }, true, { status: 404 })
@@ -231,7 +241,8 @@ export async function localConversationPatch(req: Request, ownerId: string, id: 
         ? metadata.council as Record<string, unknown>
         : {}
       const incomingCouncil = body.metadata.council
-      const { council: _drop, councilStage1: _s1, councilMissions: _cm0, ...rest } = body.metadata
+      const { council: _drop, councilStage1: _s1, councilMissions: _cm0, trash: _t0, ...rest } = body.metadata
+      void _t0
       void _drop
       void _s1
       void _cm0
@@ -242,7 +253,8 @@ export async function localConversationPatch(req: Request, ownerId: string, id: 
     } else {
       // councilStage1 is server-owned provenance: never accept it from a client, always carry over.
       // councilStage1 and councilMissions are server-owned records: never accepted from a client, always carried over.
-      const { councilStage1: _s1, councilMissions: _cm, ...incoming } = body.metadata
+      const { councilStage1: _s1, councilMissions: _cm, trash: _t1, ...incoming } = body.metadata
+      void _t1
       void _s1
       void _cm
       let kept: Record<string, unknown> = incoming
@@ -264,6 +276,7 @@ export async function localConversationDelete(ownerId: string, id: string) {
   const store = getLocalOwnershipStore(dataDir())
   const existing = store.getCouncilConversation(ownerId, id)
   if (!existing) return jsonWithPersistence({ error: 'Not found' }, true, { status: 404 })
+  if (hasLiveMission(store, ownerId, id)) return jsonWithPersistence({ error: 'This conversation has a running Foundry mission; cancel it first.', code: 'LIVE_MISSION' }, true, { status: 409 })
   // "Delete" from the sidebar moves the session to Trash; it stays recoverable until the Commander empties Trash.
   store.trashCouncilConversations(ownerId, [id])
   return jsonWithPersistence({ ok: true, id, trashed: true, deleted_at: new Date().toISOString(), backend: 'local_ownership' }, true)

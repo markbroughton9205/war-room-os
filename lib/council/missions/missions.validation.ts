@@ -198,5 +198,20 @@ const INPUT = { conversationId: 'lcnv_fixture', request: 'Fix add() in calc.mjs 
   ok('9: a proposal without acceptance criteria carries one explicit default criterion')
 }
 
-console.log(`\n${passed}/9 council mission validations passed`)
-assert.equal(passed, 9)
+// 10. concurrent approvals start one mission; sensitive targets are refused
+{
+  const m = memoryStorage(); const f = fakeFoundry()
+  const slow = { ...f.port, start: async (b: FoundryStartBody, a: string) => { await new Promise(r => setTimeout(r, 30)); return f.port.start(b, a) } }
+  const svc = createCouncilMissionService({ storage: m.storage, foundry: slow })
+  const p = svc.propose(INPUT)
+  const results = await Promise.allSettled([svc.approve(p.proposalId, 'c'), svc.approve(p.proposalId, 'c')])
+  assert.equal(f.calls.start.length, 1, 'exactly one Foundry mission is started')
+  assert.equal(results.filter(r => r.status === 'rejected').length, 1)
+  for (const bad of ['.git/hooks/pre-commit', '.env.local', '.github/workflows/x.yml', 'node_modules/x/index.js', '-rf', 'keys/server.pem']) {
+    assert.throws(() => svc.propose({ ...INPUT, targets: [{ path: bad }] }), /Unsafe/, bad)
+  }
+  ok('10: concurrent approvals start exactly one Foundry mission; VCS, secret, CI and dependency paths are refused as targets')
+}
+
+console.log(`\n${passed}/10 council mission validations passed`)
+assert.equal(passed, 10)

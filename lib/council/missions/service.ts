@@ -23,9 +23,12 @@ export class CouncilMissionError extends Error {
 const nowIso = () => new Date().toISOString()
 const SAFE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)[A-Za-z0-9_@.\-/]{1,200}$/
 
+/** Never a mission write target: VCS internals, secrets, dependency trees, CI/agent configuration, option-looking names. */
+const SENSITIVE_PATH = /(^|\/)(\.git|\.github|\.claude|\.cursor|node_modules|supabase)(\/|$)|(^|\/)\.env[^/]*$|(^|\/)-|\.(pem|key)$/i
+
 export function safeRelativePath(p: string): string | null {
   const t = p.trim().replace(/^\.\//, '')
-  if (!t || t.includes('//') || !SAFE_PATH.test(t)) return null
+  if (!t || t.includes('//') || !SAFE_PATH.test(t) || SENSITIVE_PATH.test(t)) return null
   return t
 }
 
@@ -136,6 +139,9 @@ export function statusFromFoundry(view: FoundryMissionView): { status: CouncilMi
 
 export type CouncilMissionService = ReturnType<typeof createCouncilMissionService>
 
+/** Proposals whose approval is mid-start (process-wide: the service is rebuilt per request). One approval starts at most one Foundry mission. */
+const STARTING = new Set<string>()
+
 export function createCouncilMissionService(deps: { storage: CouncilMissionStorage; foundry: FoundryPort }) {
   const { storage, foundry } = deps
   const all = () => storage.read() ?? []
@@ -145,10 +151,12 @@ export function createCouncilMissionService(deps: { storage: CouncilMissionStora
     if (idx < 0) throw new CouncilMissionError('NOT_FOUND', `Unknown mission proposal ${proposalId}`)
     return { rows, idx, proposal: rows[idx] }
   }
-  const save = (rows: CouncilMissionProposal[], idx: number, next: CouncilMissionProposal) => {
-    const copy = rows.slice()
-    copy[idx] = next
-    storage.write(copy)
+  // Re-read before every write and replace only this proposal, so a slow Foundry start or a concurrent sync never writes back a stale list.
+  const save = (_rows: CouncilMissionProposal[], _idx: number, next: CouncilMissionProposal) => {
+    const fresh = all().slice()
+    const at = fresh.findIndex(p => p.proposalId === next.proposalId)
+    if (at < 0) fresh.push(next); else fresh[at] = next
+    storage.write(fresh)
     return next
   }
 
@@ -179,29 +187,35 @@ export function createCouncilMissionService(deps: { storage: CouncilMissionStora
       if (proposal.status !== 'PROPOSED' && proposal.status !== 'START_FAILED') {
         throw new CouncilMissionError('ILLEGAL', `Mission proposal is ${proposal.status}; only a proposed mission can be approved.`)
       }
-      const approval = { at: nowIso(), by: actor }
-      const avail = foundry.availability()
-      if (!avail.ok) {
-        return save(rows, idx, { ...proposal, status: 'START_FAILED', statusReason: `Foundry is not available: ${avail.reason}`, approval })
-      }
+      if (STARTING.has(proposalId)) throw new CouncilMissionError('ILLEGAL', 'This proposal is already being started.')
+      STARTING.add(proposalId)
       try {
-        const started = await foundry.start({
-          action: 'start',
-          title: proposal.title,
-          request: proposal.request,
-          acceptance: proposal.acceptance,
-          targets: proposal.targets,
-          scope: proposal.scope,
-          install: false,
-        }, actor)
-        const view = foundry.get(started.missionId)
-        const snap: CouncilMissionFoundrySnapshot = view
-          ? snapshotOf(view)
-          : { missionId: started.missionId, state: started.state, stateReason: 'accepted by Foundry', stateAt: nowIso(), progress: null, result: null, receipt: null, syncedAt: nowIso() }
-        return save(rows, idx, { ...proposal, approval, status: 'RUNNING', statusReason: `Foundry accepted mission ${started.missionId}.`, foundry: snap })
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Foundry refused to start the mission'
-        return save(rows, idx, { ...proposal, approval, status: 'START_FAILED', statusReason: msg.slice(0, 400) })
+        const approval = { at: nowIso(), by: actor }
+        const avail = foundry.availability()
+        if (!avail.ok) {
+          return save(rows, idx, { ...proposal, status: 'START_FAILED', statusReason: `Foundry is not available: ${avail.reason}`, approval })
+        }
+        try {
+          const started = await foundry.start({
+            action: 'start',
+            title: proposal.title,
+            request: proposal.request,
+            acceptance: proposal.acceptance,
+            targets: proposal.targets,
+            scope: proposal.scope,
+            install: false,
+          }, actor)
+          const view = foundry.get(started.missionId)
+          const snap: CouncilMissionFoundrySnapshot = view
+            ? snapshotOf(view)
+            : { missionId: started.missionId, state: started.state, stateReason: 'accepted by Foundry', stateAt: nowIso(), progress: null, result: null, receipt: null, syncedAt: nowIso() }
+          return save(rows, idx, { ...proposal, approval, status: 'RUNNING', statusReason: `Foundry accepted mission ${started.missionId}.`, foundry: snap })
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : 'Foundry refused to start the mission'
+          return save(rows, idx, { ...proposal, approval, status: 'START_FAILED', statusReason: msg.slice(0, 400) })
+        }
+      } finally {
+        STARTING.delete(proposalId)
       }
     },
 

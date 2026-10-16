@@ -12835,7 +12835,7 @@ function Home() {
       const activeId = liveCouncilConvIdRef.current
       const res = await fetch('/api/conversations/bulk', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'x-wr-conversations-bulk': '1' },
         body: JSON.stringify({ action, ids, ...extra, ...(action === 'cleanup-empty' && activeId ? { excludeIds: [activeId] } : {}) }),
       })
       const j = await res.json().catch(() => ({})) as Record<string, unknown>
