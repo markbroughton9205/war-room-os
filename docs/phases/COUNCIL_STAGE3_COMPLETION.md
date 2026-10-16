@@ -5,8 +5,11 @@ Branch `council/stage3-immersive`, built on the Stage 2 tip `7e61e916`. Installe
 
 ## Result — read this first
 
-**Desktop immersive experience: implemented and accepted in the installed runtime** (installed package run as its own UI server on 127.0.0.1:3001 with its own data directory, driven through the real UI in Chrome).
-**Not yet accepted in the Electron window**: the Electron app binds the fixed ports 3847/3848 that the canonical (Stage 2) app owns, and the new install's `chrome-sandbox` needs the same one-time `sudo` setup as before. Electron acceptance therefore happens at promotion (`promote.sh`), with an immediate rollback available. **VR: foundation and plan only; no headset test.** Stage 3 is not called complete until the Electron step is confirmed.
+**Promoted and verified in the Electron window.** After the Commander ran `promote.sh`, the canonical launcher runs `war-room-os-0.2.0-e065c055-council-stage3` with the native sandbox (setuid `chrome-sandbox`); ports 3847/3848 answer; the Electron window (960×503 CSS px, DPR 2) renders the immersive Council (checked over the app's local debugging port: view `immersive`, dock, three planets, Terra pill, stars, floating input). The Commander's data was preserved: 1 active + 34 archived sessions, 23 messages and 11 Foundry mission records, unchanged. The Foundry planet showed the real mission history (5 completed with verifier exit 0 and verified receipt, 5 failed, 1 cancelled — read from the live records). No test messages were written into the canonical data.
+
+**Found at the real window size and fixed (build `d06afa12`):** at 960×503 the empty-state box, two-row composer and planet badges overlapped. Fix: compact one-row composer, planets above the text block, box-less empty state, drawer bottom clearance. Verified at 960×457 in the isolated installed runtime; **`d06afa12` is installed (`~/.local/opt/war-room-os-0.2.0-d06afa12-council-stage3`) but not yet the canonical launcher target** — switching needs the same one-time `sudo` for its sandbox helper (`~/.local/share/war-room-os-stage3-accept/promote-d06afa12.sh`). Until then the canonical app runs `e065c055`, which is fully functional with the small-window overlap.
+
+**VR: foundation and plan only; no headset test.**
 
 ## What was built (on top of the unchanged Stage 2 operations layer)
 
@@ -38,7 +41,7 @@ Verdict FAIL on first pass (1 BLOCKER) → all fixed → PASS_WITH_FIXES. Findin
 
 ## Known limits (not hidden)
 
-- Not yet exercised in the Electron window (ports/sandbox, see Result). `Alt+N` shortcuts can clash with some desktop/browser shortcuts; they are listed in Settings & help.
+- Missions, Council turns and the browser/takeover flow were exercised in the installed package run as an isolated UI server, not inside the canonical Electron window (to avoid writing test data into the Commander's sessions); the Electron window was verified for rendering, drawers, planets and the Commander's real session/mission data. `Alt+N` shortcuts can clash with some desktop/browser shortcuts; they are listed in Settings & help.
 - A flash of Immersive can appear for users whose saved view is Classic (the preference is read after hydration).
 - All Council members share one local model on this machine; HVS media tooling is missing; WebXR is not available in this runtime.
 - Planet status can lag a real change by up to one poll (3 s during a mission, 8 s otherwise).
@@ -51,7 +54,7 @@ Nothing canonical changed before promotion. Remove `~/.local/opt/war-room-os-0.2
 ## NEXT STEPS FOR OPERATOR
 
 1. **Environment changes:** none. 2. **SQL / migrations:** none.
-3. **Restart/promotion:** run `bash ~/.local/share/war-room-os-stage3-accept/promote.sh` (one `sudo` prompt for the native sandbox helper; it backs up the launcher), then quit and relaunch War Room.
+3. **Restart/promotion:** done for `e065c055`. Optional polish release: run `bash ~/.local/share/war-room-os-stage3-accept/promote-d06afa12.sh` (one `sudo` prompt), then quit and relaunch War Room.
 4. **Verification:** the Council opens in the immersive view; Settings & help → "Classic panel view" restores the old layout.
 5. **Expected output:** deep-space scene with the Earth globe, Foundry and HVS planets with truthful status, stars that only turn green on a verified Foundry receipt.
 6. **Feature flags:** none (view and motion preferences are stored in the browser). 7. **UI change:** as above.
