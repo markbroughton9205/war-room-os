@@ -5,9 +5,13 @@ Branch `council/stage3-immersive`, built on the Stage 2 tip `7e61e916`. Installe
 
 ## Result — read this first
 
-**Promoted and verified in the Electron window.** After the Commander ran `promote.sh`, the canonical launcher runs `war-room-os-0.2.0-e065c055-council-stage3` with the native sandbox (setuid `chrome-sandbox`); ports 3847/3848 answer; the Electron window (960×503 CSS px, DPR 2) renders the immersive Council (checked over the app's local debugging port: view `immersive`, dock, three planets, Terra pill, stars, floating input). The Commander's data was preserved: 1 active + 34 archived sessions, 23 messages and 11 Foundry mission records, unchanged. The Foundry planet showed the real mission history (5 completed with verifier exit 0 and verified receipt, 5 failed, 1 cancelled — read from the live records). No test messages were written into the canonical data.
+**Stage 3 is accepted in the installed Electron window.** The canonical launcher runs `war-room-os-0.2.0-d06afa12-council-stage3` (commit `d06afa12`, native sandbox, setuid `chrome-sandbox`); ports 3847/3848 answer. Verified over the app's local debugging port in the real window (960×503 CSS px, DPR 2): the running executable is the `d06afa12` install; view `immersive`; dock with 7 controls; Foundry/HVS/Terra planets all READY with their real status; single-row floating input; measured bounding boxes show **no overlap** between planets, text block, input and dock; Sessions drawer lists the Commander's real sessions (1 active, 34 archived, Trash 0) with Select All/Trash/Archive controls; Foundry drawer and Foundry planet panel show the real mission history.
 
-**Found at the real window size and fixed (build `d06afa12`):** at 960×503 the empty-state box, two-row composer and planet badges overlapped. Fix: compact one-row composer, planets above the text block, box-less empty state, drawer bottom clearance. Verified at 960×457 in the isolated installed runtime; **`d06afa12` is installed (`~/.local/opt/war-room-os-0.2.0-d06afa12-council-stage3`) but not yet the canonical launcher target** — switching needs the same one-time `sudo` for its sandbox helper (`~/.local/share/war-room-os-stage3-accept/promote-d06afa12.sh`). Until then the canonical app runs `e065c055`, which is fully functional with the small-window overlap.
+**Commander data preserved across both promotions:** 1 active + 34 archived sessions, 23 messages, 11 Foundry mission records (5 COMPLETED with verifier exit 0 and verified receipt, 5 FAILED, 1 CANCELLED) — identical to the pre-Stage-3 baseline. No test messages or missions were written into canonical data.
+
+**Rollback preserved:** previous Stage 3 install `…e065c055-council-stage3`, Stage 2 install `…0b282f07-council-stage2`, Foundry install `…861c68f5-foundry-reverse-engineer`, and launcher backups `war-room-os-user.bak-pre-council-stage3-1792143250` (Stage 2 launcher) and `…-1792143869` (e065c055 launcher).
+
+Earlier stages of the evidence: `e065c055` was Electron-verified first; at the window's real size it showed overlaps (empty-state box, two-row composer, planet badges), which `d06afa12` fixes. Missions, Council turns and browser/takeover were exercised in the installed package as an isolated UI server (see table), not inside the canonical window, to keep test data out of the Commander's sessions.
 
 **VR: foundation and plan only; no headset test.**
 
@@ -42,10 +46,11 @@ Verdict FAIL on first pass (1 BLOCKER) → all fixed → PASS_WITH_FIXES. Findin
 ## Known limits (not hidden)
 
 - Missions, Council turns and the browser/takeover flow were exercised in the installed package run as an isolated UI server, not inside the canonical Electron window (to avoid writing test data into the Commander's sessions); the Electron window was verified for rendering, drawers, planets and the Commander's real session/mission data. `Alt+N` shortcuts can clash with some desktop/browser shortcuts; they are listed in Settings & help.
+- In an empty session the one-line hint can touch the globe's caption text (cosmetic).
 - A flash of Immersive can appear for users whose saved view is Classic (the preference is read after hydration).
 - All Council members share one local model on this machine; HVS media tooling is missing; WebXR is not available in this runtime.
 - Planet status can lag a real change by up to one poll (3 s during a mission, 8 s otherwise).
-- Visual verification was done at ≈1568×703; other window sizes were reviewed from the layout rules only.
+- Visual verification covered ≈1568×703, 960×457 (browser) and the real 960×503 Electron window; other sizes were reviewed from the layout rules only.
 
 ## Rollback
 
@@ -54,7 +59,7 @@ Nothing canonical changed before promotion. Remove `~/.local/opt/war-room-os-0.2
 ## NEXT STEPS FOR OPERATOR
 
 1. **Environment changes:** none. 2. **SQL / migrations:** none.
-3. **Restart/promotion:** done for `e065c055`. Optional polish release: run `bash ~/.local/share/war-room-os-stage3-accept/promote-d06afa12.sh` (one `sudo` prompt), then quit and relaunch War Room.
+3. **Restart/promotion:** done (`d06afa12` is the canonical launcher target).
 4. **Verification:** the Council opens in the immersive view; Settings & help → "Classic panel view" restores the old layout.
 5. **Expected output:** deep-space scene with the Earth globe, Foundry and HVS planets with truthful status, stars that only turn green on a verified Foundry receipt.
 6. **Feature flags:** none (view and motion preferences are stored in the browser). 7. **UI change:** as above.
