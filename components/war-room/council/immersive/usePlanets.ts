@@ -5,7 +5,7 @@ import { useApplicationActivity } from '@/lib/ui/applicationActivity'
 import type { PlanetStatus } from '@/lib/council/immersive/planets'
 
 /** Polls the read-only planet status route. Slows down when the app is unfocused and stops when hidden, so it never competes with inference. */
-export function usePlanets(): { planets: PlanetStatus[] | null; error: string | null; refreshedAt: string | null } {
+export function usePlanets(fast = false): { planets: PlanetStatus[] | null; error: string | null; refreshedAt: string | null } {
   const activity = useApplicationActivity()
   const [planets, setPlanets] = useState<PlanetStatus[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -27,9 +27,9 @@ export function usePlanets(): { planets: PlanetStatus[] | null; error: string | 
       }
     }
     void load()
-    const t = window.setInterval(() => { void load() }, 8000 * mult)
+    const t = window.setInterval(() => { void load() }, (fast ? 3000 : 8000) * mult)
     return () => { stop = true; window.clearInterval(t) }
-  }, [visible, mult])
+  }, [visible, mult, fast])
 
   return { planets, error, refreshedAt }
 }

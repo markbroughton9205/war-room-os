@@ -102,7 +102,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
   const badges = mounted ? props.badges : { sessions: 0, trash: 0, archived: 0, pendingMissions: 0, requests: 0, liveMissions: 0, research: null }
   const modelBusy = mounted ? props.modelBusy : false
   const activity = useApplicationActivity()
-  const { planets, error: planetError, refreshedAt } = usePlanets()
+  const { planets, error: planetError, refreshedAt } = usePlanets(badges.liveMissions > 0)
   const [drawer, setDrawer] = useState<DrawerId | null>(null)
   const [conversationMounted, setConversationMounted] = useState(false)
   const [osReduced, setOsReduced] = useState(false)
@@ -129,7 +129,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
   const reducedMotion = motionPref === 'reduced' || (motionPref === 'auto' && osReduced)
   const foundryLive = planets?.find(p => p.id === 'foundry')?.activity === true
   // Static whenever it could compete with inference or nobody is looking.
-  const paused = modelBusy || foundryLive || !activity.visible || !activity.focused
+  const paused = modelBusy || foundryLive || badges.liveMissions > 0 || !activity.visible || !activity.focused
   const planet = (id: 'foundry' | 'hvs' | 'terra') => planets?.find(p => p.id === id) ?? null
 
   const open = useCallback((id: DrawerId, from?: HTMLElement | null) => {

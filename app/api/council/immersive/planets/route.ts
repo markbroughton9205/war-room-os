@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
-const TTL_MS = 10_000
+const TTL_MS = 3_000
 let cached: { at: number; body: unknown } | null = null
 let inflight: Promise<unknown> | null = null
 
