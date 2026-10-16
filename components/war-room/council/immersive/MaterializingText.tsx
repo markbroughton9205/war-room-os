@@ -48,7 +48,7 @@ export function MaterializingText({ blocks, reducedMotion, maxHeight = '38vh' }:
   return (
     <div
       ref={scroller}
-      className="immersive-text-scroll overflow-y-auto rounded-2xl border border-cyan-300/15 bg-[rgba(2,8,14,0.82)] px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.6)] backdrop-blur-md"
+      className={`immersive-text-scroll overflow-y-auto ${rendered.length === 0 ? '' : 'rounded-2xl border border-cyan-300/15 bg-[rgba(2,8,14,0.82)] px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,0.6)] backdrop-blur-md'}`}
       style={{ maxHeight }}
       role="log"
       aria-label="Council conversation, latest round"
@@ -57,7 +57,7 @@ export function MaterializingText({ blocks, reducedMotion, maxHeight = '38vh' }:
       data-testid="immersive-text"
     >
       {rendered.length === 0 ? (
-        <p className="text-sm text-slate-400" data-testid="immersive-text-empty">The Council is listening. Speak to begin.</p>
+        <p className="text-center text-xs text-slate-400" data-testid="immersive-text-empty">The Council is listening. Speak to begin.</p>
       ) : rendered.map(({ b, anim }) => (
         <article key={b.id} className="mb-3 last:mb-0" data-testid="immersive-block" data-role={b.role} data-member={b.label}>
           <header className="mb-1 flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-[0.18em]">

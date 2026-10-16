@@ -81,7 +81,11 @@ const CSS = `
 .immersive-star-pulse { display: inline-block; animation: immersive-pulse 1.8s ease-in-out infinite; }
 @keyframes immersive-ring { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(1.22); opacity: 0; } }
 .immersive-planet-ring { animation: immersive-ring 2.2s ease-out infinite; }
-.immersive-composer textarea, .immersive-composer input[type="text"] { max-height: 5.5rem; }
+.immersive-composer footer { padding: .3rem .5rem !important; background: transparent !important; border: 0 !important; box-shadow: none !important; max-height: none !important; }
+.immersive-composer form { flex-direction: row !important; align-items: center; gap: .4rem !important; }
+.immersive-composer form > div:first-child { flex: 1 1 auto; min-width: 0; }
+.immersive-composer form > div:last-child { flex: 0 0 auto; flex-wrap: nowrap !important; }
+@media (max-height: 640px) { .immersive-text-scroll { max-height: 24vh !important; } .immersive-header-gap { gap: 0 !important; } }
 @media (prefers-reduced-motion: reduce) {
   .immersive-materialize span { animation: none; opacity: 1; }
   .immersive-star-pulse, .immersive-planet-ring { animation: none; }
@@ -178,10 +182,10 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
       <div className="absolute inset-0" data-testid="immersive-terra">{globe}</div>
 
       {/* Planets */}
-      <div className="pointer-events-none absolute inset-y-0 left-[12%] z-20 flex items-center max-md:left-1 max-md:items-start max-md:pt-24"><PlanetObject error={planetError} status={planet('foundry')} reducedMotion={reducedMotion} onOpen={() => open('planet-foundry')} /></div>
-      <div className="pointer-events-none absolute inset-y-0 right-[12%] z-20 flex items-center max-md:right-1 max-md:items-start max-md:pt-24"><PlanetObject error={planetError} status={planet('hvs')} reducedMotion={reducedMotion} onOpen={() => open('planet-hvs')} /></div>
+      <div className="pointer-events-none absolute inset-y-0 left-[12%] z-20 flex items-center pb-[30vh] max-md:left-1 max-md:items-start max-md:pt-24"><PlanetObject error={planetError} status={planet('foundry')} reducedMotion={reducedMotion} onOpen={() => open('planet-foundry')} /></div>
+      <div className="pointer-events-none absolute inset-y-0 right-[12%] z-20 flex items-center pb-[30vh] max-md:right-1 max-md:items-start max-md:pt-24"><PlanetObject error={planetError} status={planet('hvs')} reducedMotion={reducedMotion} onOpen={() => open('planet-hvs')} /></div>
       {/* Header: session, presence, progress stars */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-30 flex flex-col items-center gap-1 px-14 pt-2 max-md:px-2">
+      <div className="immersive-header-gap pointer-events-none absolute inset-x-0 top-0 z-30 flex flex-col items-center gap-1 px-14 pt-1 max-md:px-2">
         <div className="pointer-events-auto flex items-center gap-2 text-[10px] uppercase tracking-[0.2em] text-slate-300">
           <span className="max-w-[16rem] truncate font-bold text-white" data-testid="immersive-session-title">{sessionTitle || 'War Room'}</span>
           <span className="text-emerald-300" data-testid="immersive-presence">{presenceLabel}</span>
@@ -220,7 +224,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
       </nav>
 
       {/* Materializing text + floating input */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col items-center gap-2 px-3 pb-12 sm:px-16" inert={drawer ? true : undefined}>
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex flex-col items-center gap-2 px-3 pb-11 sm:px-16" inert={drawer ? true : undefined}>
         <div className="pointer-events-auto w-full max-w-3xl"><MaterializingText blocks={blocks} reducedMotion={reducedMotion} maxHeight="30vh" /></div>
         <div className="immersive-composer pointer-events-auto w-full max-w-2xl overflow-hidden rounded-3xl border border-cyan-300/25 bg-[rgba(3,8,14,0.88)] shadow-[0_10px_40px_rgba(0,0,0,0.6)] backdrop-blur-md" data-testid="immersive-input">{composer}</div>
       </div>
@@ -245,7 +249,7 @@ export function ImmersiveCouncilLayer(props: ImmersiveCouncilLayerProps) {
           <h2 className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-200">{drawerTitle}</h2>
           <button type="button" onClick={close} className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] uppercase tracking-widest text-slate-200 hover:bg-white/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-300" data-testid="immersive-drawer-close">Close (Esc)</button>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="min-h-0 flex-1 overflow-y-auto pb-16">
           {/* Always mounted (their polling and result hand-off must keep working), shown only when open. */}
           <div className={show('sessions') ? 'h-full' : 'hidden'}>{mounted ? panels.sessions : null}</div>
           <div className={show('missions') ? 'p-3' : 'hidden'}>{mounted ? panels.missions : null}</div>
