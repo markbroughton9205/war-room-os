@@ -551,7 +551,8 @@ export class AutonomyController {
     this.commands.update(commandId, (c) => {
       c.state = 'QUEUED'; c.stateReason = `continued by ${actor} from the last checkpoint (${cmd.stateReason.slice(0, 160)})`; c.stateAt = at
       c.timeline.push({ at, kind: 'REOPENED', detail: `${actor} continued this command; verified work and integrated commits are kept` })
-      const s = c.steps[c.currentStep]; if (s) { delete s.pendingRung; delete s.retryNotBefore }
+      // a continued command gets one fresh attempt at the current step even when the strategy budget was used up (the Commander asked for it); the new mission sees the code as it is now
+      const s = c.steps[c.currentStep]; if (s) { s.pendingRung = 'initial'; delete s.retryNotBefore }
       return c
     })
     await this.advance()

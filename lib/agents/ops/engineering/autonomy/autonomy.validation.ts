@@ -266,7 +266,8 @@ if (only('H')) {
   check('H03_two_different_missions_with_two_ids_and_the_first_one_stays_FAILED_as_evidence', step.missions[0].id !== step.missions[1].id && w.store.read(step.missions[0].id)!.state === 'FAILED' && w.store.read(step.missions[1].id)!.state === 'COMPLETED')
 }
 if (only('H')) {
-  const w = world((c) => (c.kind === 'file' ? '```js\nexport const broken = ;\n```' : null))
+  let broken = true
+  const w = world((c) => (broken ? (c.kind === 'file' ? '```js\nexport const broken = ;\n```' : null) : goodReply(c)))
   const c = w.mk(); c.setSettings({ fullAutonomy: true, maxStrategyAttempts: 3 }, C)
   const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
   const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s))
@@ -276,6 +277,10 @@ if (only('H')) {
   check('H05_no_strategy_is_used_twice_for_one_step', new Set(done.steps[0].missions.map((m) => m.strategy)).size === done.steps[0].missions.length)
   await c.advance(); await c.advance()
   check('H06_a_BLOCKED_command_stays_blocked_and_starts_nothing_more', c.commands.read(sub.commandId)!.state === 'BLOCKED' && w.store.list().length === total)
+  broken = false
+  await c.reopen(sub.commandId, C)
+  const again = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s))
+  check('H07_continuing_a_blocked_command_grants_one_fresh_attempt_on_the_same_command_and_can_deliver', again.state === 'DELIVERED' && w.store.list().length === total + 1 && again.timeline.some((t) => t.kind === 'REOPENED'), `${again.state}: ${again.stateReason.slice(0, 160)}`)
 }
 
 // ============================================================ I. recovery: the worker dies mid-mission, the mission survives and continues from its checkpoint
