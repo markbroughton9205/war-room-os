@@ -1,4 +1,4 @@
-import { appendFileSync, chmodSync, copyFileSync, existsSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { defaultLauncher } from './capabilities'
 import type { PromoteResult } from './controller'
@@ -42,7 +42,7 @@ export async function promoteInstall(input: PromoteInput): Promise<PromoteResult
   const prevShort = /war-room-os-[\d.]+-([0-9a-f]{6,10})/.exec(previous)?.[1] ?? 'previous'
   const backup = `${launcher}.rollback-${prevShort}-${ts}`
   copyFileSync(launcher, backup)
-  const next = old.replace(`exec "${previous}"`, `exec "${exe}"`).replace(/^# .*Council Stage 3.*$/m, `# Promoted by Foundry (${stamp.gitShort ?? 'unknown'}) from a verified installation at ${new Date(ts).toISOString()}; rollback: cp -p ${backup} ${launcher}`)
+  const next = old.replace(`exec "${previous}"`, () => `exec "${exe}"`).replace(/^# .*Council Stage 3.*$/m, () => `# Promoted by Foundry (${stamp.gitShort ?? 'unknown'}) from a verified installation at ${new Date(ts).toISOString()}; rollback: cp -p ${backup} ${launcher}`)
   const tmp = `${launcher}.${process.pid}.tmp`
   writeFileSync(tmp, next, { mode: 0o755 }); chmodSync(tmp, 0o755); renameSync(tmp, launcher)
   try { appendFileSync(path.join(path.dirname(launcher), '.foundry-promotions.jsonl'), JSON.stringify({ at: new Date(ts).toISOString(), launcher, previous, next: exe, backup }) + '\n') } catch { /* evidence is best effort */ }
@@ -51,6 +51,7 @@ export async function promoteInstall(input: PromoteInput): Promise<PromoteResult
 
 export function rollbackPromotion(backup: string, launcher: string = defaultLauncher()): { ok: boolean; detail: string } {
   if (!existsSync(backup)) return { ok: false, detail: `${backup} does not exist` }
+  if (lstatSync(backup).isSymbolicLink() || !parseLauncherTarget(readFileSync(backup, 'utf8'))) return { ok: false, detail: `${backup} is not a launcher rollback copy` }
   const tmp = `${launcher}.${process.pid}.rb`
   copyFileSync(backup, tmp); chmodSync(tmp, 0o755); renameSync(tmp, launcher)
   return { ok: true, detail: `the launcher was restored from ${backup}` }

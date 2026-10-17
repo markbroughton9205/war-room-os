@@ -186,6 +186,7 @@ export class AutonomyController {
       if (since && this.now().getTime() - Date.parse(since) > MAX_RESOURCE_WAIT_MS) { this.setState(cmd.id, 'BLOCKED', `resources stayed unavailable for ${Math.round(MAX_RESOURCE_WAIT_MS / 60000)} minutes: ${verdict.reason}`); return false }
       this.setState(cmd.id, 'WAITING_RESOURCES', verdict.reason); return false
     }
+    if (TERMINAL_COMMAND_STATES.includes(this.commands.read(cmd.id)?.state ?? 'CANCELLED')) return false
     const sub = applyRung(rung, step.subtask, cmd.diagnoses[String(step.n)] ?? [])
     const isLast = cmd.currentStep === cmd.steps.length - 1
     const prev = cmd.steps[cmd.currentStep - 1]
@@ -257,15 +258,18 @@ export class AutonomyController {
     const integration = r.integration
     const isLast = cmd.currentStep === cmd.steps.length - 1
     const tests = r.testsAdded.length + r.testsChanged.length > 0
+    let stale = false
     this.commands.update(cmd.id, (c) => {
       const s = c.steps[c.currentStep]
+      if (s.n !== step.n || s.missions.at(-1)?.id !== m.id || s.state === 'COMPLETED') { stale = true; return null } // another pass already handled this completion
       s.state = 'COMPLETED'; if (integration.commit) s.integratedCommit = integration.commit; if (integration.branch) s.integratedBranch = integration.branch
       const l = s.missions.at(-1); if (l) l.endState = 'COMPLETED'
       c.ladder.codeGenerated = true; c.ladder.testsPassed = c.ladder.testsPassed || tests; c.ladder.verificationPassed = true
       return c
     })
+    if (stale) return
     this.postMilestone(cmd.id, `done-${m.id}`, `Mission ${m.id} passed independent verification${integration.commit ? ` and is integrated as ${integration.commit.slice(0, 8)} on ${integration.branch}` : ''}${tests ? ` (${r.testsAdded.length} test file(s) added)` : ''}.`)
-    if (!isLast) { this.commands.update(cmd.id, (c) => { c.currentStep += 1; return c }); this.setState(cmd.id, 'QUEUED', `step ${step.n} done; step ${step.n + 1} of ${cmd.steps.length} is next`); await this.advanceOnce(); return }
+    if (!isLast) { this.commands.update(cmd.id, (c) => (c.currentStep === step.n - 1 ? (c.currentStep += 1, c) : null)); this.setState(cmd.id, 'QUEUED', `step ${step.n} done; step ${step.n + 1} of ${cmd.steps.length} is next`); await this.advanceOnce(); return }
     // final step: the delivery ladder
     const inst = r.install
     if (inst.state === 'INSTALLED' && inst.path) {
@@ -289,7 +293,7 @@ export class AutonomyController {
       this.commands.update(cmd.id, (c) => {
         c.evidence.uiProof = { dir: res.dir, passed: res.passed, steps: res.steps, at: this.now().toISOString() }
         c.ladder.uiProof = res.error ? 'UNAVAILABLE' : res.passed ? 'PASSED' : 'FAILED'
-        c.ladder.running = res.passed && !res.error
+        c.ladder.running = res.passed && !res.error && !!c.interpretation.uiProof?.steps.some((x) => x.do === 'click-xy' || x.do === 'click-selector')
         c.timeline.push({ at: this.now().toISOString(), kind: 'UI_PROOF', detail: res.error ? `could not run: ${res.error}` : `${res.steps.filter((s) => s.ok).length}/${res.steps.length} checks passed` })
         return c
       })
@@ -321,16 +325,19 @@ export class AutonomyController {
 
   private async finalize(id: string): Promise<void> {
     const cmd = this.commands.read(id)!
-    if (TERMINAL_COMMAND_STATES.includes(cmd.state)) return
+    if (TERMINAL_COMMAND_STATES.includes(cmd.state) || cmd.state === 'STOPPED') return
+    if (isEmergencyStopped(this.deps.adir)) { this.markStopped(); return }
     const cfg = this.cfg()
+    if (cfg.paused) { this.setState(id, 'PAUSED', 'paused before the result was delivered; resume to finish'); return }
     let promotedNote = ''
     const installPath = cmd.evidence.install?.path
-    const proofOk = cmd.ladder.uiProof === 'PASSED' || cmd.ladder.uiProof === 'NOT_APPLICABLE'
+    const proofOk = cmd.ladder.running && cmd.ladder.uiProof === 'PASSED'
     if (cfg.deploymentAuthority && installPath && proofOk && cmd.ladder.verificationPassed && this.deps.promote) {
+      if (isEmergencyStopped(this.deps.adir) || this.cfg().paused) { this.markStopped(); return }
       const p = await this.deps.promote({ command: cmd, installPath })
       if (p.ok) { this.commands.update(id, (c) => { c.ladder.promoted = true; c.evidence.promotion = { at: this.now().toISOString(), launcher: p.launcher ?? '', previousTarget: p.previousTarget ?? '', backup: p.backup ?? '' }; return c }); promotedNote = ` Promoted: ${p.detail}` }
       else promotedNote = ` Not promoted: ${p.detail}`
-    } else if (installPath) promotedNote = cfg.deploymentAuthority ? ' Not promoted: the build is not proven running.' : ' Not promoted (deployment authority is off): the canonical launcher is unchanged.'
+    } else if (installPath) promotedNote = cfg.deploymentAuthority ? ' Not promoted: the build was not driven with real input, so it is not proven running.' : ' Not promoted (deployment authority is off): the canonical launcher is unchanged.'
     const l = this.commands.read(id)!.ladder
     const summary = deliverySummary(l, installPath)
     const blocked = l.uiProof === 'FAILED'
@@ -351,12 +358,15 @@ export class AutonomyController {
     const cfg = this.cfg()
     const tried = step.missions.map((x) => x.strategy as Rung)
     const repeated = step.missions.some((x) => x.fingerprint === d.fingerprint)
+    let stale = false
     this.commands.update(cmd.id, (c) => {
-      const s = c.steps[c.currentStep]; const l = s.missions.at(-1); if (l) { l.endState = m.state; l.fingerprint = d.fingerprint }
+      const s = c.steps[c.currentStep]; if (s.n !== step.n || s.missions.at(-1)?.id !== m.id || s.missions.at(-1)?.fingerprint !== undefined || s.pendingRung) { stale = true; return null }
+      const l = s.missions.at(-1); if (l) { l.endState = m.state; l.fingerprint = d.fingerprint }
       ;(c.diagnoses[String(s.n)] ??= []).push(d)
       c.timeline.push({ at: this.now().toISOString(), kind: 'DIAGNOSIS', detail: `${m.id}: ${d.cls} — ${d.summary}${repeated ? ' (same failure as an earlier attempt)' : ''}`.slice(0, 400) })
       return c
     })
+    if (stale) return
     this.postMilestone(cmd.id, `fail-${m.id}`, `Mission ${m.id} did not pass: ${d.summary}. ${d.cls === 'INFRA' ? 'Retrying when the machine is ready.' : 'Foundry will change its approach.'}`)
     if (d.cls === 'INFRA') { this.infraRetry(cmd, step, d.summary); return }
     if (!d.retriable) { this.setState(cmd.id, 'BLOCKED', `${d.summary}. This kind of failure is not repaired by rewriting the code; the integrated change is on ${step.integratedBranch ?? 'its foundry branch'}.`.slice(0, 500)); return }
@@ -428,11 +438,12 @@ export class AutonomyController {
     const cmd = this.commands.read(commandId)
     if (!cmd) throw new ControllerError('NOT_FOUND', 'unknown command')
     if (TERMINAL_COMMAND_STATES.includes(cmd.state)) throw new ControllerError('ILLEGAL', `the command is already ${cmd.state}`)
+    const cancelled = this.setState(commandId, 'CANCELLED', `cancelled by ${actor}: ${reason || 'no reason given'}`) // first, so no concurrent pass starts another mission
     for (const s of cmd.steps) for (const x of s.missions) {
       const m = this.deps.runner.store.read(x.id)
       if (m && (ACTIVE_STATES.includes(m.state) || m.state === 'INTERRUPTED')) { try { cancelMission(this.deps.runner, m.id, actor, reason || 'Commander cancelled') } catch { /* already ending */ } }
     }
-    return this.setState(commandId, 'CANCELLED', `cancelled by ${actor}: ${reason || 'no reason given'}`)
+    return cancelled
   }
 
   /** Emergency Stop: no further execution. Order matters: the stop file first (every entry point is refused from that instant), then every process and model call is terminated, then missions and commands are marked. */

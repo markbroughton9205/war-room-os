@@ -55,7 +55,10 @@ export function readConfig(dir: string = autonomyDir()): AutonomyConfig {
       paused: raw.paused === true, ...(raw.pausedAt ? { pausedAt: String(raw.pausedAt) } : {}), ...(raw.pausedBy ? { pausedBy: String(raw.pausedBy) } : {}),
       updatedAt: String(raw.updatedAt ?? DEFAULT_CONFIG.updatedAt), updatedBy: String(raw.updatedBy ?? 'unknown'),
     }
-  } catch { return { ...DEFAULT_CONFIG } }
+  } catch {
+    // no file = defaults; a file that exists but cannot be read fails CLOSED (paused, autonomy off), like the stop file
+    return existsSync(configFile(dir)) ? { ...DEFAULT_CONFIG, paused: true, pausedBy: 'system:unreadable-config' } : { ...DEFAULT_CONFIG }
+  }
 }
 
 export type ConfigPatch = Partial<Pick<AutonomyConfig, 'fullAutonomy' | 'deploymentAuthority' | 'autoInstall' | 'autoRecover' | 'maxStrategyAttempts' | 'maxAutoResumes'>>

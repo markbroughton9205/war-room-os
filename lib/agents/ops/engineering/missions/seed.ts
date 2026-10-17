@@ -11,7 +11,7 @@ const MAX_SEED_BYTES = 3_000_000
 const SKIP_SEG = new Set(['node_modules', '.git', '.next', 'dist', 'coverage', '.turbo'])
 export const SECRET_NAME = /(^|\/)(\.env(\..*)?|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519|ecdsa).*|[^/]*(?:^|[._-])(?:secret|credential|password|passwd|token)s?(?:[._-][^/]*)?\.(?:json|ya?ml|txt|env|ini|cfg|conf)|\.npmrc|\.netrc|[^/]*credentials[^/]*|\.aws|\.ssh)(\/|$)/i
 /** Paths a mission may never write (and so never apply or install): security, auth, build, packaging and configuration surfaces. Overridable only by a server operator via WAR_ROOM_ENG_ALLOW_SENSITIVE=1. */
-export const SENSITIVE_WRITE = /^(package\.json|pnpm-lock\.yaml|package-lock\.json|tsconfig[^/]*\.json|next\.config\.[^/]+|middleware\.[^/]+|proxy\.[^/]+|instrumentation\.[^/]+|\.github\/|\.env[^/]*|desktop\/|scripts\/|lib\/security\/|lib\/auth\/|lib\/sovereign-runtime\/|lib\/permissions\/|app\/api\/auth\/|app\/auth\/|app\/api\/sovereign\/)/i
+export const SENSITIVE_WRITE = /^(package\.json|pnpm-lock\.yaml|package-lock\.json|tsconfig[^/]*\.json|next\.config\.[^/]+|middleware\.[^/]+|proxy\.[^/]+|instrumentation\.[^/]+|\.github\/|\.env[^/]*|desktop\/|scripts\/|\.gitattributes|\.gitmodules|lib\/agents\/ops\/engineering\/|lib\/intent-prerouter\/|app\/api\/foundry\/|lib\/security\/|lib\/auth\/|lib\/sovereign-runtime\/|lib\/permissions\/|app\/api\/auth\/|app\/auth\/|app\/api\/sovereign\/)/i
 export const isSensitiveWrite = (p: string) => process.env.WAR_ROOM_ENG_ALLOW_SENSITIVE !== '1' && SENSITIVE_WRITE.test(p.replace(/\\/g, '/').replace(/^\.\//, ''))
 
 /** A seed path is a repo-relative file or directory; no absolute paths, no traversal, nothing secret-shaped, nothing that resolves outside the source repo. */

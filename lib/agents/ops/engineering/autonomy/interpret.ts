@@ -29,6 +29,8 @@ export function keywordsOf(text: string): string[] {
   return out.slice(0, 10)
 }
 
+/** words that name a kind of thing, not which thing: a file called page.tsx or a path containing "mode" says little */
+const WEAK = new Set(['page', 'mode', 'button', 'panel', 'list', 'view', 'screen', 'tab', 'toggle', 'dark', 'light', 'show', 'count', 'item', 'items', 'data', 'index', 'component'])
 const CODE_EXT = /\.(tsx?|mjs|jsx?|css)$/
 const SKIP_DIR = /^(node_modules|\.next|dist|coverage|docs|desktop|scripts|public|supabase|\.github)\//
 function repoFiles(repo: string): string[] {
@@ -61,8 +63,9 @@ export function discover(repo: string, text: string, keywords = keywordsOf(text)
   for (const kw of keywords) {
     for (const f of files) {
       const base = path.posix.basename(f).toLowerCase()
-      if (base.includes(kw)) bump(f, 6, `file name contains "${kw}"`, true)
-      else if (f.toLowerCase().includes(kw)) bump(f, 2, `path contains "${kw}"`, true)
+      const weak = WEAK.has(kw)
+      if (base.includes(kw)) bump(f, weak ? 2 : 6, `file name contains "${kw}"`, !weak)
+      else if (f.toLowerCase().includes(kw)) bump(f, weak ? 1 : 3, `path contains "${kw}"`, !weak)
     }
     const hits = grepHits(repo, kw)
     // a word found in dozens of files says nothing about which file the request means
@@ -93,7 +96,7 @@ function genericSubtask(n: number, ask: string, kind: Kind, matches: Interpretat
   const anchored = matches.filter((m) => m.anchored && m.score >= 6)
   const strong = (anchored.length ? anchored : matches.filter((m) => m.score >= 12)).slice(0, 3)
   const named = matches.filter((m) => m.score >= 90)
-  const primary = (named.length ? named : strong.slice(0, 2)).filter((m) => !/(^|\/)test\//.test(m.path))
+  const primary = (named.length ? named : strong.slice(0, 2).filter((m) => m.score >= 0.6 * strong[0].score)).filter((m) => !/(^|\/)test\//.test(m.path))
   const targets: Subtask['targets'] = primary.map((m) => ({ path: m.path, action: 'modify' as const }))
   const paths = [...new Set([...targets.map((t) => t.path), ...strong.map((m) => m.path)])].slice(0, 6)
   const write = [...new Set(targets.map((t) => t.path))]
@@ -105,14 +108,13 @@ function genericSubtask(n: number, ask: string, kind: Kind, matches: Interpretat
       if (!write.includes(test)) { write.push(test); const exists = existsSync(path.join(repo, test)); targets.push({ path: test, action: exists ? 'modify' : 'create' }); if (exists) paths.push(test) }
     }
   }
-  const area = primary[0] ? dirOf(primary[0].path) : strong[0] ? dirOf(strong[0].path) : ''
   const acceptance = [
     `The change described in the request is implemented: ${ask.slice(0, 220)}`,
     targets.length ? `Only these files change: ${write.join(', ')}; every other file in the repository is unchanged.` : 'Changes stay inside the files the plan names and every existing behaviour keeps working.',
     kind === 'ui-component' ? 'The user interface still renders: no TypeScript error is introduced and existing data-testid hooks keep their meaning.' : 'No TypeScript error is introduced and existing exports keep their signatures.',
     ...(targets.some((t) => /^test\//.test(t.path)) ? ['The test file keeps its existing tests and adds passing tests for the new behaviour.'] : []),
   ]
-  return { n, title: ask.length > 80 ? ask.slice(0, 77) + '…' : ask, request: ask, acceptance, targets, scope: { paths: paths.length ? paths : area ? [area] : [], write: write.length ? write : area ? [area] : [] }, hints: kind === 'ui-component' ? ['ui'] : [], reverseFirst: !named.length && primary.length === 0 && matches.length < 2 }
+  return { n, title: ask.length > 80 ? ask.slice(0, 77) + '…' : ask, request: ask, acceptance, targets, scope: { paths, write }, hints: kind === 'ui-component' ? ['ui'] : [], reverseFirst: !named.length && primary.length === 0 && matches.length < 2 }
 }
 
 /** The model's help is bounded: a title and two or three extra acceptance sentences. Anything that does not validate is ignored. */
@@ -176,6 +178,8 @@ export async function interpret(textIn: string, deps: InterpretDeps): Promise<{ 
     for (const m of g.matches) { const c = merged.get(m.path); if (!c || c.score < m.score) merged.set(m.path, m) }
     return genericSubtask(i + 1, g.asks.join('. '), classify(g.asks.join(' ')) === 'ui-global' ? 'ui-component' : classify(g.asks.join(' ')), [...merged.values()].sort((a, b) => b.score - a.score), deps.repo)
   })
+  if (subtasks.length > 4) throw new Error(`That is ${subtasks.length} separate requests; give Foundry at most 4 at a time.`)
+  if (subtasks.some((st) => st.targets.length === 0)) throw new Error('Foundry could not tell which files this change belongs in. Name the screen, panel or file (for example "in the Terra page" or "in FoundryAgentOpsPanel.tsx") and it will do the rest.')
   if (subtasks.length === 1) {
     const hint = await modelRefine(deps, text, subtasks[0])
     if (hint) { interpretedBy = 'model+deterministic'; if (hint.title) subtasks[0].title = hint.title; if (hint.extra.length) subtasks[0].acceptance = [...subtasks[0].acceptance, ...hint.extra] }
@@ -183,7 +187,6 @@ export async function interpret(textIn: string, deps: InterpretDeps): Promise<{ 
   needsInstall = kind === 'ui-component' || kind === 'ui-global' || subtasks.some((s) => s.scope.write.some((w) => /^(app|components)\//.test(w)))
   uiProof = needsInstall ? { kind: 'generic', steps: [{ do: 'goto', path: '/war-room/engineering' }, { do: 'screenshot', name: 'page-after-change' }] } : null
   if (subtasks.length > 1) notes.push(`decomposed into ${subtasks.length} subtasks built in order, each on the previous subtask's commit`)
-  if (subtasks.every((s) => s.targets.length === 0)) notes.push('no file was named or clearly matched: Foundry will plan the files itself inside the closest area, with a Reverse Engineer pass first when the area is unfamiliar')
   return finish(text, kind, discovery, subtasks, uiProof, needsInstall, interpretedBy, notes, verifyScripts)
 }
 

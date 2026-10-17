@@ -24,7 +24,6 @@ export async function GET(req: Request) {
       const v = c.getCommand(id)
       return v ? NextResponse.json({ generatedAt: new Date().toISOString(), command: v }) : NextResponse.json({ error: 'unknown command' }, { status: 404 })
     }
-    void c.advance().catch(() => undefined)
     return NextResponse.json(await c.status())
   } catch (e) { return NextResponse.json({ error: e instanceof Error ? e.message.slice(0, 300) : 'failed' }, { status: 500 }) }
 }

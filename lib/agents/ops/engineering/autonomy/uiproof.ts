@@ -23,18 +23,39 @@ export type CdpPage = {
   close: () => void
 }
 
-async function connect(wsUrl: string): Promise<CdpPage> {
-  const ws = new WebSocket(wsUrl)
-  await new Promise<void>((res, rej) => { ws.addEventListener('open', () => res()); ws.addEventListener('error', () => rej(new Error('CDP socket failed'))) })
-  let id = 0
-  const pending = new Map<number, (d: { result?: Record<string, unknown>; error?: unknown }) => void>()
-  ws.addEventListener('message', (m) => { const d = JSON.parse(String(m.data)) as { id?: number; result?: Record<string, unknown>; error?: unknown }; if (d.id && pending.has(d.id)) { pending.get(d.id)!(d); pending.delete(d.id) } })
-  const send: CdpPage['send'] = (method, params = {}) => new Promise((res, rej) => { const i = ++id; pending.set(i, (d) => (d.error ? rej(new Error(JSON.stringify(d.error).slice(0, 300))) : res(d.result ?? {}))); ws.send(JSON.stringify({ id: i, method, params })) })
-  await send('Page.enable'); await send('Runtime.enable'); await send('Network.enable')
+/** CDP over a pipe (--remote-debugging-pipe): there is no TCP debugging port for sandboxed app code to find. Messages are NUL-terminated JSON on fds 3 (to Chrome) and 4 (from Chrome). */
+function connectPipe(chrome: ChildProcess): CdpPage & { ready: Promise<void> } {
+  const toChrome = chrome.stdio[3] as import('node:stream').Writable, fromChrome = chrome.stdio[4] as import('node:stream').Readable
+  let id = 0, buf = '', sessionId = ''
+  const pending = new Map<number, { res: (r: Record<string, unknown>) => void; rej: (e: Error) => void }>()
+  const failAll = (why: string) => { for (const [, p] of pending) p.rej(new Error(why)); pending.clear() }
+  fromChrome.on('data', (d: Buffer) => {
+    buf += d.toString('utf8')
+    let i: number
+    while ((i = buf.indexOf('\0')) >= 0) {
+      const raw = buf.slice(0, i); buf = buf.slice(i + 1)
+      let m: { id?: number; result?: Record<string, unknown>; error?: unknown }
+      try { m = JSON.parse(raw) } catch { continue }
+      if (m.id && pending.has(m.id)) { const p = pending.get(m.id)!; pending.delete(m.id); m.error ? p.rej(new Error(JSON.stringify(m.error).slice(0, 300))) : p.res(m.result ?? {}) }
+    }
+  })
+  fromChrome.on('close', () => failAll('the browser closed')); fromChrome.on('error', () => failAll('the browser pipe failed')); chrome.once('exit', () => failAll('the browser exited'))
+  const raw = (method: string, params: Record<string, unknown>, sid?: string) => new Promise<Record<string, unknown>>((res, rej) => {
+    const i = ++id; pending.set(i, { res, rej })
+    const t = setTimeout(() => { if (pending.delete(i)) rej(new Error(`${method} timed out`)) }, 60_000); t.unref?.()
+    try { toChrome.write(JSON.stringify({ id: i, method, params, ...(sid ? { sessionId: sid } : {}) }) + '\0') } catch (e) { pending.delete(i); rej(e instanceof Error ? e : new Error('write failed')) }
+  })
+  const send: CdpPage['send'] = (method, params = {}) => raw(method, params, sessionId || undefined)
+  const ready = (async () => {
+    const t = (await raw('Target.createTarget', { url: 'about:blank' })) as { targetId: string }
+    const a = (await raw('Target.attachToTarget', { targetId: t.targetId, flatten: true })) as { sessionId: string }
+    sessionId = a.sessionId
+    await send('Page.enable'); await send('Runtime.enable'); await send('Network.enable')
+  })()
   return {
-    send,
+    ready, send,
     async eval<T>(expr: string) { const r = (await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })) as { result?: { value?: T }; exceptionDetails?: { exception?: { description?: string } } }; if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? 'evaluation failed'); return r.result?.value as T },
-    close() { try { ws.close() } catch { /* closed */ } },
+    close() { failAll('closed') },
   }
 }
 
@@ -64,7 +85,7 @@ export async function bootInstalledServer(installPath: string, dataDir: string, 
     if (child.exitCode !== null) throw new Error(`the installed build exited early (${child.exitCode}): ${buf.slice(-400)}`)
     try { const r = await fetch(origin + '/', { signal: AbortSignal.timeout(1500), redirect: 'manual' }); void r; break } catch { if (Date.now() > deadline) { try { process.kill(-child.pid!, 'SIGKILL') } catch { /* gone */ } throw new Error('the installed build did not become ready') } await sleep(400) }
   }
-  const stop = () => new Promise<void>((resolve) => { if (child.exitCode !== null) return resolve(); child.once('exit', () => resolve()); try { process.kill(-child.pid!, 'SIGTERM') } catch { /* gone */ } setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL') } catch { /* gone */ } }, 3000) })
+  const stop = () => new Promise<void>((resolve) => { if (child.exitCode !== null || child.signalCode !== null) return resolve(); child.once('exit', () => resolve()); try { process.kill(-child.pid!, 'SIGTERM') } catch { /* gone */ } setTimeout(() => { try { process.kill(-child.pid!, 'SIGKILL') } catch { /* gone */ } }, 3000) })
   return { origin, port, secret, stop, log: () => buf.slice(-3000) }
 }
 
@@ -77,18 +98,17 @@ export async function mintSession(h: ServerHandle): Promise<string> {
 }
 
 async function launchChrome(): Promise<{ page: CdpPage; stop: () => void }> {
-  const port = await freePort()
   const profile = mkdtempSync(path.join(os.tmpdir(), 'wr-proof-'))
   const bin = ['google-chrome', 'chromium', 'chromium-browser'].find((b) => existsSync(`/usr/bin/${b}`)) ?? 'google-chrome'
-  const chrome = spawn(bin, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, '--window-size=1400,900', '--no-first-run', '--disable-gpu', '--force-device-scale-factor=1', 'about:blank'], { stdio: 'ignore', detached: true })
+  const chrome = spawn(bin, ['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--window-size=1400,900', '--no-first-run', '--disable-gpu', '--force-device-scale-factor=1', 'about:blank'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], detached: true })
   trackChild(chrome, 'headless Chrome (UI proof)')
-  let list: { type: string; webSocketDebuggerUrl: string }[] = []
-  for (let i = 0; i < 60; i++) { try { list = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as typeof list; if (list.some((t) => t.type === 'page')) break } catch { /* not up yet */ } await sleep(500) }
-  const target = list.find((t) => t.type === 'page')
-  if (!target) { try { process.kill(-chrome.pid!, 'SIGKILL') } catch { /* gone */ } throw new Error('Chrome did not start') }
-  const page = await connect(target.webSocketDebuggerUrl)
-  await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false })
-  return { page, stop: () => { page.close(); try { process.kill(-chrome.pid!, 'SIGKILL') } catch { /* gone */ } try { rmSync(profile, { recursive: true, force: true }) } catch { /* best effort */ } } }
+  const kill = () => { try { process.kill(-chrome.pid!, 'SIGKILL') } catch { /* gone */ } try { rmSync(profile, { recursive: true, force: true }) } catch { /* best effort */ } }
+  try {
+    const page = connectPipe(chrome)
+    await page.ready
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 900, deviceScaleFactor: 1, mobile: false })
+    return { page, stop: () => { page.close(); kill() } }
+  } catch (e) { kill(); throw e }
 }
 
 const FIXTURE = `(() => {
@@ -117,6 +137,7 @@ export async function runProofSpec(base: string, session: string, steps: UiProof
   const consoleErrors: string[] = []
   try {
     await page.send('Network.setCookie', { name: 'wr_local_session', value: session, domain: '127.0.0.1', path: '/', httpOnly: true })
+    const deadline = Date.now() + 10 * 60_000 // a proof that cannot finish is a failed proof, not a stuck command
     let down = false
     const mouse = async (type: 'mouseMoved' | 'mousePressed' | 'mouseReleased', x: number, y: number) => {
       if (type === 'mousePressed') down = true
@@ -130,6 +151,7 @@ export async function runProofSpec(base: string, session: string, steps: UiProof
     const shot = async (name: string) => { const r = (await page.send('Page.captureScreenshot', { format: 'png' })) as { data: string }; writeFileSync(path.join(outDir, `${name}.png`), Buffer.from(r.data, 'base64')) }
     const center = (r: Rect) => ({ x: r.x + r.w / 2, y: r.y + r.h / 2 })
     for (const s of steps) {
+      if (Date.now() > deadline) { rec('proof deadline', false, 'the proof did not finish within 10 minutes'); break }
       try {
         switch (s.do) {
           case 'goto': {
@@ -137,7 +159,8 @@ export async function runProofSpec(base: string, session: string, steps: UiProof
             let ok = false
             for (let i = 0; i < 40; i++) { await sleep(500); if (await page.eval<boolean>(`document.readyState === 'complete' && !!document.body && document.body.innerText.length > 20`).catch(() => false)) { ok = true; break } }
             await sleep(2500) // hydration
-            rec(`load ${s.path}`, ok, ok ? 'the page rendered' : 'the page did not render')
+            const bad = ok ? await page.eval<string>(`(document.body.innerText.match(/Application error|Internal Server Error|This page could not be found|404|Unhandled Runtime Error/) || [''])[0]`).catch(() => '') : ''
+            rec(`load ${s.path}`, ok && !bad, !ok ? 'the page did not render' : bad ? `the page shows an error ("${bad}")` : 'the page rendered without an error message')
             break
           }
           case 'inject-fixture': rects = await page.eval<Rects>(FIXTURE); rec('proof fixture (button, sentence, drag handle) placed on the page', !!rects, 'a plain button, a sentence and a drag handle are used to check that normal interaction still works'); break
@@ -216,7 +239,7 @@ export async function proveInstalledBuild(input: { command: CommandRecord; insta
   try {
     server = await bootInstalledServer(input.installPath, data)
     const session = await mintSession(server)
-    const res = await runProofSpec(server.origin, session, spec.steps, input.outDir)
+    const res = await Promise.race([runProofSpec(server.origin, session, spec.steps, input.outDir), new Promise<never>((_, rej) => { const t = setTimeout(() => rej(new Error('the proof exceeded its 15 minute limit')), 15 * 60_000); t.unref?.() })])
     writeFileSync(path.join(input.outDir, 'server-log.txt'), server.log())
     return res
   } catch (e) {
