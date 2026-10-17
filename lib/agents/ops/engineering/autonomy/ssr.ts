@@ -11,7 +11,7 @@ const INIT_HOOKS = /\buse(State|Ref|Memo|Reducer)\s*\(/
 export function findSsrHazards(files: { path: string; text: string }[]): SsrHazard[] {
   const out: SsrHazard[] = []
   for (const f of files) {
-    if (!/\.(tsx|jsx)$/.test(f.path) || !/^\s*['"]use client['"]/.test(f.text)) continue
+    if (!/\.(tsx|jsx)$/.test(f.path) || !/^\s*(?:(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/)\s*)*['"]use client['"]/.test(f.text)) continue
     const lines = f.text.split('\n')
     // depth of nested effect / handler callbacks: code inside them only runs in the browser
     let browserOnlyDepth = 0
@@ -21,7 +21,7 @@ export function findSsrHazards(files: { path: string; text: string }[]): SsrHaza
       const line = raw.replace(/\/\/.*$/, '')
       const opensBrowserOnly = /\buse(Layout)?Effect\s*\(|\buse(Callback|ImperativeHandle)\s*\(|=>\s*\{\s*$|function\s+\w+\s*\([^)]*\)\s*\{\s*$/.test(line) && /\buse(Layout)?Effect\s*\(|\bon[A-Z]\w*\s*=|\bhandle\w*\s*=|\buseCallback\s*\(/.test(line)
       if (opensBrowserOnly) { stack.push(braceDepth); browserOnlyDepth++ }
-      if (GLOBALS.test(line)) {
+      if (GLOBALS.test(line) && !/typeof\s+(window|document|localStorage|sessionStorage|navigator)\b/.test(line)) { // a line that tests for the global first is the safe pattern
         // an initializer argument that reads a browser global runs during the server render
         const init = INIT_HOOKS.test(line) || (i > 0 && INIT_HOOKS.test(lines[i - 1].replace(/\/\/.*$/, '')) && /=>\s*\{?\s*$/.test(lines[i - 1])) || (i > 1 && INIT_HOOKS.test(lines[i - 2]) && /=>\s*\{\s*$/.test(lines[i - 2].trim()) )
         const before = line.slice(0, line.search(GLOBALS))

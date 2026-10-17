@@ -188,6 +188,7 @@ if (only('S')) {
   check('S01_state_and_ref_initializers_that_read_browser_globals_are_found_with_their_lines', h.length === 2 && h.some((x) => x.line === 6) && h.some((x) => x.line === 9), JSON.stringify(h.map((x) => x.line)))
   check('S02_effects_and_event_handlers_are_not_flagged', !h.some((x) => x.line === 10 || x.line === 11) && findSsrHazards([{ path: 'a.tsx', text: REF_COMPONENT }]).length === 0)
   check('S03_the_advice_names_file_line_and_the_fix', /components\/X\.tsx:9/.test(ssrAdvice(h)) && /inside useEffect/.test(ssrAdvice(h)) && ssrAdvice([]) === '')
+  check('S05_guarded_reads_and_a_license_comment_before_use_client_are_handled', findSsrHazards([{ path: 'a.tsx', text: BAD.replace("  const fine = useRef(window.matchMedia('(pointer: fine)').matches)", "  const fine = useRef(typeof window !== 'undefined' && window.innerWidth > 600)") }]).every((x) => x.line !== 9) && findSsrHazards([{ path: 'a.tsx', text: '// license\n' + BAD }]).length === 2)
   check('S04_server_files_and_non_client_components_are_ignored', findSsrHazards([{ path: 'lib/a.ts', text: BAD }, { path: 'c/Y.tsx', text: BAD.replace(`'use client'`, '') }]).length === 0)
 }
 
@@ -250,7 +251,7 @@ if (only('G')) {
   check('G04_the_mission_is_verified_and_integrated_and_the_command_is_DELIVERED', done.state === 'DELIVERED' && mm.state === 'COMPLETED' && mm.receipt?.verifier.exitCode === 0 && mm.receipt?.integration.state === 'APPLIED', `${done.state}: ${done.stateReason.slice(0, 200)}; mission ${mm.state} ${mm.stateReason}`)
   check('G05_the_delivery_ladder_never_claims_more_than_the_evidence', done.ladder.codeGenerated && done.ladder.verificationPassed && !done.ladder.buildCreated && !done.ladder.installed && !done.ladder.running && !done.ladder.promoted && done.ladder.uiProof === 'NOT_APPLICABLE')
   check('G06_the_final_summary_distinguishes_generated_tested_verified_built_installed_running', /code generated: yes/.test(done.stateReason) && /independent verification: passed/.test(done.stateReason) && /build created: no/.test(done.stateReason) && /installed: no/.test(done.stateReason) && /running: not shown/.test(done.stateReason))
-  check('G07_the_command_keeps_the_text_the_plan_and_a_timeline', done.text.includes('persistent chat sessions') && done.steps.length === 1 && done.timeline.some((t) => t.kind === 'INTERPRETED') && done.timeline.some((t) => t.kind === 'MISSION_STARTED') && done.timeline.some((t) => t.kind === 'DELIVERED'))
+  check('G07_the_command_keeps_the_text_the_plan_and_a_timeline', done.text.includes('persistent chat sessions') && done.steps.length === 1 && done.timeline.some((t) => t.kind === 'INTERPRETED') && done.timeline.some((t) => t.kind === 'MISSION_STARTED') && done.timeline.some((t) => t.kind === 'DELIVERED') && !done.timeline.some((t) => t.kind === 'CONTROLLER_STALL'))
   const c2 = w.mk()
   check('G08_a_new_controller_instance_sees_the_same_durable_state', c2.commands.read(sub.commandId)?.state === 'DELIVERED' && c2.getCommand(sub.commandId)?.mission?.state === 'COMPLETED')
   const second = await c2.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C).catch((e) => e)
@@ -283,6 +284,8 @@ if (only('H')) {
   check('H06_a_BLOCKED_command_stays_blocked_and_starts_nothing_more', c.commands.read(sub.commandId)!.state === 'BLOCKED' && w.store.list().length === total)
   broken = false
   await c.reopen(sub.commandId, C)
+  let twice = ''; try { await c.reopen(sub.commandId, C) } catch (e) { twice = e instanceof ControllerError ? e.code : 'other' }
+  check('H08_a_second_continue_while_the_command_is_live_is_refused', twice === 'ILLEGAL')
   const again = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s))
   check('H07_continuing_a_blocked_command_grants_one_fresh_attempt_on_the_same_command_and_can_deliver', again.state === 'DELIVERED' && w.store.list().length === total + 1 && again.timeline.some((t) => t.kind === 'REOPENED'), `${again.state}: ${again.stateReason.slice(0, 160)}`)
 }

@@ -39,6 +39,7 @@ function connectPipe(chrome: ChildProcess): CdpPage & { ready: Promise<void> } {
       if (m.id && pending.has(m.id)) { const p = pending.get(m.id)!; pending.delete(m.id); m.error ? p.rej(new Error(JSON.stringify(m.error).slice(0, 300))) : p.res(m.result ?? {}) }
     }
   })
+  toChrome.on('error', () => failAll('the browser pipe failed')) // a write after Chrome died is an async EPIPE; unhandled it would take the server down
   fromChrome.on('close', () => failAll('the browser closed')); fromChrome.on('error', () => failAll('the browser pipe failed')); chrome.once('exit', () => failAll('the browser exited'))
   const raw = (method: string, params: Record<string, unknown>, sid?: string) => new Promise<Record<string, unknown>>((res, rej) => {
     const i = ++id; pending.set(i, { res, rej })
@@ -55,7 +56,7 @@ function connectPipe(chrome: ChildProcess): CdpPage & { ready: Promise<void> } {
   return {
     ready, send,
     async eval<T>(expr: string) { const r = (await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true })) as { result?: { value?: T }; exceptionDetails?: { exception?: { description?: string } } }; if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description ?? 'evaluation failed'); return r.result?.value as T },
-    close() { failAll('closed') },
+    close() { failAll('closed'); try { toChrome.destroy() } catch { /* closed */ } try { fromChrome.destroy() } catch { /* closed */ } },
   }
 }
 

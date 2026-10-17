@@ -1,4 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import type { AgentOpsLog } from '../../log'
 import { resolveBin, runTool } from '../missions/toolchain'
@@ -111,7 +112,12 @@ export class AutonomyController {
   advance(): Promise<void> {
     const prev = (g[MUTEX] as Promise<void> | undefined) ?? Promise.resolve()
     // a pass that never finishes must not freeze the controller forever: after 5 minutes later callers go ahead (every step is a guarded read-modify-write, so a late straggler is harmless) and the stall is recorded
-    const wait = Promise.race([prev.catch(() => undefined), new Promise<void>((r) => { const t = setTimeout(() => { this.noteStall(); r() }, ADVANCE_STALL_MS); t.unref?.() })])
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let stalled = false
+    const wait = Promise.race([
+      prev.catch(() => undefined).then(() => undefined),
+      new Promise<void>((r) => { timer = setTimeout(() => { stalled = true; r() }, ADVANCE_STALL_MS); timer.unref?.() }),
+    ]).then(() => { if (timer) clearTimeout(timer); if (stalled) this.noteStall() })
     const next = wait.then(() => this.advanceOnce())
     g[MUTEX] = next.catch(() => undefined)
     return next
@@ -196,6 +202,7 @@ export class AutonomyController {
       this.setState(cmd.id, 'WAITING_RESOURCES', verdict.reason); return false
     }
     if (TERMINAL_COMMAND_STATES.includes(this.commands.read(cmd.id)?.state ?? 'CANCELLED')) return false
+    if (this.anyActiveMission()) { this.setState(cmd.id, 'QUEUED', 'waiting for the mission that is running: one builder, one mission at a time'); return false } // re-checked after the resource read, which awaited
     const sub = applyRung(rung, step.subtask, cmd.diagnoses[String(step.n)] ?? [])
     const isLast = cmd.currentStep === cmd.steps.length - 1
     const prev = cmd.steps[cmd.currentStep - 1]
@@ -297,6 +304,8 @@ export class AutonomyController {
 
   private ensureProof(cmd: CommandRecord) {
     if (proving().has(cmd.id)) return
+    if (isEmergencyStopped(this.deps.adir)) { this.markStopped(); return }
+    if (this.cfg().paused) { this.setState(cmd.id, 'PAUSED', 'paused before the installed build was proven; resume to continue'); return }
     const install = cmd.evidence.install?.path
     if (!install || !this.deps.proveUi) { this.commands.update(cmd.id, (c) => { c.ladder.uiProof = 'UNAVAILABLE'; return c }); void this.finalize(cmd.id); return }
     proving().add(cmd.id)
@@ -376,10 +385,15 @@ export class AutonomyController {
 
   private async verifierFailures(m: MissionRecord): Promise<string[]> {
     try {
-      const script = path.join(this.deps.runner.store.dir(m.id), 'verifier', 'verify.mjs')
-      if (!existsSync(script) || !existsSync(m.workspace.root)) return []
-      const r = await runTool([resolveBin('node'), script, m.workspace.root], m.workspace.root, { timeoutMs: 120_000, sandbox: { rw: [m.workspace.root] } })
-      return (r.stdout + '\n' + r.stderr).split('\n').filter((l) => /^not ok/.test(l.trim())).map((l) => l.trim().slice(0, 300)).slice(0, 10)
+      const src = path.join(this.deps.runner.store.dir(m.id), 'verifier', 'verify.mjs')
+      if (!existsSync(src) || !existsSync(m.workspace.root)) return []
+      // the script is copied into a private writable directory; the failed workspace is mounted read-only; HOME is hidden by the sandbox, so the hidden verifier is not visible from the code under test
+      const priv = mkdtempSync(path.join(os.tmpdir(), 'wr-vre-'))
+      try {
+        const script = path.join(priv, 'verify.mjs'); copyFileSync(src, script)
+        const r = await runTool([resolveBin('node'), script, m.workspace.root], priv, { timeoutMs: 120_000, sandbox: { rw: [priv], ro: [m.workspace.root] } })
+        return (r.stdout + '\n' + r.stderr).split('\n').filter((l) => /^not ok/.test(l.trim())).map((l) => l.trim().slice(0, 300)).slice(0, 10)
+      } finally { rmSync(priv, { recursive: true, force: true }) }
     } catch { return [] }
   }
 
@@ -547,21 +561,39 @@ export class AutonomyController {
     const cmd = this.commands.read(commandId)
     if (!cmd) throw new ControllerError('NOT_FOUND', 'unknown command')
     if (cmd.state !== 'BLOCKED' && cmd.state !== 'FAILED') throw new ControllerError('ILLEGAL', `only a BLOCKED or FAILED command can be continued (this one is ${cmd.state})`)
-    // the work is verified and installed and only the real-input proof failed or could not run (for example the proof environment was wrong): prove again, do not rebuild or re-ask the builder
+    const cfg0 = this.cfg()
     const lastStep = cmd.steps[cmd.currentStep]
+    const reopenable = (c: CommandRecord) => (c.state === 'BLOCKED' || c.state === 'FAILED') // every update re-checks: a double click or a racing pass must not rewrite a live command
+    // the work is verified and installed and only the real-input proof failed or could not run (for example the proof environment was wrong): prove again, do not rebuild or re-ask the builder
     if (lastStep?.state === 'COMPLETED' && cmd.evidence.install?.path && cmd.interpretation.uiProof && cmd.ladder.uiProof !== 'PASSED' && existsSync(cmd.evidence.install.path)) {
-      this.commands.update(commandId, (c) => { c.ladder.uiProof = 'PENDING'; delete c.evidence.uiProof; c.timeline.push({ at: this.now().toISOString(), kind: 'REOPENED', detail: `${actor} asked for the installed build to be proven again (no new mission: the verified work and the installation are kept)` }); return c })
+      if (!cfg0.fullAutonomy || cfg0.paused) throw new ControllerError('ILLEGAL', cfg0.paused ? 'Foundry is paused: resume it first.' : 'Full Autonomy is off.')
       const at2 = this.now().toISOString()
-      this.commands.update(commandId, (c) => { c.state = 'PROVING'; c.stateReason = 'driving the installed build with real pointer input again'; c.stateAt = at2; c.timeline.push({ at: at2, kind: 'PROVING', detail: c.stateReason }); return c }) // an explicit Commander reopen is the one way out of a terminal state
-      this.ensureProof(this.commands.read(commandId)!)
+      let ok = false
+      this.commands.update(commandId, (c) => { if (!reopenable(c)) return null; ok = true; c.ladder.uiProof = 'PENDING'; delete c.evidence.uiProof; c.state = 'PROVING'; c.stateReason = 'driving the installed build with real pointer input again'; c.stateAt = at2; c.timeline.push({ at: at2, kind: 'REOPENED', detail: `${actor} asked for the installed build to be proven again (no new mission: the verified work and the installation are kept)` }, { at: at2, kind: 'PROVING', detail: c.stateReason }); return c }) // an explicit Commander reopen is the one way out of a terminal state
+      if (ok) this.ensureProof(this.commands.read(commandId)!)
+      return this.commands.read(commandId)!
+    }
+    // a step whose work is already integrated is never re-run (its create targets would collide): the failure is repaired on top of it, with a fresh repair budget
+    if (lastStep?.state === 'COMPLETED' && lastStep.integratedCommit) {
+      const last = (cmd.diagnoses[String(lastStep.n)] ?? []).at(-1)
+      const at3 = this.now().toISOString()
+      let ok = false
+      this.commands.update(commandId, (c) => { if (!reopenable(c)) return null; ok = true; c.state = 'QUEUED'; c.stateReason = `continued by ${actor}: repairing on top of the integrated work`; c.stateAt = at3; c.timeline.push({ at: at3, kind: 'REOPENED', detail: `${actor} continued this command; the integrated work is kept and repaired` }); c.steps = c.steps.filter((x, i) => !(i > c.currentStep)); return c })
+      if (ok) {
+        const reset = this.commands.update(commandId, (c) => { c.steps.forEach((x) => { if (x.title.startsWith('Repair after')) x.title = x.title.replace('Repair after', 'Earlier repair after') }); return c })
+        void reset
+        await this.queueRepair(commandId, last?.cls === 'INSTALL' ? 'build' : 'UI proof', (last?.detail ?? cmd.stateReason).slice(-1500), 'The previous attempt FAILED with:', (last?.summary ?? cmd.stateReason).slice(0, 240), false)
+        await this.advance()
+      }
       return this.commands.read(commandId)!
     }
     const at = this.now().toISOString()
     this.commands.update(commandId, (c) => {
+      if (!reopenable(c)) return null
       c.state = 'QUEUED'; c.stateReason = `continued by ${actor} from the last checkpoint (${cmd.stateReason.slice(0, 160)})`; c.stateAt = at
       c.timeline.push({ at, kind: 'REOPENED', detail: `${actor} continued this command; verified work and integrated commits are kept` })
       // a continued command gets one fresh attempt at the current step even when the strategy budget was used up (the Commander asked for it); the new mission sees the code as it is now
-      const s = c.steps[c.currentStep]; if (s) { s.pendingRung = 'initial'; delete s.retryNotBefore }
+      const st = c.steps[c.currentStep]; if (st) { st.pendingRung = 'initial'; delete st.retryNotBefore }
       return c
     })
     await this.advance()
