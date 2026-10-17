@@ -37,6 +37,8 @@ export type RunnerDeps = {
   workspacesRoot: string
   integrationRoot: string
   lineup: () => Promise<ModelLineup> | ModelLineup
+  /** the line-up when a specific (escalation) builder is requested; absent = escalation is not available in this deployment */
+  lineupFor?: (builder: string) => Promise<ModelLineup> | ModelLineup
   gates?: GateSpec
   /** the install stage (Commander approval was recorded on the mission at creation); absent means installs are not available in this deployment */
   installer?: (m: MissionRecord, integration: ChangeReceipt['integration'], onLog: (s: string) => void) => Promise<ChangeReceipt['install']>
@@ -45,7 +47,7 @@ export type RunnerDeps = {
   guard?: () => string | null
   now?: () => Date
 }
-export type MissionDraft = { title: string; request: string; acceptance: string[]; hints?: string[]; targets?: { path: string; action: 'create' | 'modify' }[]; scope?: Partial<ScopeSpec>; install?: boolean; verifyScript?: string; analysisId?: string }
+export type MissionDraft = { /** escalation: build this mission with this installed, qualified local model instead of the default builder */ builder?: string; title: string; request: string; acceptance: string[]; hints?: string[]; targets?: { path: string; action: 'create' | 'modify' }[]; scope?: Partial<ScopeSpec>; install?: boolean; verifyScript?: string; analysisId?: string }
 
 const C_SYSTEM: Actor = 'system:engineering-runner'
 const clip = (s: string, n: number) => s.trim().slice(0, n)
@@ -131,7 +133,8 @@ export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: A
   const v = validateDraft(draft)
   const now = (deps.now ?? (() => new Date()))()
   reconcileMissions(deps.log, deps.store)
-  const lineup = await deps.lineup()
+  if (draft.builder && !deps.lineupFor) throw new MissionError('NO_BUILDER', 'escalation to another local model is not available in this deployment')
+  const lineup = await (draft.builder ? deps.lineupFor!(draft.builder) : deps.lineup())
   const id = deps.store.newId(now)
   const root = path.join(deps.workspacesRoot, id)
   let baseCommit: string | undefined
@@ -141,7 +144,7 @@ export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: A
     schema: 1, id, title: v.title, request: v.request, acceptance: v.acceptance, hints: v.hints, targets: v.targets, scope: v.scope, install: v.install, createdAt: now.toISOString(), createdBy: by,
     state: 'QUEUED', stateReason: 'creating the workspace', stateAt: now.toISOString(), workspace: { root, seeded: [], seedTreeSha256: 'PENDING', ...(baseCommit ? { baseCommit } : {}) },
     assignmentId: 'PENDING', agentId, lease: null, attempts: [], recoveries: [],
-    config: { builder: lineup.builder.label, testReviewer: lineup.testReviewer?.label ?? null, testCandidates: lineup.testCandidates.map((c) => c.label), escalation: lineup.escalation?.label ?? null, flags: { simulated: lineup.simulated, firstPass: deps.engine?.firstPass !== false, contractTests: deps.engine?.contractTests !== false && !v.targets.length, retrieval: false, research: false, fastRepair: false } },
+    config: { builder: lineup.builder.label, testReviewer: lineup.testReviewer?.label ?? null, testCandidates: lineup.testCandidates.map((c) => c.label), escalation: lineup.escalation?.label ?? null, flags: { simulated: lineup.simulated, escalated: !!draft.builder, firstPass: deps.engine?.firstPass !== false, contractTests: deps.engine?.contractTests !== false && !v.targets.length, retrieval: false, research: false, fastRepair: false } },
     progress: { stepsDone: 0, stepsTotal: 0, modelCalls: 0, repairs: 0, filesChanged: [], lastEvent: 'queued' }, result: null, receipt: null,
     ...(draft.analysisId && /^rev-[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$/.test(draft.analysisId) ? { analysisId: draft.analysisId } : {}),
   }
@@ -231,7 +234,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     store.update(id, (m) => { if (m.lease?.workerId !== workerId) return null; m.progress = { stepsDone: steps.filter((s) => s.status === 'DONE' || s.status === 'SKIPPED').length, stepsTotal: steps.length, modelCalls: deliveries.filter((d) => d.provider !== 'foundry').length, repairs: m.progress.repairs, filesChanged: [...new Set((cp?.state.fileChanges ?? []).map((c) => c.path))], lastEvent: progressNote }; return m })
   }
   try {
-    const lineup = await deps.lineup()
+    const lineup = await (m0.config.flags.escalated && deps.lineupFor ? deps.lineupFor(m0.config.builder) : deps.lineup())
     const cfg = m0.config
     const verifierDir = missionPaths(deps, id).verifier
     const verification: FinalVerification = makeIndependentVerification(`independent verification (${m0.title})`, verifierDir, 'verify.mjs', readFileSync(path.join(verifierDir, 'verify.mjs'), 'utf8'), ws.root)

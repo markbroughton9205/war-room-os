@@ -105,6 +105,11 @@ export function FoundryAutonomyCenter() {
       </div>
       {err && <p data-testid="autonomy-error" className="text-xs text-red-300">Autonomy API unavailable: {err}</p>}
 
+      {status && status.metrics.finished > 0 && (
+        <p data-testid="autonomy-metrics" className="text-xs text-gray-400 mb-2">
+          Measured: {status.metrics.delivered}/{status.metrics.finished} finished commands delivered · autonomous completion {status.metrics.autonomousCompletionRate === null ? 'n/a' : `${Math.round(status.metrics.autonomousCompletionRate * 100)}%`} (delivered with no Commander action) · {status.metrics.failuresDiagnosed} failure(s) diagnosed, {status.metrics.failuresRecovered} recovered · {status.metrics.escalations.local} local escalation(s), {status.metrics.escalations.localSucceeded} delivered{status.metrics.meanMinutesToDelivery !== null ? ` · mean ${status.metrics.meanMinutesToDelivery} min to delivery` : ''}{status.metrics.interventions.length ? ` · Commander actions: ${status.metrics.interventions.map((i) => `${i.kind.toLowerCase()} ×${i.count}`).join(', ')}` : ''}
+        </p>
+      )}
       <h3 className="text-sm text-gray-300 mt-2 mb-1">Active</h3>
       {status && status.active.length === 0 && <p data-testid="autonomy-idle" className="text-xs text-gray-400 mb-2">Nothing is running. Type a request above.</p>}
       {status?.active.map((c) => <CommandCard key={c.id} c={c} detail={open === c.id ? detail : null} open={open === c.id} onToggle={() => { setOpen(open === c.id ? null : c.id); setDetail(null) }} busy={busy} post={post} />)}
@@ -180,9 +185,22 @@ export function CommandCard({ c, detail, open, onToggle, busy, post, compact }: 
             <div key={s.n} className="mt-1"><span className="font-medium">Step {s.n}: {s.title}</span> — {s.state}{s.integratedCommit ? ` · integrated ${s.integratedCommit.slice(0, 8)}` : ''}
               <div className="text-gray-400">targets: {s.subtask.targets.map((t) => `${t.action} ${t.path}`).join(', ') || 'planned by the engine'}</div>
               <ol className="list-decimal ml-5 text-gray-400">{s.subtask.acceptance.map((a, i) => <li key={i}>{a.slice(0, 260)}</li>)}</ol>
-              {s.missions.map((x) => <div key={x.id} className="text-gray-400">attempt: {x.id} ({x.strategy}) → {x.endState ?? 'running'}</div>)}
+              {s.missions.map((x) => <div key={x.id} className="text-gray-400">attempt: {x.id} ({x.strategy}{x.builder ? `, worker ${x.builder}` : ''}) → {x.endState ?? 'running'}</div>)}
             </div>
           ))}
+          {d.decisions && d.decisions.length > 0 && (
+            <div data-testid="command-decisions" className="mt-1"><div className="font-medium">Recovery decisions (cause, evidence, choice, rejected alternatives)</div>
+              {d.decisions.map((x, i) => (
+                <div key={i} className="mb-1 pl-2 border-l border-gray-700">
+                  <div><span className="text-amber-300">{x.cause}</span> · step {x.step} · mission {x.missionId} · worker {x.worker.builder}{x.worker.escalatedTo ? ` → escalated to ${x.worker.escalatedTo}` : ''}</div>
+                  <div className="text-gray-400">evidence: {x.evidence.slice(0, 3).join(' | ').slice(0, 300) || '—'}</div>
+                  <div>chose: {x.chosen} — {x.reason}</div>
+                  {x.rejected.slice(0, 4).map((r, j) => <div key={j} className="text-gray-500">not chosen: {r.option} — {r.why.slice(0, 200)}</div>)}
+                </div>
+              ))}
+            </div>
+          )}
+          {d.lessonsApplied && d.lessonsApplied.length > 0 && <div className="mt-1 text-gray-400">lessons from earlier missions applied: {d.lessonsApplied.join(', ')}</div>}
           {d.evidence.uiProof && <div className="mt-1"><div className="font-medium">UI proof ({d.evidence.uiProof.passed ? 'passed' : 'FAILED'}) — {d.evidence.uiProof.dir}</div>{d.evidence.uiProof.steps.map((s, i) => <div key={i} className={s.ok ? 'text-green-300' : 'text-red-300'}>{s.ok ? '✓' : '✗'} {s.label} — {s.detail}</div>)}</div>}
           {d.evidence.install && <div className="mt-1">installation: {d.evidence.install.path}</div>}
           {d.evidence.promotion && <div>promoted: launcher was {d.evidence.promotion.previousTarget}; rollback copy {d.evidence.promotion.backup}</div>}

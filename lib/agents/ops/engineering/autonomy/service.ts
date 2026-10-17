@@ -4,7 +4,12 @@ import { loopbackBaseUrl } from '../runtime/ollamaModel'
 import { AutonomyController, type ControllerDeps } from './controller'
 import { autonomyDir } from './config'
 import { promoteInstall } from './promote'
-import { proveInstalledBuild } from './uiproof'
+import { bootInstalledServer, mintSession, proveInstalledBuild } from './uiproof'
+import { mkdtempSync, rmSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+import { ForgeStore } from '@/lib/agents/forge/store'
+import { readResources } from './resources'
 import type { CommandOrigin } from './types'
 
 const KEY = Symbol.for('war-room.autonomy.controller')
@@ -32,12 +37,38 @@ async function postToConversation(origin: CommandOrigin & { ownerId?: string }, 
   return msg?.id ?? null
 }
 
+/** Deployment acceptance: start the promoted build (sandboxed, private data dir), mint a session, and fetch the Foundry page. Anything else is a failed deployment. */
+export async function deploymentHealthCheck(installPath: string): Promise<{ ok: boolean; detail: string }> {
+  const data = mkdtempSync(path.join(os.tmpdir(), 'wr-health-data-'))
+  let server: Awaited<ReturnType<typeof bootInstalledServer>> | null = null
+  try {
+    server = await bootInstalledServer(installPath, data, 90_000)
+    const session = await mintSession(server)
+    const r = await fetch(`${server.origin}/war-room/engineering`, { headers: { cookie: `wr_local_session=${session}` }, redirect: 'manual', signal: AbortSignal.timeout(30_000) })
+    if (r.status >= 500) return { ok: false, detail: `the Foundry page answered HTTP ${r.status}` }
+    return { ok: true, detail: `booted on a private port, session minted, /war-room/engineering answered HTTP ${r.status}` }
+  } catch (e) { return { ok: false, detail: e instanceof Error ? e.message : String(e) } } finally { await server?.stop().catch(() => undefined); try { rmSync(data, { recursive: true, force: true }) } catch { /* best effort */ } }
+}
+
+/** Installed local models + the Forge's recorded role benchmarks: what escalation may choose from. */
+async function specialistInputs() {
+  const base = loopbackBaseUrl()
+  const tags = (await (await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(5000) })).json()) as { models?: { name: string; size: number }[] }
+  const installed = (tags.models ?? []).map((m) => ({ name: m.name, sizeBytes: m.size }))
+  const res = await readResources().catch(() => null)
+  const free = res ? (res.gpuFreeMiB ?? 0) + res.residentModels.reduce((n, m) => n + m.vramMiB, 0) : null
+  const ram = res?.ramAvailableMiB ?? null
+  // a model fits when its weights can be split between the free GPU memory and the available RAM (Ollama offloads the rest)
+  const fits = (m: { sizeBytes: number }) => free === null || ram === null ? true : m.sizeBytes / 1048576 <= free + ram - 4000
+  return { installed, benchmarks: new ForgeStore().benchmarks(), fits }
+}
+
 export function buildControllerDeps(log: AgentOpsLog = new AgentOpsLog()): ControllerDeps {
   const runner = serviceDeps(log)
   const adir = autonomyDir(log.file.replace(/\/agent-foundry\.jsonl$/, ''))
   return {
     log, runner, adir, repo: () => engineeringRepo(log), draftJson: warmDraft(runner),
-    proveUi: proveInstalledBuild, promote: ({ installPath }) => promoteInstall({ installPath }),
+    proveUi: proveInstalledBuild, specialists: specialistInputs, promote: ({ installPath }) => promoteInstall({ installPath, healthCheck: deploymentHealthCheck }),
     post: (origin, family, content, metadata) => { void postToConversation(origin as never, family, content, metadata).catch(() => undefined); return null },
   }
 }

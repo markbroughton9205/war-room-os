@@ -17,15 +17,19 @@ import { interpret, type InterpretDeps } from './interpret'
 import { findSsrHazards, ssrAdvice } from './ssr'
 import { judgeResources, readResources, type ResourceVerdict } from './resources'
 import { CommandStore, isCommandId } from './store'
-import { applyRung, diagnose, nextRung, splitSubtask, type MissionFacts } from './strategy'
-import { TERMINAL_COMMAND_STATES, type CommandOrigin, type CommandRecord, type CommandState, type CommandStep, type DeliveryLadder, type Diagnosis, type Rung, type Subtask } from './types'
+import { applyRung, causeOf, diagnose, nextRung, splitSubtask, type MissionFacts } from './strategy'
+import { chooseEscalation, type InstalledModel } from './specialists'
+import { externalEscalation } from './external'
+import { lessonsBlock, lessonsFromCommand, recordLessons, retrieveLessons } from './lessons'
+import { autonomyMetrics, type AutonomyMetrics } from './metrics'
+import { TERMINAL_COMMAND_STATES, type CommandOrigin, type CommandRecord, type CommandState, type CommandStep, type DeliveryLadder, type Decision, type Diagnosis, type Rung, type Subtask } from './types'
 
 export class ControllerError extends Error {
   constructor(public readonly code: 'AUTONOMY_OFF' | 'STOPPED' | 'NO_REPO' | 'INVALID' | 'NOT_FOUND' | 'ILLEGAL' | 'BUSY', msg: string) { super(msg) }
 }
 
 export type UiProofResult = { passed: boolean; steps: { label: string; ok: boolean; detail: string }[]; dir: string; error?: string }
-export type PromoteResult = { ok: boolean; detail: string; launcher?: string; previousTarget?: string; backup?: string }
+export type PromoteResult = { ok: boolean; detail: string; launcher?: string; previousTarget?: string; backup?: string; rolledBack?: boolean }
 
 export type ControllerDeps = {
   log: AgentOpsLog
@@ -36,6 +40,8 @@ export type ControllerDeps = {
   draftJson?: InterpretDeps['draftJson']
   /** replaces the interpreter (tests only) */
   planner?: (text: string, deps: InterpretDeps) => ReturnType<typeof interpret>
+  /** installed local models + recorded role benchmarks, for escalation (absent = no local escalation available) */
+  specialists?: () => Promise<{ installed: InstalledModel[]; benchmarks: import('../../../forge/types').BenchmarkRecord[]; fits?: (m: InstalledModel) => boolean }>
   resources?: (builder: string | null) => Promise<ResourceVerdict>
   proveUi?: (input: { command: CommandRecord; installPath: string; outDir: string }) => Promise<UiProofResult>
   promote?: (input: { command: CommandRecord; installPath: string }) => Promise<PromoteResult>
@@ -68,6 +74,7 @@ export type AutonomyStatus = {
   activity: ReturnType<typeof activitySnapshot>
   active: CommandView[]
   recent: CommandView[]
+  metrics: AutonomyMetrics
   workers: { missionId: string; workerId: string; pid: number; heartbeatAgeSec: number; progressAgeSec: number; note: string; builder: string }[]
 }
 
@@ -93,12 +100,16 @@ export class AutonomyController {
     const id = this.commands.newId(now)
     const steps: CommandStep[] = ip.subtasks.map((s, i) => ({ n: i + 1, title: s.title, subtask: { ...s, ...(verifyScripts[s.n] ? { verifyKey: s.n } : {}) }, missions: [], state: 'PENDING', autoResumes: 0 }))
     const { subtasks, ...ipRest } = ip
+    // lessons from earlier missions that match this request are put in front of the builder (as data)
+    const early = retrieveLessons(this.deps.adir, { text: ip.commandText, paths: steps.flatMap((s) => s.subtask.targets.map((t) => t.path)) }, 2)
+    if (early.length) for (const st of steps) st.subtask = { ...st.subtask, request: st.subtask.request + lessonsBlock(early) }
     const rec: CommandRecord = {
       schema: 1, id, text: ip.commandText, origin, createdAt: now.toISOString(), createdBy: actor, state: 'QUEUED', stateReason: 'interpreted; waiting to start', stateAt: now.toISOString(),
       interpretation: { ...ipRest, subtaskTitles: subtasks.map((s) => s.title) }, steps, currentStep: 0,
       ladder: { codeGenerated: false, testsPassed: false, verificationPassed: false, buildCreated: false, installed: false, running: false, uiProof: ip.uiProof ? 'PENDING' : 'NOT_APPLICABLE', promoted: false },
-      evidence: {}, diagnoses: {}, timeline: [{ at: now.toISOString(), kind: 'COMMAND', detail: `received: ${ip.commandText.slice(0, 200)}` }, { at: now.toISOString(), kind: 'INTERPRETED', detail: `${ip.kind}, ${ip.complexity}; ${steps.length} step(s); ${ip.interpretedBy}${ip.notes.length ? '; ' + ip.notes.join('; ') : ''}` }], posted: [],
+      evidence: {}, diagnoses: {}, decisions: [], lessonsApplied: [], timeline: [{ at: now.toISOString(), kind: 'COMMAND', detail: `received: ${ip.commandText.slice(0, 200)}` }, { at: now.toISOString(), kind: 'INTERPRETED', detail: `${ip.kind}, ${ip.complexity}; ${steps.length} step(s); ${ip.interpretedBy}${ip.notes.length ? '; ' + ip.notes.join('; ') : ''}` }], posted: [],
     }
+    if (early.length) { rec.lessonsApplied = early.map((l) => l.id); rec.timeline.push({ at: now.toISOString(), kind: 'LESSONS', detail: `applied ${early.length} lesson(s) from earlier missions: ${early.map((l) => l.id).join(', ')}` }) }
     this.commands.create(rec)
     for (const [n, script] of Object.entries(verifyScripts)) this.commands.writeVerify(id, Number(n), script)
     await this.advance()
@@ -173,7 +184,7 @@ export class AutonomyController {
       else this.setState(cmd.id, 'RUNNING', live.verdict === 'STALLED' ? `mission ${m.id} is alive but has made no progress for a while (${live.reason})` : `mission ${m.id} ${m.state.toLowerCase()}: ${m.stateReason}`.slice(0, 300))
       return false
     }
-    if (m.state === 'INTERRUPTED') return this.handleInterrupted(cmd, step, m, cfg)
+    if (m.state === 'INTERRUPTED') return await this.handleInterrupted(cmd, step, m, cfg)
     if (m.state === 'COMPLETED') { await this.handleCompleted(cmd, step, m); return false }
     if (m.state === 'FAILED') return await this.handleFailed(cmd, step, m, alreadyStarted)
     if (m.state === 'CANCELLED') { this.setState(cmd.id, 'CANCELLED', `mission ${m.id} was cancelled: ${m.stateReason}`); return false }
@@ -190,6 +201,10 @@ export class AutonomyController {
     const cfg = this.cfg()
     if (!cfg.fullAutonomy) { this.setState(cmd.id, 'AWAITING_AUTHORITY', 'Full Autonomy was switched off; waiting for the Commander'); return false }
     if (cfg.paused) { this.setState(cmd.id, 'QUEUED', 'Foundry is paused; this command starts when it is resumed'); return false }
+    // budgets: a command that keeps spending is stopped and reported before another mission is started, never left to run
+    { const used = cmd.steps.reduce((n, st) => n + st.missions.length, 0); const minutes = (this.now().getTime() - Date.parse(cmd.createdAt)) / 60_000
+      if (used >= cfg.maxMissionsPerCommand) { this.setState(cmd.id, 'BLOCKED', `mission budget spent: ${used} missions for one command (limit ${cfg.maxMissionsPerCommand}); Foundry stops instead of looping`); return false }
+      if (minutes > cfg.maxCommandMinutes) { this.setState(cmd.id, 'BLOCKED', `time budget spent: ${Math.round(minutes)} minutes for one command (limit ${cfg.maxCommandMinutes}); Foundry stops instead of looping`); return false } }
     const busy = this.anyActiveMission()
     if (busy || alreadyStarted) { this.setState(cmd.id, 'QUEUED', `waiting for mission ${busy?.id ?? 'in progress'}: one builder, one mission at a time`); return false }
     const repo = this.deps.repo()
@@ -203,7 +218,10 @@ export class AutonomyController {
     }
     if (TERMINAL_COMMAND_STATES.includes(this.commands.read(cmd.id)?.state ?? 'CANCELLED')) return false
     if (this.anyActiveMission()) { this.setState(cmd.id, 'QUEUED', 'waiting for the mission that is running: one builder, one mission at a time'); return false } // re-checked after the resource read, which awaited
-    const sub = applyRung(rung, step.subtask, cmd.diagnoses[String(step.n)] ?? [])
+    const diags = cmd.diagnoses[String(step.n)] ?? []
+    let sub = applyRung(rung, step.subtask, diags)
+    // lessons that match this very failure (same fingerprint/cause) are added to a retry
+    if (rung !== 'initial' && diags.length) { const ls = retrieveLessons(this.deps.adir, { text: cmd.text, cause: diags.at(-1)!.cause, fingerprint: diags.at(-1)!.fingerprint, paths: sub.targets.map((t) => t.path) }, 2).filter((l) => !cmd.lessonsApplied.includes(l.id)); if (ls.length) { sub = { ...sub, request: sub.request + lessonsBlock(ls) }; this.commands.update(cmd.id, (c) => { c.lessonsApplied.push(...ls.map((l) => l.id)); c.timeline.push({ at: this.now().toISOString(), kind: 'LESSONS', detail: `applied ${ls.length} lesson(s) to this retry: ${ls.map((l) => l.id).join(', ')}` }); return c }) } }
     const isLast = cmd.currentStep === cmd.steps.length - 1
     const prev = cmd.steps[cmd.currentStep - 1]
     const ref = prev?.integratedCommit
@@ -213,11 +231,12 @@ export class AutonomyController {
       action: 'start', title: sub.title, request: sub.request, acceptance: sub.acceptance, hints: sub.hints, targets: sub.targets,
       scope: { paths, write: sub.scope.write, ...(ref ? { ref } : {}) }, install, ...(sub.verifyKey !== undefined ? { verifyScript: this.commands.readVerify(cmd.id, sub.verifyKey) } : {}),
       ...(sub.reverseFirst && !ref ? { reverseFirst: true } : {}),
+      ...(rung === 'escalate-local' && step.pendingBuilder ? { builder: step.pendingBuilder } : {}),
     }
     if (body.verifyScript === undefined) delete body.verifyScript
     try {
       const rec = await startFromApi(this.deps.runner, body, cmd.createdBy)
-      this.commands.update(cmd.id, (c) => { const s = c.steps[c.currentStep]; s.state = 'RUNNING'; delete s.pendingRung; delete s.retryNotBefore; s.missions.push({ id: rec.id, strategy: rung, startedAt: this.now().toISOString() }); return c })
+      this.commands.update(cmd.id, (c) => { const s = c.steps[c.currentStep]; s.state = 'RUNNING'; delete s.pendingRung; delete s.pendingBuilder; delete s.retryNotBefore; s.missions.push({ id: rec.id, strategy: rung, startedAt: this.now().toISOString(), builder: rec.config.builder }); return c })
       this.setState(cmd.id, 'RUNNING', `mission ${rec.id} started (${rung})`, (c) => { c.timeline.push({ at: this.now().toISOString(), kind: 'MISSION_STARTED', detail: `${rec.id} · step ${step.n}/${cmd.steps.length} · ${rung} · builder ${rec.config.builder}` }) })
       this.postMilestone(cmd.id, `mission-${rec.id}`, `Foundry started mission ${rec.id}${cmd.steps.length > 1 ? ` (step ${step.n} of ${cmd.steps.length})` : ''}: ${sub.title}.`)
       return true
@@ -238,7 +257,7 @@ export class AutonomyController {
   }
 
   // ------------------------------------------------------------------ outcomes
-  private handleInterrupted(cmd: CommandRecord, step: CommandStep, m: MissionRecord, cfg: AutonomyConfig): boolean {
+  private async handleInterrupted(cmd: CommandRecord, step: CommandStep, m: MissionRecord, cfg: AutonomyConfig): Promise<boolean> {
     const why = m.stateReason
     if (/emergency stop/i.test(why)) { this.setState(cmd.id, 'STOPPED', why.slice(0, 300)); return false }
     if (/paused by the commander|paused/i.test(why) && !/worker died/i.test(why)) {
@@ -262,7 +281,7 @@ export class AutonomyController {
     }
     if (cfg.paused) { this.setState(cmd.id, 'PAUSED', `paused; mission ${m.id} is interrupted and recoverable`); return false }
     // not recoverable: the interruption itself is the failure to diagnose
-    this.recordFailure(cmd, step, m, { cls: 'INFRA', summary: 'the worker was lost and the mission cannot be resumed', detail: why, fingerprint: 'interrupted', retriable: true })
+    await this.recordFailure(cmd, step, m, { cls: 'INFRA', cause: 'resource', summary: 'the worker was lost and the mission cannot be resumed', detail: why, fingerprint: 'interrupted', retriable: true })
     return false
   }
 
@@ -270,10 +289,10 @@ export class AutonomyController {
     const view = missionView(this.deps.runner, m, true)
     const r = view.receipt
     const evidenceOk = view.result?.status === 'COMPLETED' && !!r && r.verifier.exitCode === 0 && view.receiptCheck !== 'NO_RECEIPT' && view.receiptCheck.ok
-    if (!evidenceOk) { this.recordFailure(cmd, step, m, { cls: 'ENGINE', summary: 'the mission reported COMPLETED but its own records do not support it', detail: `result=${view.result?.status}; verifier=${r?.verifier.exitCode}; receipt=${JSON.stringify(view.receiptCheck).slice(0, 160)}`, fingerprint: 'unsupported-completion', retriable: true }); return }
+    if (!evidenceOk) { await this.recordFailure(cmd, step, m, { cls: 'ENGINE', cause: 'code', summary: 'the mission reported COMPLETED but its own records do not support it', detail: `result=${view.result?.status}; verifier=${r?.verifier.exitCode}; receipt=${JSON.stringify(view.receiptCheck).slice(0, 160)}`, fingerprint: 'unsupported-completion', retriable: true }); return }
     // every test file the plan promised must really have been written (the engine verifies before it authors tests, so this is where a missing one is caught)
     const missingTests = step.subtask.targets.filter((t) => t.action === 'create' && /^test\//.test(t.path) && !r.filesCreated.some((f) => f.path === t.path)).map((t) => t.path)
-    if (missingTests.length) { this.recordFailure(cmd, step, m, { cls: 'TESTS', summary: `the planned test file was never written: ${missingTests.join(', ')}`, detail: `The change must include its tests: create ${missingTests.join(', ')} with node:test tests for every exported function.`, fingerprint: 'missing-tests', retriable: true }); return }
+    if (missingTests.length) { await this.recordFailure(cmd, step, m, { cls: 'TESTS', cause: 'test', summary: `the planned test file was never written: ${missingTests.join(', ')}`, detail: `The change must include its tests: create ${missingTests.join(', ')} with node:test tests for every exported function.`, fingerprint: 'missing-tests', retriable: true }); return }
     const integration = r.integration
     const isLast = cmd.currentStep === cmd.steps.length - 1
     const tests = r.testsAdded.length + r.testsChanged.length > 0
@@ -367,6 +386,7 @@ export class AutonomyController {
       else promotedNote = ` Not promoted: ${p.detail}`
     } else if (installPath) promotedNote = cfg.deploymentAuthority ? ' Not promoted: the build was not driven with real input, so it is not proven running.' : ' Not promoted (deployment authority is off): the canonical launcher is unchanged.'
     const l = this.commands.read(id)!.ladder
+    try { const fresh = this.commands.read(id)!; recordLessons(this.deps.adir, lessonsFromCommand({ ...fresh, state: 'DELIVERED' })) } catch { /* lessons are a bonus */ }
     const summary = deliverySummary(l, installPath)
     const blocked = l.uiProof === 'FAILED'
     this.setState(id, blocked ? 'BLOCKED' : 'DELIVERED', `${summary}${promotedNote}`.slice(0, 600))
@@ -409,39 +429,59 @@ export class AutonomyController {
       if (this.commands.read(cmd.id)!.steps[cmd.currentStep]?.integratedCommit === integ.commit) await this.queueRepair(cmd.id, 'build', (d.detail.slice(-1100) + '\n' + this.ssrEvidence(m, view.receipt)).slice(0, 2600), 'The production build (next build) of this change FAILED with:', d.summary, false)
       return false
     }
-    this.recordFailure(cmd, step, m, d)
+    await this.recordFailure(cmd, step, m, d)
     void alreadyStarted
     return false
   }
 
-  /** Record the diagnosis, then either retry with a CHANGED strategy or report BLOCKED. The same strategy is never used twice for one step, so an identical failure cannot loop. */
-  private recordFailure(cmd: CommandRecord, step: CommandStep, m: MissionRecord, d: Diagnosis) {
+  /**
+   * Recovery. The failure has a CAUSE and real EVIDENCE; the next step is chosen from those, recorded with the alternatives that were rejected, and never repeats a strategy for the
+   * same step. Order of preference: (1) wait out machine problems, (2) retry with the diagnosis, (3) hand the repair to a different QUALIFIED local model when the current worker's repair
+   * changed nothing or failed the same way, (4) re-map the area (Reverse Engineer), (5) split the work. An approved external model is considered only when already configured (none is
+   * contacted otherwise). When everything is spent the command is BLOCKED with every diagnosis and the one thing only the Commander can supply.
+   */
+  private async recordFailure(cmd: CommandRecord, step: CommandStep, m: MissionRecord, d: Diagnosis): Promise<void> {
     const cfg = this.cfg()
     const tried = step.missions.map((x) => x.strategy as Rung)
     const repeated = step.missions.some((x) => x.fingerprint === d.fingerprint)
+    const ineffective = repeated || /NO_CHANGE|changed no file|no file inside its write scope|NO_EFFECTIVE_CHANGE|wrote no change/i.test(`${d.summary} ${d.detail}`)
     let stale = false
     this.commands.update(cmd.id, (c) => {
       const s = c.steps[c.currentStep]; if (s.n !== step.n || s.missions.at(-1)?.id !== m.id || s.missions.at(-1)?.fingerprint !== undefined || s.pendingRung) { stale = true; return null }
-      const l = s.missions.at(-1); if (l) { l.endState = m.state; l.fingerprint = d.fingerprint }
+      const l = s.missions.at(-1); if (l) { l.endState = m.state; l.fingerprint = d.fingerprint; l.builder = m.config.builder }
       ;(c.diagnoses[String(s.n)] ??= []).push(d)
-      c.timeline.push({ at: this.now().toISOString(), kind: 'DIAGNOSIS', detail: `${m.id}: ${d.cls} — ${d.summary}${repeated ? ' (same failure as an earlier attempt)' : ''}`.slice(0, 400) })
+      c.timeline.push({ at: this.now().toISOString(), kind: 'DIAGNOSIS', detail: `${m.id}: ${d.cause.toUpperCase()}/${d.cls} — ${d.summary}${repeated ? ' (same failure as an earlier attempt)' : ''}`.slice(0, 400) })
       return c
     })
     if (stale) return
-    this.postMilestone(cmd.id, `fail-${m.id}`, `Mission ${m.id} did not pass: ${d.summary}. ${d.cls === 'INFRA' ? 'Retrying when the machine is ready.' : 'Foundry will change its approach.'}`)
-    if (d.cls === 'INFRA') { this.infraRetry(cmd, step, d.summary); return }
-    if (!d.retriable) { this.setState(cmd.id, 'BLOCKED', `${d.summary}. This kind of failure is not repaired by rewriting the code; the integrated change is on ${step.integratedBranch ?? 'its foundry branch'}.`.slice(0, 500)); return }
-    if (step.missions.length >= cfg.maxStrategyAttempts) { this.setState(cmd.id, 'BLOCKED', this.blockedSummary(cmd.id, step.n)); return }
-    let rung = nextRung(tried, step.subtask)
+    this.postMilestone(cmd.id, `fail-${m.id}`, `Mission ${m.id} did not pass (${d.cause}): ${d.summary}. ${d.cls === 'INFRA' ? 'Retrying when the machine is ready.' : 'Foundry will change its approach.'}`)
+    const evidence = d.detail.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 6).map((x) => x.slice(0, 220))
+    const decide = (chosen: string, reason: string, rejected: Decision['rejected'], escalatedTo?: string) => {
+      const dec: Decision = { at: this.now().toISOString(), step: step.n, missionId: m.id, cause: d.cause, fingerprint: d.fingerprint, evidence, chosen, reason, rejected, worker: { builder: m.config.builder, attempt: step.missions.length, ...(escalatedTo ? { escalatedTo } : {}) } }
+      this.commands.update(cmd.id, (c) => { c.decisions.push(dec); c.timeline.push({ at: dec.at, kind: 'DECISION', detail: `${chosen}: ${reason}`.slice(0, 400) }); return c })
+    }
+    if (d.cls === 'INFRA') { decide('wait and retry the same strategy', `the cause is ${d.cause} (the machine or the local model runtime), not the code: ${d.summary}`, [{ option: 'rewrite the code', why: 'the code was not shown to be wrong' }, { option: 'escalate to another model', why: 'a different model does not fix a busy or unavailable machine' }]); this.infraRetry(cmd, step, d.summary); return }
+    if (!d.retriable) { decide('stop and report', `${d.cause} failure that rewriting the code does not repair: ${d.summary}`, [{ option: 'retry with a new strategy', why: 'the cause is outside the code' }]); this.setState(cmd.id, 'BLOCKED', `${d.summary}. This kind of failure is not repaired by rewriting the code (cause: ${d.cause}); the integrated change is on ${step.integratedBranch ?? 'its foundry branch'}.`.slice(0, 500)); return }
+    if (step.missions.length >= cfg.maxStrategyAttempts) { decide('stop and report', `the strategy budget (${cfg.maxStrategyAttempts} attempts) for this step is spent`, []); this.setState(cmd.id, 'BLOCKED', this.blockedSummary(cmd.id, step.n)); return }
+    // local specialist candidates (qualified by recorded benchmark runs, installed, fitting now)
+    let esc: ReturnType<typeof chooseEscalation> | null = null
+    if (this.deps.specialists) { try { const sp = await this.deps.specialists(); esc = chooseEscalation({ benchmarks: sp.benchmarks, installed: sp.installed, current: m.config.builder, tried: step.missions.map((x) => x.builder ?? '').filter(Boolean), fits: sp.fits }) } catch { esc = null } }
+    const ext = externalEscalation(this.deps.adir)
+    const canEscalate = !!esc?.model
+    const rejectedBase: Decision['rejected'] = [...(esc?.rejected ?? []).map((r) => ({ option: `local model ${r.model}`, why: r.why })), { option: 'external coding model', why: ext.available ? 'configured but only used after the local options are spent' : ext.reason }]
+    let rung: Rung | null
+    if (ineffective && !tried.includes('escalate-local') && canEscalate && !['resource', 'dependency', 'installation', 'external'].includes(d.cause)) rung = 'escalate-local' // the same worker cannot do it: do not spend another attempt on it
+    else rung = nextRung(tried, step.subtask, { canEscalate, cause: d.cause, ineffective })
     if (rung === 'split') {
       // a plan change, not a prompt change: two smaller steps, the second built on the first one's commit
       const parts = splitSubtask(step.subtask)
       if (parts) {
+        decide('split the work', 'earlier attempts at the whole step failed; two smaller parts, logic first, are each easier to get right', [...rejectedBase, { option: 'repeat an earlier strategy', why: 'never repeated for the same step' }])
         this.commands.update(cmd.id, (c) => {
           const at = c.currentStep
           const mk = (sub: Subtask): CommandStep => ({ n: 0, title: sub.title, subtask: sub, missions: [], state: 'PENDING', autoResumes: 0 })
           const failedStep = c.steps[at]
-          c.steps.splice(at, 1, mk(parts[0]), mk(parts[1])); c.steps.forEach((s, i) => { s.n = i + 1 })
+          c.steps.splice(at, 1, mk(parts[0]), mk(parts[1])); c.steps.forEach((st, i) => { st.n = i + 1 })
           c.diagnoses[String(at + 1)] = failedStep.missions.length ? (c.diagnoses[String(failedStep.n)] ?? []) : []
           c.timeline.push({ at: this.now().toISOString(), kind: 'STRATEGY', detail: 'split the work into logic/tests and interface/wiring, built one after the other' })
           return c
@@ -449,11 +489,17 @@ export class AutonomyController {
         this.setState(cmd.id, 'QUEUED', 'changed strategy: splitting the work into smaller parts, built one after the other')
         return
       }
-      rung = nextRung([...tried, 'split'], step.subtask)
+      rung = nextRung([...tried, 'split'], step.subtask, { canEscalate, cause: d.cause })
     }
-    if (!rung) { this.setState(cmd.id, 'BLOCKED', this.blockedSummary(cmd.id, step.n)); return }
-    this.commands.update(cmd.id, (c) => { c.timeline.push({ at: this.now().toISOString(), kind: 'STRATEGY', detail: `next attempt uses "${rung}" (tried: ${tried.join(', ')})` }); c.steps[c.currentStep].pendingRung = rung!; return c })
-    this.setState(cmd.id, 'QUEUED', `changed strategy: ${rung}`)
+    if (!rung) {
+      decide('stop and report', `every local strategy is spent (${tried.join(', ')}); ${ext.available ? 'the approved external provider is configured but no external adapter is implemented in this build' : ext.reason}`, rejectedBase)
+      this.setState(cmd.id, 'BLOCKED', this.blockedSummary(cmd.id, step.n) + (ext.available ? '' : ` External escalation: ${ext.reason}.`)); return
+    }
+    const to = rung === 'escalate-local' ? esc?.model ?? undefined : undefined
+    const why = rung === 'escalate-local' ? `${ineffective ? 'the last repair changed nothing or failed the same way' : 'the first retry did not help'}; ${esc && esc.model ? `${esc.model} is qualified (${esc.evidence})` : ''}` : rung === 'diagnosed' ? 'retry once with the extracted evidence quoted to the builder' : rung === 'reverse-context' ? 'map the area first (read-only analysis) and retry with that context' : 'next unused strategy'
+    decide(rung === 'escalate-local' ? `escalate to the local specialist ${to}` : `retry with strategy "${rung}"`, why, rung === 'escalate-local' ? (esc?.rejected ?? []).map((r) => ({ option: `local model ${r.model}`, why: r.why })).concat([{ option: 'external coding model', why: ext.available ? 'configured, but local specialists come first' : ext.reason }]) : rejectedBase.concat(tried.map((t) => ({ option: `strategy "${t}"`, why: 'already used for this step' }))), to)
+    this.commands.update(cmd.id, (c) => { c.timeline.push({ at: this.now().toISOString(), kind: 'STRATEGY', detail: `next attempt uses "${rung}"${to ? ` with ${to}` : ''} (tried: ${tried.join(', ')})` }); const st = c.steps[c.currentStep]; st.pendingRung = rung!; if (to) st.pendingBuilder = to; else delete st.pendingBuilder; return c })
+    this.setState(cmd.id, 'QUEUED', `changed strategy: ${rung}${to ? ` (${to})` : ''}`)
   }
 
   private blockedSummary(id: string, n: number): string {
@@ -623,7 +669,7 @@ export class AutonomyController {
     let capabilities: Capability[] = this.capCache?.rows ?? []
     if (opts.capabilities !== false && (!this.capCache || Date.now() - this.capCache.at > 30_000)) { capabilities = await probeCapabilities({ repo: this.deps.repo(), config: cfg }); this.capCache = { at: Date.now(), rows: capabilities } }
     const resources = await (this.deps.resources ?? ((b: string | null) => readResources().then((r) => judgeResources(r, b))))(this.lineupBuilder()).catch(() => null)
-    return { generatedAt: this.now().toISOString(), config: cfg, emergencyStop: readEmergencyStop(this.deps.adir), capabilities, resources, activity: activitySnapshot(), active: open.map((c) => this.commandView(c)), recent: all.filter((c) => TERMINAL_COMMAND_STATES.includes(c.state) || c.state === 'STOPPED').slice(0, 20).map((c) => this.commandView(c)), workers }
+    return { generatedAt: this.now().toISOString(), config: cfg, emergencyStop: readEmergencyStop(this.deps.adir), capabilities, resources, activity: activitySnapshot(), metrics: autonomyMetrics(all), active: open.map((c) => this.commandView(c)), recent: all.filter((c) => TERMINAL_COMMAND_STATES.includes(c.state) || c.state === 'STOPPED').slice(0, 20).map((c) => this.commandView(c)), workers }
   }
 
   getCommand(id: string): CommandView | null { const c = isCommandId(id) ? this.commands.read(id) : null; return c ? this.commandView(c, true) : null }

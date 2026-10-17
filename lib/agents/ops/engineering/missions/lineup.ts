@@ -9,12 +9,12 @@ import { MissionError, type ModelLineup } from './runner'
  * candidate by status/role; heavy models never implicit). Loopback Ollama only. Retrieval, research and fast-repair stay OFF (their Stage 4 verdicts are INACTIVE).
  * The builder stays resident (keep_alive 10m); helpers unload as soon as they answer, as in the gold rounds.
  */
-export async function defaultLineup(opts: { forge?: ForgeStore; base?: string } = {}): Promise<ModelLineup> {
+export async function defaultLineup(opts: { forge?: ForgeStore; base?: string; /** escalation: a different, already-qualified local model builds this mission alone */ builder?: string } = {}): Promise<ModelLineup> {
   const base = loopbackBaseUrl(opts.base)
   const store = opts.forge ?? new ForgeStore()
   const models = store.models().length ? store.models() : FIRST_POOL
   const pool = assignPool(models, store.benchmarks())
-  const builder = pool.members.find((m) => m.role === 'BUILDER')?.modelRef
+  const builder = opts.builder ?? pool.members.find((m) => m.role === 'BUILDER')?.modelRef
   if (!builder) throw new MissionError('NO_BUILDER', `no builder: ${pool.notes.join('; ') || 'the Forge has no evidence route for complete_feature'}`)
   let installed: string[] = []
   try {
@@ -23,9 +23,10 @@ export async function defaultLineup(opts: { forge?: ForgeStore; base?: string } 
   } catch { throw new MissionError('NO_BUILDER', 'the local model runtime (Ollama on loopback) is not reachable') }
   const has = (ref: string) => installed.includes(ref)
   if (!has(builder)) throw new MissionError('NO_BUILDER', `the builder ${builder} is not installed in the local model runtime`)
-  const client = (ref: string) => new OllamaModelClient(ref, base, keepAliveFor(pool, ref))
-  const reviewer = pool.members.find((m) => m.role === 'TEST_REVIEWER')?.modelRef
-  const candidate = pool.members.find((m) => m.role === 'TEST_CANDIDATE')?.modelRef
+  const client = (ref: string) => new OllamaModelClient(ref, base, opts.builder && ref === opts.builder ? '10m' : keepAliveFor(pool, ref))
+  // an escalation mission is a bounded repair by one specialist: no reviewer/competing-writer helpers, so nothing else competes for the GPU
+  const reviewer = opts.builder ? undefined : pool.members.find((m) => m.role === 'TEST_REVIEWER')?.modelRef
+  const candidate = opts.builder ? undefined : pool.members.find((m) => m.role === 'TEST_CANDIDATE')?.modelRef
   return {
     builder: { label: builder, model: client(builder) },
     ...(reviewer && has(reviewer) ? { testReviewer: { label: reviewer, model: client(reviewer) } } : {}),

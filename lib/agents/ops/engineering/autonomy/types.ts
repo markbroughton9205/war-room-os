@@ -55,8 +55,19 @@ export type Interpretation = {
 export type TimelineEntry = { at: string; kind: string; detail: string }
 
 export type FailureClass = 'INFRA' | 'VERIFIER' | 'TESTS' | 'GATE' | 'INTEGRATION' | 'INSTALL' | 'ENGINE' | 'UNKNOWN'
-export type Diagnosis = { cls: FailureClass; summary: string; detail: string; fingerprint: string; retriable: boolean }
-export type Rung = 'initial' | 'diagnosed' | 'reverse-context' | 'split'
+/** WHY it failed, independent of where it was noticed: the question recovery answers before choosing a repair. */
+export type Cause = 'model' | 'code' | 'test' | 'build' | 'runtime' | 'resource' | 'dependency' | 'installation' | 'external' | 'unknown'
+export type Diagnosis = { cls: FailureClass; cause: Cause; summary: string; detail: string; fingerprint: string; retriable: boolean }
+export type Rung = 'initial' | 'diagnosed' | 'escalate-local' | 'reverse-context' | 'split'
+
+/** One recovery decision, with the evidence it rested on and what was rejected: the audit trail of why Foundry did what it did. */
+export type Decision = {
+  at: string; step: number; missionId: string; cause: Cause; fingerprint: string
+  evidence: string[]
+  chosen: string; reason: string
+  rejected: { option: string; why: string }[]
+  worker: { builder: string; attempt: number; escalatedTo?: string }
+}
 
 export type StepState = 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED' | 'BLOCKED'
 export type CommandStep = {
@@ -64,11 +75,13 @@ export type CommandStep = {
   title: string
   subtask: Subtask
   /** the missions that tried this step, in order; the last is current */
-  missions: { id: string; strategy: string; startedAt: string; endState?: string; fingerprint?: string }[]
+  missions: { id: string; strategy: string; startedAt: string; endState?: string; fingerprint?: string; /** the model that actually did the work (attribution) */ builder?: string }[]
   state: StepState
   autoResumes: number
   /** the strategy the NEXT attempt at this step will use (set after a failure, cleared when that attempt starts) */
   pendingRung?: Rung
+  /** for an escalation attempt: the qualified local model that will build it */
+  pendingBuilder?: string
   /** do not start the next attempt before this time (back-off after a machine/model problem) */
   retryNotBefore?: string
   /** a commit this step's mission integrated (the next step is seeded from it) */
@@ -104,9 +117,12 @@ export type CommandRecord = {
   interpretation: Omit<Interpretation, 'subtasks'> & { subtaskTitles: string[] }
   steps: CommandStep[]
   currentStep: number
+  /** lessons from earlier missions that were put in front of the builder for this command (ids) */
+  lessonsApplied: string[]
   ladder: DeliveryLadder
   evidence: { uiProof?: { dir: string; passed: boolean; steps: { label: string; ok: boolean; detail: string }[]; at: string }; install?: { path: string; stamp?: string; commit?: string }; promotion?: { at: string; launcher: string; previousTarget: string; backup: string } }
   diagnoses: Record<string, Diagnosis[]>
+  decisions: Decision[]
   timeline: TimelineEntry[]
   /** progress messages already written back to the origin conversation (so each milestone is posted once) */
   posted: string[]

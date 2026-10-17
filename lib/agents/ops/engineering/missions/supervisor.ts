@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { AgentOpsLog } from '../../log'
 import { reconcileMissions } from './reconcile'
 import { MissionStore } from './store'
@@ -13,6 +14,8 @@ export function startMissionSupervisor(opts: { dir?: string; intervalMs?: number
   const store = new MissionStore(log)
   const run = () => {
     try { reconcileMissions(log, store, undefined, 'system:supervisor') } catch { /* never throws into the server */ }
+    // an install that was killed mid-build leaves a scratch worktree: remove those that no running mission owns
+    void import('./service').then((svc) => { const repo = svc.engineeringRepo(log); const active = store.list().filter((x) => ['INSTALLING', 'APPLYING', 'RUNNING', 'VERIFYING'].includes(x.state)).map((x) => x.id); return import('./install').then((i) => i.cleanupStaleInstallScratch(repo, path.join(path.dirname(log.file), 'engineering-install'), active)) }).catch(() => undefined)
     // the autonomous controller continues commands that were in flight (recovery after a restart, retries, the next step); it never throws into the server either
     void import('../autonomy/service').then((m) => m.autonomyController().advance()).catch(() => undefined)
   }

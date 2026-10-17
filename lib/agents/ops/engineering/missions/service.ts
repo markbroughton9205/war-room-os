@@ -31,7 +31,7 @@ export function serviceDeps(log: AgentOpsLog = new AgentOpsLog()): RunnerDeps {
   const base = path.dirname(log.file)
   const adir = autonomyDir(base)
   const guard = () => (isEmergencyStopped(adir) ? 'Emergency Stop is active: Foundry will not start or resume any work until the Commander clears it' : readConfig(adir).paused ? 'Foundry is paused by the Commander: resume it to start or continue work' : null)
-  return { log, store: new MissionStore(log), guard, workspacesRoot: path.join(base, 'engineering-workspaces'), integrationRoot: path.join(base, 'engineering-integration'), lineup: () => defaultLineup(), installer: (m, i, on) => installRuntime(m, i, on, engineeringRepo(log), { scratchRoot: path.join(base, 'engineering-install') }) }
+  return { log, store: new MissionStore(log), guard, workspacesRoot: path.join(base, 'engineering-workspaces'), integrationRoot: path.join(base, 'engineering-integration'), lineup: () => defaultLineup(), lineupFor: (builder: string) => defaultLineup({ builder }), installer: (m, i, on) => installRuntime(m, i, on, engineeringRepo(log), { scratchRoot: path.join(base, 'engineering-install') }) }
 }
 
 export type MissionView = {
@@ -110,7 +110,7 @@ export async function startFromApi(deps: RunnerDeps, body: Record<string, unknow
   if (analysisId && write.length) { const r0 = engineeringRepo(deps.log); const have = new Set(targets.map((t) => t.path)); for (const f of write) if (!have.has(f) && !f.endsWith('/')) targets = [...targets, { path: f, action: r0 && (() => { try { return statSync(path.join(r0, f)).isFile() } catch { return false } })() ? 'modify' as const : 'create' as const }] }
   const repo = paths.length ? engineeringRepo(deps.log) : null
   if (paths.length && !repo) throw new MissionError('SCOPE', 'no engineering repository is configured on this machine (WAR_ROOM_ENGINEERING_REPO or engineering-config.json)')
-  const draft: MissionDraft = { title: String(body.title ?? ''), request, acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets, install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths, ...(typeof scopeIn.ref === 'string' && scopeIn.ref ? { ref: scopeIn.ref } : {}) } } : {}) }, analysisId }
+  const draft: MissionDraft = { ...(typeof body.builder === 'string' && body.builder ? { builder: body.builder } : {}), title: String(body.title ?? ''), request, acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets, install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths, ...(typeof scopeIn.ref === 'string' && scopeIn.ref ? { ref: scopeIn.ref } : {}) } } : {}) }, analysisId }
   const rec = await createMission(deps, draft, actor as never)
   launchMission(deps, rec.id, 'START')
   return rec

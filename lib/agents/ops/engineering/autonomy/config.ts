@@ -21,6 +21,9 @@ export type AutonomyConfig = {
   maxStrategyAttempts: number
   /** automatic resumes of one mission after worker loss / restart */
   maxAutoResumes: number
+  /** wall-clock and mission budgets per command: a loop that keeps spending is stopped and reported, never left to run */
+  maxCommandMinutes: number
+  maxMissionsPerCommand: number
   paused: boolean
   pausedAt?: string
   pausedBy?: string
@@ -28,7 +31,7 @@ export type AutonomyConfig = {
   updatedBy: string
 }
 
-export const DEFAULT_CONFIG: AutonomyConfig = { schema: 1, fullAutonomy: false, deploymentAuthority: false, autoInstall: true, autoRecover: true, maxStrategyAttempts: 3, maxAutoResumes: 3, paused: false, updatedAt: new Date(0).toISOString(), updatedBy: 'default' }
+export const DEFAULT_CONFIG: AutonomyConfig = { schema: 1, fullAutonomy: false, deploymentAuthority: false, autoInstall: true, autoRecover: true, maxStrategyAttempts: 4, maxAutoResumes: 3, maxCommandMinutes: 240, maxMissionsPerCommand: 12, paused: false, updatedAt: new Date(0).toISOString(), updatedBy: 'default' }
 
 export type EmergencyStop = { active: true; at: string; by: string; reason: string; killedProcesses: number[]; abortedModelCalls: number; missions: string[] }
 
@@ -51,7 +54,7 @@ export function readConfig(dir: string = autonomyDir()): AutonomyConfig {
       ...DEFAULT_CONFIG, schema: 1,
       fullAutonomy: raw.fullAutonomy === true, deploymentAuthority: raw.deploymentAuthority === true,
       autoInstall: raw.autoInstall !== false, autoRecover: raw.autoRecover !== false,
-      maxStrategyAttempts: n(raw.maxStrategyAttempts, 3, 1, 5), maxAutoResumes: n(raw.maxAutoResumes, 3, 0, 10),
+      maxStrategyAttempts: n(raw.maxStrategyAttempts, 4, 1, 6), maxAutoResumes: n(raw.maxAutoResumes, 3, 0, 10), maxCommandMinutes: n(raw.maxCommandMinutes, 240, 5, 1440), maxMissionsPerCommand: n(raw.maxMissionsPerCommand, 12, 1, 40),
       paused: raw.paused === true, ...(raw.pausedAt ? { pausedAt: String(raw.pausedAt) } : {}), ...(raw.pausedBy ? { pausedBy: String(raw.pausedBy) } : {}),
       updatedAt: String(raw.updatedAt ?? DEFAULT_CONFIG.updatedAt), updatedBy: String(raw.updatedBy ?? 'unknown'),
     }
@@ -61,7 +64,7 @@ export function readConfig(dir: string = autonomyDir()): AutonomyConfig {
   }
 }
 
-export type ConfigPatch = Partial<Pick<AutonomyConfig, 'fullAutonomy' | 'deploymentAuthority' | 'autoInstall' | 'autoRecover' | 'maxStrategyAttempts' | 'maxAutoResumes'>>
+export type ConfigPatch = Partial<Pick<AutonomyConfig, 'fullAutonomy' | 'deploymentAuthority' | 'autoInstall' | 'autoRecover' | 'maxStrategyAttempts' | 'maxAutoResumes' | 'maxCommandMinutes' | 'maxMissionsPerCommand'>>
 /** Settings are changed only by an explicit patch from a Commander actor; the previous value is kept in settings-history.jsonl. */
 export function updateConfig(dir: string, patch: ConfigPatch, by: string): AutonomyConfig {
   const cur = readConfig(dir)

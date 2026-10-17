@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
-import type { Diagnosis, FailureClass, Rung, Subtask } from './types'
-export type { Diagnosis, FailureClass, Rung }
+import type { Cause, Diagnosis, FailureClass, Rung, Subtask } from './types'
+export type { Cause, Diagnosis, FailureClass, Rung }
 
 /**
  * Failure diagnosis and the repair ladder. A failed mission is read for WHY it failed; the diagnosis (never the bare word FAILED) is what the next attempt is given.
@@ -20,9 +20,28 @@ export type MissionFacts = {
 const norm = (s: string) => s.toLowerCase().replace(/[0-9a-f]{8,}/g, '#').replace(/\d+/g, 'N').replace(/\/[\w./@-]+/g, (p) => p.split('/').pop() ?? p).replace(/\s+/g, ' ').trim()
 const fp = (cls: string, text: string) => createHash('sha256').update(`${cls}|${norm(text).slice(0, 400)}`).digest('hex').slice(0, 12)
 
+/** Cause from class and the actual text. The patterns are the failure texts this system has really produced (Ollama, Next, tsc, git, npm). */
+export function causeOf(cls: FailureClass, text: string): Cause {
+  const t = text
+  if (/ENOSPC|no space left|out of memory|\bOOM\b|CUDA|VRAM|launch timed out|cannot allocate memory|GPU memory is short|RAM is short/i.test(t)) return 'resource'
+  if (/ENOTFOUND|EAI_AGAIN|ECONNRESET|rate.?limit|HTTP 4\d\d|HTTP 429|registry\.npmjs|upstream|provider/i.test(t) && !/ollama|127\.0\.0\.1:11434/i.test(t)) return 'external'
+  if (/Cannot find module|Module not found.*(?:node_modules|'[a-z@][^']*')|ERESOLVE|peer dep|npm ERR|pnpm.*ERR|lockfile|is not installed in the local model/i.test(t) && !/Can't resolve '@\/|\.\/|\.\.\//.test(t)) return 'dependency'
+  if (cls === 'INFRA') return 'model' // the local model runtime: refused connection, timeout, degenerate output, HTTP 5xx
+  if (cls === 'TESTS') return 'test'
+  if (cls === 'ENGINE') return /NO_CHANGE|NO_EFFECTIVE_CHANGE|unusable reply|malformed|degenerate/i.test(t) ? 'model' : 'code'
+  if (cls === 'INSTALL') {
+    if (/window is not defined|document is not defined|localStorage is not defined|navigator is not defined|prerender|Export encountered|Unhandled Runtime|hydrat/i.test(t)) return 'runtime'
+    if (/worktree|scratch|cp: |merge|disk|EACCES|EPERM|read-only file system|install directory|could not be merged|sandbox/i.test(t)) return 'installation'
+    return 'build'
+  }
+  if (cls === 'GATE') return /error TS\d+|Type error/i.test(t) ? 'code' : 'build'
+  if (cls === 'INTEGRATION') return /worktree|branch|merge|base commit/i.test(t) ? 'installation' : 'code'
+  return cls === 'VERIFIER' ? 'code' : 'unknown'
+}
+
 export function diagnose(m: MissionFacts): Diagnosis {
   const reason = `${m.stateReason} ${m.result?.reason ?? ''}`
-  const make = (cls: FailureClass, summary: string, detail: string, retriable = true): Diagnosis => ({ cls, summary, detail: detail.slice(0, 1800), fingerprint: fp(cls, summary + ' ' + detail.slice(0, 300)), retriable })
+  const make = (cls: FailureClass, summary: string, detail: string, retriable = true): Diagnosis => ({ cls, cause: causeOf(cls, `${summary} ${detail}`), summary, detail: detail.slice(0, 1800), fingerprint: fp(cls, summary + ' ' + detail.slice(0, 300)), retriable })
   // the model runtime or the machine, not the code
   if (/ECONNREFUSED|not reachable|fetch failed|timeout or cancelled|HTTP 5\d\d|model error|no builder|is not installed in the local model|out of memory|CUDA|launch timed out/i.test(reason + ' ' + m.events.slice(-6).map((e) => e.detail).join(' '))) {
     if (!/independent verifier|integration gates|install failed/i.test(m.stateReason)) return make('INFRA', 'the local model runtime or the machine was unavailable', reason, true)
@@ -48,12 +67,14 @@ export function diagnose(m: MissionFacts): Diagnosis {
 }
 
 /** The ladder, in order. A rung is skipped when it cannot apply to the step; the same fingerprint never gets the same rung twice. */
-export const LADDER: Rung[] = ['initial', 'diagnosed', 'reverse-context', 'split']
+export const LADDER: Rung[] = ['initial', 'diagnosed', 'escalate-local', 'reverse-context', 'split']
 
-export function nextRung(used: Rung[], step: Pick<Subtask, 'targets'>): Rung | null {
+export function nextRung(used: Rung[], step: Pick<Subtask, 'targets'>, opts: { canEscalate?: boolean; cause?: Cause; ineffective?: boolean } = {}): Rung | null {
   for (const r of LADDER) {
     if (used.includes(r)) continue
     if (r === 'split' && step.targets.length < 3) continue // nothing to split
+    // a specialist helps with the model/code/test/build/runtime kinds of failure; it cannot fix a full disk or a missing dependency
+    if (r === 'escalate-local' && (!opts.canEscalate || (opts.cause && ['resource', 'dependency', 'installation', 'external'].includes(opts.cause)))) continue
     return r
   }
   return null
@@ -64,7 +85,7 @@ export function applyRung(rung: Rung, s: Subtask, history: Diagnosis[]): Subtask
   const last = history[history.length - 1]
   if (!last || rung === 'initial') return s
   const diag = `\n\nA PREVIOUS ATTEMPT AT THIS FAILED (${last.cls}): ${last.summary}\n${last.detail ? last.detail.split('\n').slice(0, 8).join('\n') : ''}\nDo not repeat that approach. Fix the cause stated above.`
-  if (rung === 'diagnosed') return { ...s, request: s.request + diag, hints: [...s.hints, 'repair-attempt'] }
+  if (rung === 'diagnosed' || rung === 'escalate-local') return { ...s, request: s.request + diag, hints: [...s.hints, 'repair-attempt'] }
   if (rung === 'reverse-context') return { ...s, request: s.request + diag, reverseFirst: true, hints: [...s.hints, 'repair-attempt'] }
   return s
 }

@@ -23,9 +23,16 @@ import { autonomyDir, clearEmergencyStop, isEmergencyStopped, readConfig, update
 import { AutonomyController, ControllerError, type ControllerDeps } from './controller'
 import { classify, discover, interpret, keywordsOf, splitAsks, stripAddress } from './interpret'
 import { cursorNames, cursorRecipe } from './recipes'
-import { judgeResources, NEED } from './resources'
+import { judgeResources, NEED, type ResourceReading } from './resources'
+import { causeOf } from './strategy'
+import { chooseEscalation } from './specialists'
+import { lessonsBlock, lessonsFromCommand, recordLessons, retrieveLessons, resolutionHint } from './lessons'
+import { externalEscalation } from './external'
+import { autonomyMetrics } from './metrics'
+import type { BenchmarkRecord } from '../../../forge/types'
 import { applyRung, diagnose, nextRung, splitSubtask } from './strategy'
 import { parseLauncherTarget, promoteInstall, rollbackPromotion } from './promote'
+import { readLessons } from './lessons'
 import { probeCapabilities } from './capabilities'
 import { proofPage, REF_COMPONENT, REF_LOGIC, REF_LOGIC_TEST, mountInto } from './autonomy.fixtures'
 import { runProofSpec } from './uiproof'
@@ -170,11 +177,11 @@ if (only('E')) {
   const same = diagnose({ state: 'FAILED', stateReason: 'x', result: { status: 'FAILED', reason: 'y' }, receipt: null, events: [] })
   check('E05_equal_failures_have_equal_fingerprints_and_different_ones_do_not', gate.fingerprint === diagnose({ state: 'FAILED', stateReason: 'integration gates failed: typecheck (tsc --noEmit)', result: { status: 'COMPLETED', reason: 'all steps validated' }, receipt: { verifier: { exitCode: 0, summary: '' }, integration: { state: 'GATES_FAILED', gates: [{ name: 'typecheck (tsc --noEmit)', exitCode: 2, summary: 'x', detail: "components/a.tsx(99,3): error TS2304: Cannot find name 'foo'.\ncomponents/a.tsx(30,1): error TS1005: ';' expected." }], refused: [] }, install: { state: 'NOT_RUN' } }, events: [] }).fingerprint && gate.fingerprint !== same.fingerprint)
   const sub: Subtask = { n: 1, title: 't', request: 'r', acceptance: ['a lib/x.mjs works'], targets: [{ path: 'lib/x.mjs', action: 'create' }, { path: 'test/x.test.mjs', action: 'create' }, { path: 'components/X.tsx', action: 'create' }], scope: { paths: [], write: ['lib/x.mjs', 'test/x.test.mjs', 'components/X.tsx'] }, hints: [], reverseFirst: false }
-  const used: ('initial' | 'diagnosed' | 'reverse-context' | 'split')[] = []
+  const used: ('initial' | 'diagnosed' | 'escalate-local' | 'reverse-context' | 'split')[] = []
   const seq: string[] = []
-  for (let i = 0; i < 8; i++) { const r = nextRung(used, sub); if (!r) break; seq.push(r); used.push(r) }
-  check('E06_the_ladder_changes_strategy_each_time_and_ends', seq.join() === 'initial,diagnosed,reverse-context,split' && nextRung(used, sub) === null)
-  check('E07_a_single_file_step_has_no_split_rung', nextRung(['initial', 'diagnosed', 'reverse-context'], { ...sub, targets: [sub.targets[0]] }) === null)
+  for (let i = 0; i < 8; i++) { const r = nextRung(used, sub, { canEscalate: true, cause: 'code' }); if (!r) break; seq.push(r); used.push(r) }
+  check('E06_the_ladder_changes_strategy_each_time_and_ends', seq.join() === 'initial,diagnosed,escalate-local,reverse-context,split' && nextRung(used, sub, { canEscalate: true }) === null)
+  check('E07_a_single_file_step_has_no_split_rung', nextRung(['initial', 'diagnosed', 'escalate-local', 'reverse-context'], { ...sub, targets: [sub.targets[0]] }, { canEscalate: true }) === null)
   const applied = applyRung('diagnosed', sub, [gate])
   check('E08_a_retry_carries_the_diagnosis_and_forbids_repeating_the_approach', /PREVIOUS ATTEMPT/.test(applied.request) && /TS2304/.test(applied.request) && /Do not repeat/.test(applied.request) && applied.hints.includes('repair-attempt') && applyRung('reverse-context', sub, [gate]).reverseFirst === true)
   const parts = splitSubtask(sub)
@@ -635,6 +642,140 @@ if (only('R')) {
   check('R05_the_repository_and_the_sandbox_are_probed_for_real', by.repo.state === 'GRANTED' && /rev|at [0-9a-f]{6,}/.test(by.repo.evidence) && by.sandbox.state === (spawnSync('bwrap', ['--ro-bind', '/', '/', '--dev', '/dev', '--unshare-all', 'true']).status === 0 ? 'GRANTED' : 'UNAVAILABLE'))
   const none = await probeCapabilities({ repo: null, config: readConfig(path.join(tmp(), 'y')) })
   check('R06_no_repository_is_reported_as_unavailable_not_assumed', none.find((r) => r.id === 'repo')!.state === 'UNAVAILABLE')
+}
+
+// ============================================================ T. self-recovery: causes, evidence, escalation, lessons, budgets, contention, rollback, metrics
+const bench = (model: string, ok: number, n: number): BenchmarkRecord[] => Array.from({ length: n }, (_, i) => ({ modelRef: model, executor: 'ollama:x', fixture: `f${i}`, at: 'now', taskClass: 'role_benchmark' as const, verifierScore: { pass: 1, total: 1 }, completion: (i < ok ? 'COMPLETED' : 'FAILED') as 'COMPLETED' | 'FAILED', modelCalls: 1, repairs: 0, retries: 0, regressions: 0, elapsedMs: 1000, manualIntervention: false, contextTokens: 100, ramMiB: 'UNKNOWN' as const, vramMiB: 'UNKNOWN' as const, role: 'FAST_REPAIR_WORKER' as const }))
+if (only('T')) {
+  // ---- causes (the failure texts this system has really produced)
+  check('T01_failures_are_classified_by_cause_from_their_actual_text', causeOf('INFRA', 'fetch failed ECONNREFUSED 127.0.0.1:11434') === 'model' && causeOf('INFRA', 'CUDA error: launch timed out') === 'resource' && causeOf('INSTALL', 'ENOSPC: no space left on device') === 'resource' && causeOf('INSTALL', 'Export encountered an error on /war-room/page: ReferenceError: window is not defined') === 'runtime' && causeOf('GATE', "error TS2304: Cannot find name 'foo'") === 'code' && causeOf('TESTS', 'not ok - addPulse') === 'test' && causeOf('INSTALL', "Module not found: Can't resolve 'left-pad'") === 'dependency' && causeOf('INSTALL', 'getaddrinfo EAI_AGAIN registry.npmjs.org') === 'external' && causeOf('INSTALL', 'could not create the scratch worktree: fatal: bad object') === 'installation' && causeOf('INSTALL', 'next build failed: Failed to compile ./a.tsx') === 'build' && causeOf('ENGINE', 'wrote NO_CHANGE for the file') === 'model')
+  // ---- local specialist choice, from recorded evidence only
+  const benchmarks = [...bench('qwen3-coder:30b', 18, 20), ...bench('qwen2.5-coder:14b', 20, 20), ...bench('deepseek-coder-v2:16b', 16, 20), ...bench('tiny:1b', 3, 12)]
+  const installed = [{ name: 'DEVSTRAL', sizeBytes: 14e9 }, { name: 'qwen3-coder:30b', sizeBytes: 18e9 }, { name: 'qwen2.5-coder:14b', sizeBytes: 9e9 }, { name: 'deepseek-coder-v2:16b', sizeBytes: 10e9 }, { name: 'tiny:1b', sizeBytes: 1e9 }, { name: 'qwen3-embedding:0.6b', sizeBytes: 6e8 }, { name: 'unbenchmarked:7b', sizeBytes: 5e9 }]
+  const ch = chooseEscalation({ benchmarks, installed, current: 'DEVSTRAL', tried: [] })
+  check('T02_escalation_picks_a_different_installed_model_that_the_recorded_runs_qualified_for_the_role_never_by_name', ch.model === 'qwen3-coder:30b' && 'evidence' in ch && /18\/20 \(90%\)/.test(ch.evidence), JSON.stringify(ch).slice(0, 300))
+  const why = Object.fromEntries(ch.rejected.map((r) => [r.model, r.why]))
+  check('T03_every_rejected_candidate_carries_its_reason', /just failed/.test(why['DEVSTRAL']) && /not qualified/.test(why['deepseek-coder-v2:16b']) && /not qualified/.test(why['tiny:1b']) && /no benchmark evidence/.test(why['unbenchmarked:7b']) && /smaller than the chosen/.test(why['qwen2.5-coder:14b']) && !('qwen3-embedding:0.6b' in why))
+  const tight = chooseEscalation({ benchmarks, installed, current: 'DEVSTRAL', tried: [], fits: (m) => m.sizeBytes < 10e9 })
+  check('T04_a_qualified_model_that_does_not_fit_the_free_memory_is_skipped_for_the_next_one', tight.model === 'qwen2.5-coder:14b' && tight.rejected.some((r) => r.model === 'qwen3-coder:30b' && /does not fit/.test(r.why)))
+  const none = chooseEscalation({ benchmarks, installed, current: 'DEVSTRAL', tried: ['qwen3-coder:30b', 'qwen2.5-coder:14b'] })
+  check('T05_when_every_qualified_model_was_tried_there_is_no_escalation_and_the_reason_says_so', none.model === null && /no installed local model is qualified/.test((none as { reason: string }).reason))
+  // ---- external models only when ALREADY configured
+  const ad = path.join(tmp(), 'ext')
+  const e0 = externalEscalation(ad)
+  mkdirSync(ad, { recursive: true }); writeFileSync(path.join(ad, 'external-providers.json'), JSON.stringify([{ provider: 'x', model: 'm' }]))
+  const e1 = externalEscalation(ad, {})
+  writeFileSync(path.join(ad, 'external-providers.json'), JSON.stringify([{ provider: 'x', model: 'm', maxCalls: 3, maxTokensPerCall: 4000, approvedBy: 'commander:mark', credentialEnv: 'X_KEY' }]))
+  const e2 = externalEscalation(ad, {}); const e3 = externalEscalation(ad, { X_KEY: 'present' })
+  check('T06_an_external_coding_model_is_available_only_with_a_complete_approved_entry_AND_an_existing_credential', !e0.available && /none was contacted/.test((e0 as { reason: string }).reason) && !e1.available && !e2.available && /no credential/.test((e2 as { reason: string }).reason) && e3.available)
+  // ---- GPU contention is judged from a reading, and our own work is not "another workload"
+  const busy: ResourceReading = { gpuUtilPct: 88, gpuProcs: [{ pid: 1, name: 'python3', usedMiB: 4500 }], gpuFreeMiB: 11000, gpuTotalMiB: 16000, ramAvailableMiB: 20000, residentModels: [] }
+  const jb = judgeResources(busy, 'b')
+  check('T07_a_GPU_busy_with_someone_elses_work_makes_Foundry_wait_and_name_it_without_touching_it', !jb.ok && /busy with another workload \(88%.*python3/.test(jb.reason) && /instead of interrupting/.test(jb.reason) && judgeResources(busy, 'b', { ownWorkRunning: true }).ok && judgeResources({ ...busy, gpuUtilPct: 5 }, 'b').ok)
+  // ---- lessons come only from real recoveries
+  const adir = path.join(tmp(), 'lessons')
+  const diag = { cls: 'INSTALL' as const, cause: 'runtime' as const, summary: 'the installation build failed: Export encountered an error on /war-room/page: ReferenceError: window is not defined', detail: 'window is not defined', fingerprint: 'fp-ssr-1', retriable: true }
+  const delivered = { id: 'cmd-20261017T000000-aaaaaaaa', text: 'Foundry, add a ship cursor component that follows the pointer', state: 'DELIVERED', steps: [{ n: 1, title: 't', subtask: { targets: [{ path: 'components/war-room/ShipCursor.tsx', action: 'create' }] }, missions: [{ id: 'm1', strategy: 'initial' }, { id: 'm2', strategy: 'diagnosed' }] }], diagnoses: { '1': [diag] } } as never
+  const lessons = lessonsFromCommand(delivered)
+  recordLessons(adir, lessons); recordLessons(adir, lessons)
+  check('T08_a_delivered_command_that_recovered_leaves_exactly_one_lesson_with_the_resolution_that_worked', lessons.length === 1 && /useEffect/.test(lessons[0].resolution) && readFileSync(path.join(adir, 'lessons.jsonl'), 'utf8').trim().split('\n').length === 1 && lessonsFromCommand({ ...(delivered as object), state: 'FAILED' } as never).length === 0)
+  const hit = retrieveLessons(adir, { text: 'add an animated pointer overlay component', cause: 'runtime', fingerprint: 'fp-ssr-1' })
+  const miss = retrieveLessons(adir, { text: 'rename a column in the billing report' })
+  check('T09_a_matching_failure_or_request_retrieves_the_lesson_and_an_unrelated_one_does_not', hit.length === 1 && /LESSONS FROM EARLIER MISSIONS/.test(lessonsBlock(hit)) && /may not apply/.test(lessonsBlock(hit)) && miss.length === 0 && resolutionHint({ cause: 'runtime', summary: 'x', detail: 'ReferenceError: window is not defined' }).length > 40)
+  // ---- measured autonomy from durable records
+  const mk = (id: string, state: string, kinds: string[], diagnoses: Record<string, unknown[]>, decisions: unknown[] = [], created = '2026-10-17T10:00:00.000Z', end = '2026-10-17T10:30:00.000Z') => ({ id, text: id, state, createdAt: created, stateReason: `${id} ended ${state}`, timeline: [...kinds.map((k) => ({ at: created, kind: k, detail: '' })), ...(state === 'DELIVERED' ? [{ at: end, kind: 'DELIVERED', detail: '' }] : [])], diagnoses, decisions, steps: [] }) as never
+  const dg = (cause: string) => ({ cls: 'GATE', cause, summary: 's', detail: 'd', fingerprint: 'f', retriable: true })
+  const mm = autonomyMetrics([mk('a', 'DELIVERED', [], {}), mk('b', 'DELIVERED', [], { '1': [dg('code')] }, [{ chosen: 'escalate to the local specialist q' }]), mk('c', 'DELIVERED', ['REOPENED'], { '1': [dg('runtime')] }), mk('d', 'BLOCKED', [], { '1': [dg('dependency')] }), mk('e', 'CANCELLED', [], {}), mk('f', 'RUNNING', [], {})])
+  check('T10_autonomy_is_measured_from_the_records_commander_actions_are_counted_and_blocked_commands_are_explained', mm.finished === 5 && mm.delivered === 3 && mm.autonomousCompletionRate === 0.5 && mm.deliveredAfterRecovery === 2 && mm.failuresDiagnosed === 3 && mm.failuresRecovered === 2 && mm.escalations.local === 1 && mm.escalations.localSucceeded === 1 && mm.interventions.some((i) => i.kind === 'REOPENED' && i.count === 1) && mm.remainingInterventionCauses.length === 1 && mm.remainingInterventionCauses[0].cause === 'dependency' && mm.meanMinutesToDelivery === 30, JSON.stringify(mm).slice(0, 300))
+}
+if (only('T')) {
+  // ---- the controller: an ineffective repair escalates to a DIFFERENT qualified local model, and every step of that is on the record
+  let wref: ReturnType<typeof world> | null = null
+  const SPECIALIST = 'qwen3-coder:30b'
+  const original = () => readFileSync(path.join(wref!.repo, 'src', 'messageStore.mjs'), 'utf8')
+  const w = world((c) => (c.kind === 'file' && c.path === 'src/messageStore.mjs' ? fenced(original()) : c.kind === 'file' && c.path && SOLUTION[c.path] ? fenced(SOLUTION[c.path]) : null))
+  wref = w
+  w.runner.lineupFor = (b: string): ModelLineup => ({ builder: { label: b, model: named(new ScriptedModel((c) => { w.calls.push(c); return c.kind === 'file' && c.path && SOLUTION[c.path] ? fenced(SOLUTION[c.path]) : null }), b) }, testCandidates: [], simulated: true })
+  const plan: ControllerDeps['planner'] = async (text) => { const r = await chatPlan({ targets: [{ path: 'src/messageStore.mjs', action: 'modify' as const }], scope: { paths: ['src/messageStore.mjs', 'package.json'], write: ['src/messageStore.mjs'] }, acceptance: ['src/messageStore.mjs exports loadSessions() and saveSessions(list) that persist to the CHAT_DATA_FILE JSON file'] })!(text, { repo: '' }); return { ...r, verifyScripts: {} } }
+  const c = w.mk({ runner: w.runner, planner: plan, specialists: async () => ({ installed: [{ name: 'builder-x', sizeBytes: 14e9 }, { name: SPECIALIST, sizeBytes: 18e9 }, { name: 'unbenchmarked:7b', sizeBytes: 5e9 }], benchmarks: bench(SPECIALIST, 19, 20), fits: () => true }) })
+  c.setSettings({ fullAutonomy: true }, C)
+  const sub = await c.submit('Foundry, make the chat store persist sessions to a JSON file', { kind: 'foundry-ui' }, C)
+  const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 300_000)
+  const step = done.steps[0]
+  check('T11_a_repair_that_changed_nothing_escalates_to_a_different_qualified_local_model_which_delivers', done.state === 'DELIVERED' && step.missions.length === 2 && step.missions[0].strategy === 'initial' && step.missions[1].strategy === 'escalate-local' && step.missions[1].builder === SPECIALIST && step.missions[0].builder === 'builder-x', `${done.state}: ${done.stateReason.slice(0, 160)}; ${step.missions.map((m) => `${m.strategy}:${m.builder}:${m.endState}`).join(' | ')}`)
+  const dec = done.decisions[0]
+  check('T12_the_decision_records_cause_evidence_choice_reason_rejected_alternatives_and_the_workers', !!dec && dec.cause === 'code' && dec.chosen === `escalate to the local specialist ${SPECIALIST}` && /changed nothing|failed the same way/.test(dec.reason) && dec.evidence.length >= 1 && dec.rejected.some((r) => /unbenchmarked/.test(r.option) && /no benchmark evidence/.test(r.why)) && dec.rejected.some((r) => /external/.test(r.option) && /none was contacted/.test(r.why)) && dec.worker.builder === 'builder-x' && dec.worker.escalatedTo === SPECIALIST, JSON.stringify(dec).slice(0, 400))
+  check('T13_the_escalated_mission_really_ran_on_the_specialist_and_the_first_stayed_FAILED_as_evidence', w.store.read(step.missions[1].id)?.config.builder === SPECIALIST && w.store.read(step.missions[1].id)?.config.flags.escalated === true && w.store.read(step.missions[0].id)?.state === 'FAILED' && w.store.read(step.missions[0].id)?.config.flags.escalated === false)
+  const les = readLessons(w.adir)
+  check('T14_the_recovery_left_a_lesson_and_a_later_similar_command_gets_it_in_front_of_the_builder', les.length >= 1 && les[0].cause === 'code')
+  const sub2 = await c.submit('Foundry, make the chat store persist sessions to a JSON file again', { kind: 'foundry-ui' }, C)
+  const c2 = w.mk({ runner: w.runner })
+  const second = c2.commands.read(sub2.commandId)!
+  check('T15_the_lesson_was_applied_to_the_new_command_and_is_listed_on_it', second.lessonsApplied.length >= 1 && second.timeline.some((t) => t.kind === 'LESSONS') && /LESSONS FROM EARLIER MISSIONS/.test(second.steps[0].subtask.request))
+  const m1 = autonomyMetrics(w.mk().commands.list())
+  check('T16_the_metrics_over_these_real_records_show_the_recovery_and_the_escalation', m1.failuresDiagnosed >= 1 && m1.escalations.local >= 1 && m1.deliveredAfterRecovery >= 1)
+}
+if (only('T')) {
+  // ---- budgets: a command that keeps failing is stopped, not left to loop
+  const w = world((c) => (c.kind === 'file' ? '```js\nexport const broken = ;\n```' : null))
+  const c = w.mk(); c.setSettings({ fullAutonomy: true, maxStrategyAttempts: 6, maxMissionsPerCommand: 2 }, C)
+  const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
+  const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 300_000)
+  check('T17_the_mission_budget_stops_a_command_that_keeps_failing', done.state === 'BLOCKED' && /mission budget spent: 2 missions/.test(done.stateReason) && w.store.list().length === 2, `${done.state}: ${done.stateReason.slice(0, 160)}`)
+  let clock = Date.now()
+  const w2 = world((c) => (c.kind === 'file' ? '```js\nexport const broken = ;\n```' : null))
+  const c3 = w2.mk({ now: () => new Date(clock) }); c3.setSettings({ fullAutonomy: true, maxStrategyAttempts: 6, maxCommandMinutes: 10 }, C)
+  const s3 = await c3.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
+  for (let i = 0; i < 400 && w2.store.list().every((m) => ['RUNNING', 'QUEUED', 'VERIFYING', 'APPLYING'].includes(m.state)); i++) await sleep(250)
+  clock += 11 * 60_000
+  const d3 = await settle(c3, s3.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 120_000)
+  check('T18_the_time_budget_stops_a_command_that_has_run_too_long', d3.state === 'BLOCKED' && /time budget spent/.test(d3.stateReason), `${d3.state}: ${d3.stateReason.slice(0, 160)}`)
+}
+if (only('T')) {
+  // ---- GPU contention end to end: the command waits (naming the other workload), then starts when it is gone, and never touched the other workload
+  const reading: ResourceReading = { gpuUtilPct: 90, gpuProcs: [{ pid: 9, name: 'council-inference', usedMiB: 9000 }], gpuFreeMiB: 12000, gpuTotalMiB: 16000, ramAvailableMiB: 20000, residentModels: [] }
+  const w = world(goodReply, { resources: async () => judgeResources(reading, 'builder-x') })
+  const c = w.mk({ resources: async () => judgeResources(reading, 'builder-x') }); c.setSettings({ fullAutonomy: true }, C)
+  const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
+  check('T19_while_another_workload_uses_the_GPU_the_command_waits_naming_it_and_no_mission_exists', sub.state === 'WAITING_RESOURCES' && /busy with another workload \(90%.*council-inference/.test(sub.reason) && w.store.list().length === 0)
+  reading.gpuUtilPct = 4; reading.gpuProcs = []
+  const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s))
+  check('T20_when_the_other_workload_ends_the_same_command_starts_and_is_delivered', done.state === 'DELIVERED' && w.store.list().length === 1)
+}
+if (only('T')) {
+  // ---- deployment with an acceptance test: a failed deployment is rolled back automatically, a passing one is verified and journaled
+  const home = tmp(); const launcher = path.join(home, 'war-room-os-user')
+  const script = '#!/bin/bash\nexport GDK_BACKEND=x11\nexec "/old/opt/War-Room-OS/war-room-os" --ozone-platform=x11 "$@"\n'
+  writeFileSync(launcher, script); chmodSync(launcher, 0o755)
+  const mkInstall = (name: string) => { const d = path.join(home, name); mkdirSync(path.join(d, 'opt', 'War-Room-OS'), { recursive: true }); writeFileSync(path.join(d, 'opt', 'War-Room-OS', 'war-room-os'), '#!/bin/sh\n'); chmodSync(path.join(d, 'opt', 'War-Room-OS', 'war-room-os'), 0o755); writeFileSync(path.join(d, 'opt', 'War-Room-OS', 'chrome-sandbox'), 'x'); writeFileSync(path.join(d, 'INSTALL_STAMP.json'), JSON.stringify({ gitDirty: false, gitShort: 'abc' })); return d }
+  const bad = mkInstall('war-room-os-0.2.0-bad00001-test'), good = mkInstall('war-room-os-0.2.0-good0001-test')
+  const common = { launcher, sandboxHelperOk: () => ({ ok: true, why: 'test' }) }
+  const r1 = await promoteInstall({ ...common, installPath: bad, healthCheck: async () => ({ ok: false, detail: 'the build exited with code 1 before serving' }) })
+  const j1 = readFileSync(path.join(home, '.foundry-promotions.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).state)
+  check('T21_an_intentionally_failed_test_deployment_is_rolled_back_automatically_and_the_launcher_is_byte_identical', !r1.ok && r1.rolledBack === true && /failed its deployment health check/.test(r1.detail) && readFileSync(launcher, 'utf8') === script && j1.join() === 'PREPARED,APPLIED,ROLLED_BACK', `${r1.detail.slice(0, 160)} / ${j1.join()}`)
+  const r2 = await promoteInstall({ ...common, installPath: bad, healthCheck: async () => { throw new Error('boom') } })
+  check('T22_a_health_check_that_crashes_counts_as_failed_and_also_rolls_back', !r2.ok && r2.rolledBack === true && /crashed: boom/.test(r2.detail) && readFileSync(launcher, 'utf8') === script)
+  const r3 = await promoteInstall({ ...common, installPath: good, healthCheck: async () => ({ ok: true, detail: 'booted and served' }) })
+  const j3 = readFileSync(path.join(home, '.foundry-promotions.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l).state)
+  check('T23_a_passing_deployment_is_verified_journaled_and_keeps_the_new_target', r3.ok && !r3.rolledBack && parseLauncherTarget(readFileSync(launcher, 'utf8')) === path.join(good, 'opt', 'War-Room-OS', 'war-room-os') && j3.slice(-3).join() === 'PREPARED,APPLIED,VERIFIED' && /passed its health check/.test(r3.detail), r3.detail.slice(0, 160))
+  rollbackPromotion(r3.backup!, launcher)
+  const weird = mkInstall('war-room-os-0.2.0-we"ird-test')
+  const r4 = await promoteInstall({ ...common, installPath: weird })
+  check('T24_a_launcher_that_fails_verification_after_the_rewrite_is_restored_at_once', !r4.ok && r4.rolledBack === true && /failed verification/.test(r4.detail) && readFileSync(launcher, 'utf8') === script, r4.detail.slice(0, 200))
+}
+if (only('T')) {
+  // ---- the Council conversation stays linked to its Foundry mission while the mission changes underneath (retry, escalation, recovery)
+  const rows: CouncilMissionProposal[] = []
+  const storage: CouncilMissionStorage = { read: () => rows.slice(), write: (n) => { rows.splice(0, rows.length, ...n) }, postMessage: () => ({ id: 'x' }) }
+  let cur: FoundryCommandView
+  const base = (missionId: string, state: string): FoundryCommandView => ({ id: 'cmd-20261017T000000-bbbbbbbb', state, stateReason: 'r', stateAt: '', title: 'T', missionId, stepIndex: 0, stepCount: 1, ladder: { codeGenerated: false, testsPassed: false, verificationPassed: false, buildCreated: false, installed: false, running: false, uiProof: 'NOT_APPLICABLE', promoted: false }, installPath: null, mission: { id: missionId, state: 'RUNNING', stateReason: 'x', stateAt: '', progress: null, result: null, receipt: null } })
+  cur = base('msn-20261017T000001-aaaaaaaa', 'RUNNING')
+  const port: FoundryPort = { availability: () => ({ ok: true }), async start() { throw new Error('no') }, get: () => null, cancel() { /* n/a */ }, async submitCommand() { return { commandId: cur.id, missionId: cur.missionId, state: 'RUNNING', reason: 'ok' } }, getCommand: () => cur }
+  const svc = createCouncilMissionService({ storage, foundry: port })
+  const p = await svc.command({ conversationId: 'conv_linked1', ownerId: 'o', text: 'Foundry, build the thing please now' }, C)
+  const seen: string[] = [p.foundry!.missionId]
+  for (const [mid, st] of [['msn-20261017T000002-bbbbbbbb', 'QUEUED'], ['msn-20261017T000003-cccccccc', 'WAITING_RESOURCES'], ['msn-20261017T000004-dddddddd', 'RUNNING'], ['msn-20261017T000005-eeeeeeee', 'PROVING']] as const) { cur = base(mid, st); svc.sync(); seen.push(rows[0].foundry!.missionId) }
+  check('T25_the_Council_proposal_stays_linked_to_the_same_conversation_and_command_while_the_mission_id_changes_through_retries', rows.length === 1 && rows[0].conversationId === 'conv_linked1' && rows[0].commandId === cur.id && rows[0].status === 'RUNNING' && new Set(seen).size === 5 && seen.at(-1) === 'msn-20261017T000005-eeeeeeee', seen.join(','))
 }
 
 finish()

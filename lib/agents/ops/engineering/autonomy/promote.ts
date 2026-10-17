@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { appendFileSync, chmodSync, copyFileSync, existsSync, lstatSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { defaultLauncher } from './capabilities'
@@ -7,7 +8,16 @@ import type { PromoteResult } from './controller'
  * Promotion = pointing the canonical launcher at a verified installation. Reversible by construction: the previous launcher is copied aside first, the new one is written atomically,
  * the old installation directory is never touched, and the rollback is one `cp`. Promotion is refused (not faked) whenever the new build could not actually start on this machine.
  */
-export type PromoteInput = { installPath: string; launcher?: string; now?: Date; /** override for tests: report whether the Electron sandbox helper is usable */ sandboxHelperOk?: (exeDir: string) => { ok: boolean; why: string } }
+export type PromoteInput = {
+  installPath: string; launcher?: string; now?: Date
+  /** override for tests: report whether the Electron sandbox helper is usable */
+  sandboxHelperOk?: (exeDir: string) => { ok: boolean; why: string }
+  /**
+   * The deployment's own acceptance test, run AFTER the launcher points at the new build: it must start the build and see it work. If it says no (or throws, or times out), the launcher is
+   * restored from the backup it just made and the promotion is reported as rolled back. A promotion without this hook is only structurally verified.
+   */
+  healthCheck?: (installPath: string) => Promise<{ ok: boolean; detail: string }>
+}
 
 export function sandboxHelperState(exeDir: string): { ok: boolean; why: string } {
   const f = path.join(exeDir, 'chrome-sandbox')
@@ -43,10 +53,29 @@ export async function promoteInstall(input: PromoteInput): Promise<PromoteResult
   const backup = `${launcher}.rollback-${prevShort}-${ts}`
   copyFileSync(launcher, backup)
   const next = old.replace(`exec "${previous}"`, () => `exec "${exe}"`).replace(/^# .*Council Stage 3.*$/m, () => `# Promoted by Foundry (${stamp.gitShort ?? 'unknown'}) from a verified installation at ${new Date(ts).toISOString()}; rollback: cp -p ${backup} ${launcher}`)
+  const journal = (state: string, extra: Record<string, unknown> = {}) => { try { appendFileSync(path.join(path.dirname(launcher), '.foundry-promotions.jsonl'), JSON.stringify({ at: new Date().toISOString(), state, launcher, previous, next: exe, backup, ...extra }) + '\n') } catch { /* evidence is best effort */ } }
+  journal('PREPARED')
+  const restore = (why: string): PromoteResult => {
+    const rb = rollbackPromotion(backup, launcher)
+    journal(rb.ok ? 'ROLLED_BACK' : 'ROLLBACK_FAILED', { why })
+    return { ok: false, rolledBack: rb.ok, detail: `${why}; ${rb.ok ? `the launcher was restored automatically (${backup})` : `AUTOMATIC ROLLBACK FAILED (${rb.detail}); restore manually: cp -p ${backup} ${launcher}`}`, launcher, previousTarget: previous, backup }
+  }
   const tmp = `${launcher}.${process.pid}.tmp`
   writeFileSync(tmp, next, { mode: 0o755 }); chmodSync(tmp, 0o755); renameSync(tmp, launcher)
-  try { appendFileSync(path.join(path.dirname(launcher), '.foundry-promotions.jsonl'), JSON.stringify({ at: new Date(ts).toISOString(), launcher, previous, next: exe, backup }) + '\n') } catch { /* evidence is best effort */ }
-  return { ok: true, detail: `the launcher now starts ${exe} (takes effect the next time War Room is launched; the running app was not restarted). Rollback: cp -p ${backup} ${launcher}`, launcher, previousTarget: previous, backup }
+  journal('APPLIED')
+  // structural verification of what was just written: the target, the executable bit and the shell syntax
+  const written = readFileSync(launcher, 'utf8')
+  const syntax = spawnSync('bash', ['-n', launcher], { encoding: 'utf8', timeout: 10_000 })
+  if (parseLauncherTarget(written) !== exe || (statSync(launcher).mode & 0o111) === 0 || syntax.status !== 0) return restore(`the rewritten launcher failed verification (${syntax.status !== 0 ? 'shell syntax: ' + String(syntax.stderr).slice(0, 120) : 'wrong target or not executable'})`)
+  if (input.healthCheck) {
+    let h: { ok: boolean; detail: string }
+    try { h = await input.healthCheck(input.installPath) } catch (e) { h = { ok: false, detail: `the health check crashed: ${e instanceof Error ? e.message : String(e)}` } }
+    if (!h.ok) return restore(`the new build failed its deployment health check (${h.detail.slice(0, 240)})`)
+    journal('VERIFIED', { health: h.detail.slice(0, 200) })
+    return { ok: true, detail: `the launcher now starts ${exe} and the build passed its health check (${h.detail.slice(0, 120)}); takes effect the next time War Room is launched (the running app was not restarted). Rollback: cp -p ${backup} ${launcher}`, launcher, previousTarget: previous, backup }
+  }
+  journal('VERIFIED', { health: 'structural only' })
+  return { ok: true, detail: `the launcher now starts ${exe} (structurally verified only: no health check was supplied; takes effect the next time War Room is launched; the running app was not restarted). Rollback: cp -p ${backup} ${launcher}`, launcher, previousTarget: previous, backup }
 }
 
 export function rollbackPromotion(backup: string, launcher: string = defaultLauncher()): { ok: boolean; detail: string } {
