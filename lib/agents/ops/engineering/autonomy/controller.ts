@@ -444,7 +444,7 @@ export class AutonomyController {
     const cfg = this.cfg()
     const tried = step.missions.map((x) => x.strategy as Rung)
     const repeated = step.missions.some((x) => x.fingerprint === d.fingerprint)
-    const ineffective = repeated || /NO_CHANGE|changed no file|no file inside its write scope|NO_EFFECTIVE_CHANGE|wrote no change/i.test(`${d.summary} ${d.detail}`)
+    const ineffective = repeated || d.cause === 'model' || /NO_CHANGE|unusable|changed no file|no file inside its write scope|NO_EFFECTIVE_CHANGE|wrote no change/i.test(`${d.summary} ${d.detail}`)
     let stale = false
     this.commands.update(cmd.id, (c) => {
       const s = c.steps[c.currentStep]; if (s.n !== step.n || s.missions.at(-1)?.id !== m.id || s.missions.at(-1)?.fingerprint !== undefined || s.pendingRung) { stale = true; return null }
@@ -498,6 +498,7 @@ export class AutonomyController {
     const to = rung === 'escalate-local' ? esc?.model ?? undefined : undefined
     const why = rung === 'escalate-local' ? `${ineffective ? 'the last repair changed nothing or failed the same way' : 'the first retry did not help'}; ${esc && esc.model ? `${esc.model} is qualified (${esc.evidence})` : ''}` : rung === 'diagnosed' ? 'retry once with the extracted evidence quoted to the builder' : rung === 'reverse-context' ? 'map the area first (read-only analysis) and retry with that context' : 'next unused strategy'
     decide(rung === 'escalate-local' ? `escalate to the local specialist ${to}` : `retry with strategy "${rung}"`, why, rung === 'escalate-local' ? (esc?.rejected ?? []).map((r) => ({ option: `local model ${r.model}`, why: r.why })).concat([{ option: 'external coding model', why: ext.available ? 'configured, but local specialists come first' : ext.reason }]) : rejectedBase.concat(tried.map((t) => ({ option: `strategy "${t}"`, why: 'already used for this step' }))), to)
+    if (to) this.postMilestone(cmd.id, `escalate-${m.id}`, `Foundry's builder (${m.config.builder}) could not repair this (${d.cause}). Evidence: ${evidence[0] ?? d.summary}. Foundry is escalating the repair to ${to}, a local model qualified for it on recorded benchmark runs (${esc && esc.model ? esc.evidence : ''}).`)
     this.commands.update(cmd.id, (c) => { c.timeline.push({ at: this.now().toISOString(), kind: 'STRATEGY', detail: `next attempt uses "${rung}"${to ? ` with ${to}` : ''} (tried: ${tried.join(', ')})` }); const st = c.steps[c.currentStep]; st.pendingRung = rung!; if (to) st.pendingBuilder = to; else delete st.pendingBuilder; return c })
     this.setState(cmd.id, 'QUEUED', `changed strategy: ${rung}${to ? ` (${to})` : ''}`)
   }

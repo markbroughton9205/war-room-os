@@ -23,7 +23,11 @@ export async function defaultLineup(opts: { forge?: ForgeStore; base?: string; /
   } catch { throw new MissionError('NO_BUILDER', 'the local model runtime (Ollama on loopback) is not reachable') }
   const has = (ref: string) => installed.includes(ref)
   if (!has(builder)) throw new MissionError('NO_BUILDER', `the builder ${builder} is not installed in the local model runtime`)
-  const client = (ref: string) => new OllamaModelClient(ref, base, opts.builder && ref === opts.builder ? '10m' : keepAliveFor(pool, ref))
+  // FAULT INJECTION (acceptance testing only, off by default, recorded on every mission it touches): the DEFAULT builder answers with unusable text, so the recovery path (diagnose, escalate to a
+  // qualified specialist) can be exercised on the real pipeline. An explicitly requested escalation builder is never affected.
+  const chaos = !opts.builder && process.env.WAR_ROOM_CHAOS_BUILDER === 'garbage'
+  const real = (ref: string) => new OllamaModelClient(ref, base, opts.builder && ref === opts.builder ? '10m' : keepAliveFor(pool, ref))
+  const client = (ref: string) => (chaos && ref === builder ? ({ async generate(i: Parameters<OllamaModelClient['generate']>[0]) { const r = await real(ref).generate({ ...i, maxTokens: 8 }); return r.ok ? { ...r, text: 'I am sorry, I am unable to produce code for this request.' } : r } } as unknown as OllamaModelClient) : real(ref))
   // an escalation mission is a bounded repair by one specialist: no reviewer/competing-writer helpers, so nothing else competes for the GPU
   const reviewer = opts.builder ? undefined : pool.members.find((m) => m.role === 'TEST_REVIEWER')?.modelRef
   const candidate = opts.builder ? undefined : pool.members.find((m) => m.role === 'TEST_CANDIDATE')?.modelRef

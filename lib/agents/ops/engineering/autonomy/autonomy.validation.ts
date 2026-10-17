@@ -59,7 +59,7 @@ if (only('A')) {
   check('A01_defaults_are_conservative_full_autonomy_off_deployment_off', (() => { const c = readConfig(adir); return c.fullAutonomy === false && c.deploymentAuthority === false && c.paused === false })())
   updateConfig(adir, { fullAutonomy: true, maxStrategyAttempts: 99 }, C)
   const c1 = readConfig(adir)
-  check('A02_settings_persist_across_readers_and_are_clamped', c1.fullAutonomy === true && c1.maxStrategyAttempts === 5 && c1.updatedBy === C && existsSync(path.join(adir, 'settings-history.jsonl')))
+  check('A02_settings_persist_across_readers_and_are_clamped', c1.fullAutonomy === true && c1.maxStrategyAttempts === 6 && c1.updatedBy === C && existsSync(path.join(adir, 'settings-history.jsonl')))
   check('A03_an_unreadable_config_falls_back_to_the_safe_defaults', (() => { const d = path.join(tmp(), 'a'); mkdirSync(d, { recursive: true }); writeFileSync(path.join(d, 'config.json'), '{not json'); return readConfig(d).fullAutonomy === false })())
   check('A04_emergency_stop_is_a_file_so_every_process_sees_it', !isEmergencyStopped(adir))
 }

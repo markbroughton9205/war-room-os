@@ -144,7 +144,7 @@ export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: A
     schema: 1, id, title: v.title, request: v.request, acceptance: v.acceptance, hints: v.hints, targets: v.targets, scope: v.scope, install: v.install, createdAt: now.toISOString(), createdBy: by,
     state: 'QUEUED', stateReason: 'creating the workspace', stateAt: now.toISOString(), workspace: { root, seeded: [], seedTreeSha256: 'PENDING', ...(baseCommit ? { baseCommit } : {}) },
     assignmentId: 'PENDING', agentId, lease: null, attempts: [], recoveries: [],
-    config: { builder: lineup.builder.label, testReviewer: lineup.testReviewer?.label ?? null, testCandidates: lineup.testCandidates.map((c) => c.label), escalation: lineup.escalation?.label ?? null, flags: { simulated: lineup.simulated, escalated: !!draft.builder, firstPass: deps.engine?.firstPass !== false, contractTests: deps.engine?.contractTests !== false && !v.targets.length, retrieval: false, research: false, fastRepair: false } },
+    config: { builder: lineup.builder.label, testReviewer: lineup.testReviewer?.label ?? null, testCandidates: lineup.testCandidates.map((c) => c.label), escalation: lineup.escalation?.label ?? null, flags: { simulated: lineup.simulated, escalated: !!draft.builder, chaos: !draft.builder && process.env.WAR_ROOM_CHAOS_BUILDER === 'garbage', ssrCheckOff: process.env.WAR_ROOM_ENG_SSR_CHECK === 'off', firstPass: deps.engine?.firstPass !== false, contractTests: deps.engine?.contractTests !== false && !v.targets.length, retrieval: false, research: false, fastRepair: false } },
     progress: { stepsDone: 0, stepsTotal: 0, modelCalls: 0, repairs: 0, filesChanged: [], lastEvent: 'queued' }, result: null, receipt: null,
     ...(draft.analysisId && /^rev-[0-9]{8}T[0-9]{6}-[0-9a-f]{8}$/.test(draft.analysisId) ? { analysisId: draft.analysisId } : {}),
   }
@@ -289,7 +289,8 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     let verifier: ChangeReceipt['verifier'] = { label: verification.label, exitCode: fv.exitCode ?? -1, summary: (fv.stdout + '\n' + fv.stderr).trim().split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ').slice(0, 400) || 'no summary', at: clock().toISOString() }
     if (fv.exitCode !== 0) { await finishAs('FAILED', 'the independent verifier failed on the final workspace', noInt, noInst, verifier); return }
     // ---- server-render hazards (application code that will be built into an installation): the type checker cannot see them and `next build` would fail minutes later, so they are repaired now, naming the exact lines
-    if (m0.install) {
+    if (m0.install && process.env.WAR_ROOM_ENG_SSR_CHECK === 'off') store.event(id, { kind: 'SSR_CHECK_DISABLED', detail: 'the pre-integration server-render check is switched off by WAR_ROOM_ENG_SSR_CHECK=off (acceptance testing)', attempt: attemptNo })
+    if (m0.install && process.env.WAR_ROOM_ENG_SSR_CHECK !== 'off') {
       for (let round = 1; round <= 2; round++) {
         if (!owns()) { store.event(id, { kind: 'LATE_RESULT_DISCARDED', detail: `worker ${workerId} lost the mission during the server-render check`, attempt: attemptNo }); return }
         const fin0 = ws.snapshot()
