@@ -56,6 +56,20 @@ export function cleanupStaleInstallScratch(repo: string | null, scratchRoot: str
   return removed
 }
 
+/** `next build && node scripts/x.mjs` -> argv lists run with node directly. Returns null when the script has any other shape (then nothing runs unsandboxed or through a package manager). */
+export function buildScriptArgvs(root: string, node: string): string[][] | null {
+  let script = ''
+  try { const sc = (JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {}; if (!sc.build) return null; script = [sc.prebuild, sc.build, sc.postbuild].filter(Boolean).join(' && ') } catch { return null } // the lifecycle package managers run: prebuild, build, postbuild
+  const out: string[][] = []
+  for (const part of script.split('&&').map((x) => x.trim()).filter(Boolean)) {
+    const w = part.split(/\s+/)
+    if (w[0] === 'next' && existsSync(path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next'))) out.push([node, path.join(root, 'node_modules', 'next', 'dist', 'bin', 'next'), ...w.slice(1)])
+    else if (w[0] === 'node' && w[1] && !w[1].startsWith('-') && !path.isAbsolute(w[1]) && !w[1].includes('..')) out.push([node, ...w.slice(1)])
+    else return null
+  }
+  return out.length ? out : null
+}
+
 export async function installRuntime(m: MissionRecord, integ: ChangeReceipt['integration'], on: (s: string) => void, repo: string | null, opts: InstallOpts = {}): Promise<ChangeReceipt['install']> {
   if (!repo) return { state: 'FAILED', detail: 'no engineering repository is configured' }
   if (integ.state !== 'APPLIED' || !integ.commit || !integ.branch) return { state: 'FAILED', detail: 'there is no integrated commit to install' }
@@ -111,9 +125,13 @@ export async function installRuntime(m: MissionRecord, integ: ChangeReceipt['int
       if (existsSync(path.join(repo, sub)) && !existsSync(path.join(scratch, sub))) { const c = sync(['cp', '-a', '--reflink=auto', path.join(repo, sub), path.join(scratch, sub)], scratch, 600_000); if (c.code !== 0) return fail(`could not prepare ${sub}: ${c.out.slice(-200)}`) }
     }
     // ---- 3. builds (model-written code executes here: sandboxed, no network)
-    const stepsB = opts.steps?.build ?? [pnpm, 'run', 'build']
-    const b1 = await run('next build', stepsB, scratch, 30 * 60_000)
-    if (b1.exitCode !== 0) return fail(`next build failed: ${buildFailureDetail(b1)}`)
+    // the project's own `build` script, executed command by command WITHOUT a package manager (a corepack shim would try to download pnpm; nothing here may need the network)
+    const buildSteps = opts.steps?.build ? [opts.steps.build] : buildScriptArgvs(scratch, node)
+    if (!buildSteps) return fail('package.json has no usable build script (expected `next build` optionally followed by node scripts)')
+    for (const argv of buildSteps) {
+      const b1 = await run(argv[1]?.includes('next') ? 'next build' : `build step ${path.basename(argv[1] ?? argv[0])}`, argv, scratch, 30 * 60_000)
+      if (b1.exitCode !== 0) return fail(`build failed (${argv.slice(1).join(' ').slice(0, 80)}): ${buildFailureDetail(b1)}`)
+    }
     const b2 = await run('prepare the desktop runtime', opts.steps?.prepare ?? [node, 'scripts/prepare-desktop-runtime.mjs'], scratch, 15 * 60_000)
     if (b2.exitCode !== 0) return fail(`prepare-desktop-runtime failed: ${buildFailureDetail(b2)}`)
     const pkgArgv = opts.steps?.package ?? [path.join(path.dirname(node), 'npx'), 'electron-builder', '--linux', 'dir', '--x64']
