@@ -1,4 +1,6 @@
-import { existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, statSync, writeFileSync, copyFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync, copyFileSync } from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import { Workspace, treeHash } from '../runtime/workspaceFs'
 import type { SourceSpec } from './types'
@@ -25,6 +27,30 @@ export function checkSeedPath(repo: string, rel: string): string {
   return clean
 }
 
+/** Resolves a ref to a full commit id inside `repo`, or throws. Only commit-ish names git itself resolves are accepted; the result is a 40-hex id. */
+export function resolveRef(repo: string, ref: string): string {
+  if (!/^[A-Za-z0-9][A-Za-z0-9_./-]{0,200}$/.test(ref) || ref.includes('..')) throw new SeedError('PATH', `invalid ref: ${ref.slice(0, 60)}`)
+  const r = spawnSync('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { encoding: 'utf8', timeout: 20_000 })
+  const id = (r.stdout ?? '').trim()
+  if (r.status !== 0 || !/^[0-9a-f]{40}$/.test(id)) throw new SeedError('MISSING', `ref does not resolve to a commit: ${ref}`)
+  return id
+}
+
+/** The named paths as they are at `ref`, extracted into a fresh temporary directory (git archive; no working-tree state, no hooks). The caller removes the directory. */
+export function materializeRef(repo: string, ref: string, paths: string[]): string {
+  const tmp = mkdtempSync(path.join(os.tmpdir(), 'wr-ref-'))
+  try {
+    for (const p of paths) {
+      if (!p || path.isAbsolute(p) || p.includes('\0') || p.split(/[\\/]/).includes('..') || p.startsWith('-')) throw new SeedError('PATH', `seed path must be repository-relative without traversal: ${p}`)
+    }
+    const ar = spawnSync('git', ['-C', repo, '--literal-pathspecs', 'archive', '--format=tar', ref, '--', ...paths], { maxBuffer: 256 * 1024 * 1024, timeout: 120_000 })
+    if (ar.status !== 0) throw new SeedError('MISSING', `a seed path does not exist at ${ref.slice(0, 10)}: ${String(ar.stderr ?? '').trim().slice(0, 160)}`)
+    const tar = spawnSync('tar', ['-x', '-C', tmp, '--no-same-owner', '--no-same-permissions'], { input: ar.stdout, timeout: 120_000 })
+    if (tar.status !== 0) throw new SeedError('PATH', `could not extract the seed paths at ${ref.slice(0, 10)}`)
+    return tmp
+  } catch (e) { rmSync(tmp, { recursive: true, force: true }); throw e }
+}
+
 /** Copies the named repo paths into a fresh mission workspace (layout preserved, symlinks dropped, size-bounded) and returns the seeded file list and the seed snapshot. */
 export function seedWorkspace(root: string, source: SourceSpec | undefined): { seeded: string[]; snapshot: Record<string, string>; treeSha256: string } {
   mkdirSync(root, { recursive: true })
@@ -48,8 +74,10 @@ export function seedWorkspace(root: string, source: SourceSpec | undefined): { s
       if (st.isDirectory()) walk(p, r); else if (st.isFile()) copyFile(p, r)
     }
   }
+  let refTmp: string | null = null
   if (source) {
-    const repo = realpathSync(source.repo)
+    if (source.ref) refTmp = materializeRef(source.repo, source.ref, source.paths)
+    const repo = realpathSync(refTmp ?? source.repo)
     for (const raw of source.paths) {
       const rel = checkSeedPath(repo, raw)
       const abs = path.join(repo, rel)
@@ -57,6 +85,7 @@ export function seedWorkspace(root: string, source: SourceSpec | undefined): { s
       if (st.isSymbolicLink()) continue
       if (st.isDirectory()) walk(abs, rel); else copyFile(abs, rel)
     }
+    if (refTmp) rmSync(refTmp, { recursive: true, force: true })
   }
   // a workspace the engine can run tests in: plain ES modules, `node --test`
   const pj = path.join(root, 'package.json')

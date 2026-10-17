@@ -23,7 +23,8 @@ export type Lease = {
   progressNote: string
 }
 
-export type SourceSpec = { repo: string; paths: string[] }
+/** `ref`: a commit the workspace is seeded from instead of the checked-out tree (a chained subtask builds on the commit the previous subtask integrated). */
+export type SourceSpec = { repo: string; paths: string[]; ref?: string }
 /** write: path prefixes (relative to the source repo) where created/changed files may be applied back; anything else is refused at integration. */
 export type ScopeSpec = { source?: SourceSpec; write: string[] }
 

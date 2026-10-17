@@ -850,6 +850,11 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
         }),
       )
     }
+    // Hand engineering requests to Foundry before general Council routing.
+    const foundryHandled = await import('@/lib/intent-prerouter/foundry')
+      .then(mod => mod.tryHandleFoundryCommand(req, message, conversationId))
+      .catch(error => { console.error('[foundry-prerouter]', error); return null })
+    if (foundryHandled) return foundryHandled
   }
 
   councilTrace.record('request_received', {

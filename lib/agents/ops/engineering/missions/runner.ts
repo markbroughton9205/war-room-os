@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { AgentOpsLog } from '../../log'
@@ -19,7 +19,7 @@ import { GATE_REPAIR_ROUNDS, GATE_REPAIR_SYSTEM, extractCorrected, gateRepairPro
 import { fileProvenance, roleOf, type LedgerDelivery, type LedgerWrite } from './provenance'
 import { buildReceipt, verifyReceipt } from './receipt'
 import { localRunners, realFacts, reconcileMissions, resumability } from './reconcile'
-import { SeedError, checkSeedPath, isSensitiveWrite, seedWorkspace } from './seed'
+import { SeedError, checkSeedPath, isSensitiveWrite, materializeRef, resolveRef, seedWorkspace } from './seed'
 import { assessLiveness, HEARTBEAT_MS, pidStartOf } from './liveness'
 import { resolveBin, runTool } from './toolchain'
 import type { MissionStore } from './store'
@@ -40,6 +40,8 @@ export type RunnerDeps = {
   /** the install stage (Commander approval was recorded on the mission at creation); absent means installs are not available in this deployment */
   installer?: (m: MissionRecord, integration: ChangeReceipt['integration'], onLog: (s: string) => void) => Promise<ChangeReceipt['install']>
   engine?: { crashAfterSteps?: number; firstPass?: boolean; contractTests?: boolean }
+  /** Commander authority gate: a non-null reason refuses to create, start or resume any mission (Emergency Stop, Pause). Enforced here so every entry point is bound by it. */
+  guard?: () => string | null
   now?: () => Date
 }
 export type MissionDraft = { title: string; request: string; acceptance: string[]; hints?: string[]; targets?: { path: string; action: 'create' | 'modify' }[]; scope?: Partial<ScopeSpec>; install?: boolean; verifyScript?: string; analysisId?: string }
@@ -66,14 +68,21 @@ export function validateDraft(d: MissionDraft): { title: string; request: string
     if (!path.isAbsolute(repo) || !existsSync(path.join(repo, '.git'))) throw new MissionError('SCOPE', 'the source repository must be an absolute path to a git checkout')
     const paths = (d.scope.source.paths ?? []).map(String)
     if (paths.length < 1 || paths.length > 40) throw new MissionError('SCOPE', 'between 1 and 40 seed paths are required')
-    try { source = { repo, paths: paths.map((p) => checkSeedPath(repo, p)) } } catch (e) { throw new MissionError('SCOPE', e instanceof SeedError ? e.message : String(e)) }
+    try {
+      if (d.scope.source.ref) {
+        // a chained subtask: the seed is the previous subtask's integrated commit, so its paths are checked there, not in the working tree
+        const ref = resolveRef(repo, String(d.scope.source.ref))
+        const tmp = materializeRef(repo, ref, paths.map((p) => p.replace(/\\/g, '/')))
+        try { source = { repo, ref, paths: paths.map((p) => checkSeedPath(tmp, p)) } } finally { rmSync(tmp, { recursive: true, force: true }) }
+      } else source = { repo, paths: paths.map((p) => checkSeedPath(repo, p)) }
+    } catch (e) { throw new MissionError('SCOPE', e instanceof SeedError ? e.message : String(e)) }
     if (write.length === 0) throw new MissionError('SCOPE', 'a mission that works on a repository must declare where its changes may be applied (write scope)')
   }
   const targets = (Array.isArray(d.targets) ? d.targets : []).map((t) => ({ path: String(t?.path ?? '').replace(/\\/g, '/'), action: t?.action === 'create' ? ('create' as const) : ('modify' as const) }))
   if (targets.length > 12) throw new MissionError('SCOPE', 'at most 12 target files')
   for (const t of targets) {
     if (!t.path || t.path.startsWith('/') || t.path.split('/').includes('..') || !write.some((w) => t.path === w || t.path.startsWith(w + '/'))) throw new MissionError('SCOPE', `target ${t.path || '(empty)'} is outside the declared write scope`)
-    if (t.action === 'modify' && source && !existsSync(path.join(source.repo, t.path))) throw new MissionError('SCOPE', `target ${t.path} is to be modified but does not exist in the repository`)
+    if (t.action === 'modify' && source && !(source.ref ? source.paths.some((sp) => t.path === sp || t.path.startsWith(sp + '/')) : existsSync(path.join(source.repo, t.path)))) throw new MissionError('SCOPE', `target ${t.path} is to be modified but does not exist in the repository`)
   }
   const verifyScript = d.verifyScript ? String(d.verifyScript) : null
   if (verifyScript && verifyScript.length > 40_000) throw new MissionError('INVALID', 'the independent verifier script is too large')
@@ -117,6 +126,7 @@ export function missionPaths(deps: Pick<RunnerDeps, 'store'>, id: string) { cons
 
 /** Create a mission: validates the request, seeds the authorized workspace, binds an assignment, records QUEUED. Does not start work. */
 export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: Actor): Promise<MissionRecord> {
+  { const g = deps.guard?.(); if (g) throw new MissionError('ILLEGAL', g) }
   const v = validateDraft(draft)
   const now = (deps.now ?? (() => new Date()))()
   reconcileMissions(deps.log, deps.store)
@@ -124,7 +134,7 @@ export async function createMission(deps: RunnerDeps, draft: MissionDraft, by: A
   const id = deps.store.newId(now)
   const root = path.join(deps.workspacesRoot, id)
   let baseCommit: string | undefined
-  if (v.scope.source) { const r = await runTool([resolveBin('git'), '-C', v.scope.source.repo, 'rev-parse', 'HEAD'], v.scope.source.repo, { timeoutMs: 20_000 }); if (r.exitCode === 0) baseCommit = r.stdout.trim() }
+  if (v.scope.source) { const r = await runTool([resolveBin('git'), '-C', v.scope.source.repo, 'rev-parse', v.scope.source.ref ?? 'HEAD'], v.scope.source.repo, { timeoutMs: 20_000 }); if (r.exitCode === 0) baseCommit = r.stdout.trim() }
   const agentId = ensureAgent(deps.log, by)
   const rec: MissionRecord = {
     schema: 1, id, title: v.title, request: v.request, acceptance: v.acceptance, hints: v.hints, targets: v.targets, scope: v.scope, install: v.install, createdAt: now.toISOString(), createdBy: by,
@@ -170,6 +180,7 @@ const setState = (deps: RunnerDeps, id: string, workerId: string | null, state: 
 
 /** Start (or restart after recovery) the worker for a mission. The runner executes inside this process; its lease is renewed by a heartbeat and checked by the reconciler. */
 export function launchMission(deps: RunnerDeps, id: string, kind: 'START' | 'RESUME', recoveredFrom?: Attempt['recoveredFrom']): { workerId: string; done: Promise<void> } {
+  { const g = deps.guard?.(); if (g) throw new MissionError('ILLEGAL', g) }
   const now = deps.now ?? (() => new Date())
   const other = deps.store.list().find((x) => x.id !== id && ACTIVE_STATES.includes(x.state) && assessLiveness(x, realFacts(now())).verdict !== 'DEAD')
   if (other) throw new MissionError('BUSY', `mission ${other.id} is active; one engineering mission runs at a time`)
@@ -335,6 +346,7 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
 
 /** Resume an INTERRUPTED mission from its checkpoint (the recovery worker). Completed work is not redone; ids, assignment and prior receipts are kept. */
 export function resumeMission(deps: RunnerDeps, id: string, by: Actor): { workerId: string; done: Promise<void> } {
+  { const g = deps.guard?.(); if (g) throw new MissionError('ILLEGAL', g) }
   reconcileMissions(deps.log, deps.store)
   const m = deps.store.read(id)
   if (!m) throw new MissionError('NOT_FOUND', 'unknown mission')

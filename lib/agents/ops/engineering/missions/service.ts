@@ -12,6 +12,7 @@ import { createMission, launchMission, resumeMission, cancelMission, MissionErro
 import { verifyReceipt } from './receipt'
 import type { MissionRecord } from './types'
 import { installRuntime } from './install'
+import { autonomyDir, isEmergencyStopped, readConfig } from '../autonomy/config'
 import { AnalysisError, buildDraftFromAnalysis, getAnalysis, runAnalysis } from '../reverse/service'
 import { isAnalysisId } from '../reverse/store'
 
@@ -28,7 +29,9 @@ export function engineeringRepo(log: AgentOpsLog): string | null {
 
 export function serviceDeps(log: AgentOpsLog = new AgentOpsLog()): RunnerDeps {
   const base = path.dirname(log.file)
-  return { log, store: new MissionStore(log), workspacesRoot: path.join(base, 'engineering-workspaces'), integrationRoot: path.join(base, 'engineering-integration'), lineup: () => defaultLineup(), installer: (m, i, on) => installRuntime(m, i, on, engineeringRepo(log)) }
+  const adir = autonomyDir(base)
+  const guard = () => (isEmergencyStopped(adir) ? 'Emergency Stop is active: Foundry will not start or resume any work until the Commander clears it' : readConfig(adir).paused ? 'Foundry is paused by the Commander: resume it to start or continue work' : null)
+  return { log, store: new MissionStore(log), guard, workspacesRoot: path.join(base, 'engineering-workspaces'), integrationRoot: path.join(base, 'engineering-integration'), lineup: () => defaultLineup(), installer: (m, i, on) => installRuntime(m, i, on, engineeringRepo(log)) }
 }
 
 export type MissionView = {
@@ -79,7 +82,7 @@ export function getMission(deps: RunnerDeps, id: string) { reconcileMissions(dep
  * a plain start behaves exactly as before.
  */
 export async function startFromApi(deps: RunnerDeps, body: Record<string, unknown>, actor: string) {
-  const scopeIn = (body.scope ?? {}) as { paths?: unknown; write?: unknown }
+  const scopeIn = (body.scope ?? {}) as { paths?: unknown; write?: unknown; ref?: unknown }
   let paths = Array.isArray(scopeIn.paths) ? scopeIn.paths.map(String) : []
   let write = Array.isArray(scopeIn.write) ? scopeIn.write.map(String) : []
   let targets = Array.isArray(body.targets) ? (body.targets as { path?: unknown; action?: unknown }[]).map((t) => ({ path: String(t?.path ?? ''), action: t?.action === 'create' ? ('create' as const) : ('modify' as const) })) : []
@@ -107,7 +110,7 @@ export async function startFromApi(deps: RunnerDeps, body: Record<string, unknow
   if (analysisId && write.length) { const r0 = engineeringRepo(deps.log); const have = new Set(targets.map((t) => t.path)); for (const f of write) if (!have.has(f) && !f.endsWith('/')) targets = [...targets, { path: f, action: r0 && (() => { try { return statSync(path.join(r0, f)).isFile() } catch { return false } })() ? 'modify' as const : 'create' as const }] }
   const repo = paths.length ? engineeringRepo(deps.log) : null
   if (paths.length && !repo) throw new MissionError('SCOPE', 'no engineering repository is configured on this machine (WAR_ROOM_ENGINEERING_REPO or engineering-config.json)')
-  const draft: MissionDraft = { title: String(body.title ?? ''), request, acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets, install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths } } : {}) }, analysisId }
+  const draft: MissionDraft = { title: String(body.title ?? ''), request, acceptance: Array.isArray(body.acceptance) ? body.acceptance.map(String) : [], hints: Array.isArray(body.hints) ? body.hints.map(String) : [], targets, install: body.install === true, verifyScript: typeof body.verifyScript === 'string' ? body.verifyScript : undefined, scope: { write, ...(repo ? { source: { repo, paths, ...(typeof scopeIn.ref === 'string' && scopeIn.ref ? { ref: scopeIn.ref } : {}) } } : {}) }, analysisId }
   const rec = await createMission(deps, draft, actor as never)
   launchMission(deps, rec.id, 'START')
   return rec

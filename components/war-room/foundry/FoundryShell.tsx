@@ -78,6 +78,7 @@ import { FoundryQuietThread } from './FoundryQuietThread'
 import { FoundryLiveProgressPanel } from './FoundryLiveProgressPanel'
 import { buildLiveProgressFromItems } from '@/lib/native-builder/foundryLiveProgress'
 import { FoundryComposer } from './FoundryComposer'
+import { FoundryCommandStrip } from './FoundryCommandStrip'
 import { resolveSessionListMissionId } from '@/lib/native-builder/foundrySessionResume'
 import type { FoundryEngineeringEvent, FoundryEngineeringRuntimeState } from '@/lib/native-builder/foundryEngineeringEvents'
 import { commanderStatusHeadline, commanderVisibleSessions, looksLikeInternalSourcePath } from '@/lib/native-builder/foundryCommanderShell'
@@ -414,6 +415,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
   const [filesFor, setFilesFor] = useState<FilesListedFor>(null)
   const [filePreview, setFilePreview] = useState<{ path: string; content: string } | null>(null)
   const [request, setRequest] = useState('')
+  const [autonomyTick, setAutonomyTick] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [drawer, setDrawer] = useState<'hidden' | 'terminal' | 'diff' | 'tests' | 'logs' | 'processes'>('hidden')
@@ -886,7 +888,20 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
     void reload()
   }
 
+  /** "Foundry, <what you want>": plain language goes to the autonomous controller, which owns the whole mission (no form, no files, no criteria). */
+  const sendAutonomyCommand = async (text: string) => {
+    setBusy('start'); setError(null)
+    try {
+      const r = await fetch('/api/foundry/autonomy', { method: 'POST', headers: { 'content-type': 'application/json', 'x-wr-agent-ops': '1' }, body: JSON.stringify({ action: 'command', text }) })
+      const j = (await r.json()) as { error?: string; commandId?: string }
+      if (!r.ok) setError(j.error ?? 'Foundry did not take the command')
+      else { setRequest(''); setAutonomyTick(n => n + 1) }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Foundry did not take the command') }
+    setBusy(null)
+  }
+
   const send = async () => {
+    if (/^\s*(?:hey\s+)?foundry\s*[,:;-]\s*\S/i.test(request)) { await sendAutonomyCommand(request.trim()); return }
     if (!request.trim()) {
       setStartStatus(startFailed('EMPTY_REQUEST', new Date().toISOString()))
       return setError('Describe what Foundry should build or fix.')
@@ -2016,6 +2031,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
           ) : null}
           <FoundryWorkbenchAiPanel enabled={workbenchW0} onFocusPrompt={() => promptRef.current?.focus()} />
           <FoundryWorkbenchExtensionsPanel enabled={workbenchW0} />
+          <FoundryCommandStrip refreshKey={autonomyTick} />
           <FoundryComposer
             request={request}
             onRequestChange={setRequest}

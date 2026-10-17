@@ -39,6 +39,8 @@ export type CouncilMissionFoundrySnapshot = {
 export type CouncilMissionProposal = {
   proposalId: string
   conversationId: string
+  /** set when the mission was started by a plain-language command through Foundry's autonomous controller (no proposal/approval step) */
+  commandId?: string
   createdAt: string
   title: string
   request: string

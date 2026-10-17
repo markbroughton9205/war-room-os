@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { FoundryMissionView, FoundryPort } from './foundryPort'
+import type { FoundryCommandView, FoundryMissionView, FoundryPort } from './foundryPort'
 import {
   TERMINAL_COUNCIL_MISSION_STATUSES,
   type CouncilMissionFoundrySnapshot,
@@ -137,6 +137,20 @@ export function statusFromFoundry(view: FoundryMissionView): { status: CouncilMi
   return { status: 'RUNNING', reason: `Foundry mission state ${s}: ${view.stateReason}` }
 }
 
+/** Command state -> Council status. COMPLETED needs the controller's own delivery ladder (independent verification passed) AND Foundry's receipt-backed mission record. */
+export function statusFromCommand(c: FoundryCommandView): { status: CouncilMissionStatus; reason: string } {
+  if (c.state === 'DELIVERED') {
+    const missionOk = c.mission ? statusFromFoundry(c.mission).status === 'COMPLETED' : false
+    return c.ladder.verificationPassed && missionOk
+      ? { status: 'COMPLETED', reason: `Foundry delivered it: ${c.stateReason}` }
+      : { status: 'FAILED', reason: `Foundry reported DELIVERED but its own records do not support it (verification ${c.ladder.verificationPassed ? 'passed' : 'not passed'}, mission ${c.mission?.state ?? 'missing'}).` }
+  }
+  if (c.state === 'BLOCKED' || c.state === 'FAILED') return { status: 'FAILED', reason: `Foundry stopped: ${c.stateReason}` }
+  if (c.state === 'CANCELLED') return { status: 'CANCELLED', reason: `Foundry command cancelled: ${c.stateReason}` }
+  if (c.state === 'STOPPED') return { status: 'INTERRUPTED', reason: `Emergency Stop: ${c.stateReason}` }
+  return { status: 'RUNNING', reason: `Foundry ${c.state.toLowerCase().replace(/_/g, ' ')}: ${c.stateReason}` }
+}
+
 export type CouncilMissionService = ReturnType<typeof createCouncilMissionService>
 
 /** Proposals whose approval is mid-start (process-wide: the service is rebuilt per request). One approval starts at most one Foundry mission. */
@@ -172,6 +186,30 @@ export function createCouncilMissionService(deps: { storage: CouncilMissionStora
         content: `Mission proposal drafted: "${proposal.title}". Nothing has been started. It needs your approval before Foundry runs it.`,
         metadata: { councilMission: { proposalId: proposal.proposalId, status: proposal.status } },
       })
+      return proposal
+    },
+
+    /**
+     * "Council, build this": the Commander's own words are the authorization, so there is no proposal/approval step. The request goes to Foundry's autonomous controller (the same one
+     * the Foundry page uses); Council keeps the originating conversation, the command and the mission id, and mirrors Foundry's records. It executes nothing itself.
+     */
+    async command(input: { conversationId: string; ownerId: string; text: string }, actor: string): Promise<CouncilMissionProposal> {
+      if (!foundry.submitCommand) throw new CouncilMissionError('UNAVAILABLE', 'Foundry\'s autonomous controller is not available in this build.')
+      const avail = foundry.availability()
+      if (!avail.ok) throw new CouncilMissionError('UNAVAILABLE', `Foundry is not available: ${avail.reason}`)
+      const started = await foundry.submitCommand(input.text, { conversationId: input.conversationId, ownerId: input.ownerId }, actor).catch((e: unknown) => { throw new CouncilMissionError(e instanceof Error && /Full Autonomy is off|Emergency Stop/.test(e.message) ? 'UNAVAILABLE' : 'INVALID', e instanceof Error ? e.message : 'Foundry refused the command') })
+      const view = foundry.getCommand?.(started.commandId) ?? null
+      const at = nowIso()
+      const proposal: CouncilMissionProposal = {
+        proposalId: `cm_${randomUUID().replace(/-/g, '').slice(0, 20)}`, conversationId: input.conversationId, commandId: started.commandId, createdAt: at,
+        title: (view?.title ?? input.text).slice(0, 120), request: input.text.slice(0, 4000), acceptance: [], targets: [], scope: { paths: [], write: [] }, install: false,
+        discussion: { messageIds: [], contributors: [], excerpt: '' },
+        status: 'RUNNING', statusReason: `Foundry accepted command ${started.commandId}${started.missionId ? ` as mission ${started.missionId}` : ''}: ${started.reason}`,
+        approval: { at, by: actor }, rejection: null,
+        foundry: started.missionId ? { missionId: started.missionId, state: started.state, stateReason: started.reason, stateAt: at, progress: null, result: null, receipt: null, syncedAt: at } : null,
+        resultReturned: null,
+      }
+      storage.write([...all(), proposal])
       return proposal
     },
 
@@ -222,6 +260,7 @@ export function createCouncilMissionService(deps: { storage: CouncilMissionStora
     cancel(proposalId: string, actor: string, reason = 'Commander cancelled'): CouncilMissionProposal {
       const { rows, idx, proposal } = find(proposalId)
       if (!proposal.foundry || TERMINAL_COUNCIL_MISSION_STATUSES.includes(proposal.status)) throw new CouncilMissionError('ILLEGAL', `Cannot cancel a mission that is ${proposal.status}.`)
+      if (proposal.commandId && foundry.cancelCommand) { void foundry.cancelCommand(proposal.commandId, actor, reason).catch(() => undefined); return save(rows, idx, { ...proposal, statusReason: 'Cancellation requested from Foundry; waiting for Foundry to confirm.' }) }
       foundry.cancel(proposal.foundry.missionId, actor, reason)
       return save(rows, idx, { ...proposal, statusReason: 'Cancellation requested from Foundry; waiting for Foundry to confirm.' })
     },
@@ -234,6 +273,18 @@ export function createCouncilMissionService(deps: { storage: CouncilMissionStora
       let rows = all()
       let changed = false
       rows = rows.map(p => {
+        if (p.commandId && foundry.getCommand) {
+          if (TERMINAL_COUNCIL_MISSION_STATUSES.includes(p.status) && p.resultReturned) return p
+          const cv = foundry.getCommand(p.commandId)
+          if (!cv) { if (p.status !== 'RUNNING') return p; changed = true; return { ...p, status: 'FAILED' as const, statusReason: `Foundry has no record of command ${p.commandId}.` } }
+          const derived = statusFromCommand(cv)
+          const snap: CouncilMissionFoundrySnapshot = cv.mission ? snapshotOf(cv.mission) : (p.foundry ?? { missionId: cv.missionId ?? '', state: cv.state, stateReason: cv.stateReason, stateAt: cv.stateAt, progress: null, result: null, receipt: null, syncedAt: nowIso() })
+          // progress and the final answer are written into the conversation by Foundry's controller itself (so they arrive even with this panel closed); Council only records that it happened
+          const terminal = TERMINAL_COUNCIL_MISSION_STATUSES.includes(derived.status)
+          const upd = { ...p, status: derived.status, statusReason: derived.reason, foundry: snap, ...(terminal ? { resultReturned: { at: nowIso(), messageId: null } } : {}) }
+          if (JSON.stringify({ ...upd, foundry: { ...upd.foundry, syncedAt: '' } }) !== JSON.stringify({ ...p, foundry: p.foundry ? { ...p.foundry, syncedAt: '' } : p.foundry })) changed = true
+          return upd
+        }
         if (!p.foundry || TERMINAL_COUNCIL_MISSION_STATUSES.includes(p.status) && p.resultReturned) return p
         const view = foundry.get(p.foundry.missionId)
         if (!view) {

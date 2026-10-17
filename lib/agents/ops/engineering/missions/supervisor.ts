@@ -11,7 +11,11 @@ export function startMissionSupervisor(opts: { dir?: string; intervalMs?: number
   let log: AgentOpsLog
   try { log = new AgentOpsLog(opts.dir) } catch { return null }
   const store = new MissionStore(log)
-  const run = () => { try { reconcileMissions(log, store, undefined, 'system:supervisor') } catch { /* never throws into the server */ } }
+  const run = () => {
+    try { reconcileMissions(log, store, undefined, 'system:supervisor') } catch { /* never throws into the server */ }
+    // the autonomous controller continues commands that were in flight (recovery after a restart, retries, the next step); it never throws into the server either
+    void import('../autonomy/service').then((m) => m.autonomyController().advance()).catch(() => undefined)
+  }
   const first = setTimeout(run, 1000); first.unref?.()
   const t = setInterval(run, Math.min(Math.max(opts.intervalMs ?? 10_000, 1000), 120_000)); t.unref?.()
   const h = { stop: () => { clearTimeout(first); clearInterval(t); delete g[KEY] } }

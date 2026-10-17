@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { trackChild } from '../runtime/activity'
 import { existsSync, readdirSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -34,10 +35,11 @@ export function runTool(argv: string[], cwd: string, opts: { timeoutMs?: number;
         return resolve({ argv, cwd, exitCode: null, timedOut: false, stdout: '', stderr: msg, durationMs: 0 })
       }
     }
-    execFile(exec[0], exec.slice(1), { cwd, env: toolEnv(opts.env), timeout: opts.timeoutMs ?? 300_000, maxBuffer: 16 * 1024 * 1024, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+    const child = execFile(exec[0], exec.slice(1), { cwd, env: toolEnv(opts.env), timeout: opts.timeoutMs ?? 300_000, maxBuffer: 16 * 1024 * 1024, killSignal: 'SIGKILL', ...({ detached: true } as object) }, (err, stdout, stderr) => {
       const e = err as (NodeJS.ErrnoException & { killed?: boolean; code?: number | string }) | null
       const clip = (t: string) => redactText(String(t ?? '')).slice(-12_000)
       resolve({ argv, cwd, exitCode: e ? (typeof e.code === 'number' ? e.code : null) : 0, timedOut: !!e?.killed, stdout: clip(stdout), stderr: clip(stderr), durationMs: Date.now() - t0 })
     })
+    trackChild(child, argv.slice(0, 3).join(' ').slice(0, 80))
   })
 }

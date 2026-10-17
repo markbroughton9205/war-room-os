@@ -11,6 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "validate:native-builder": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-native-builder-validation.mjs && node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-native-builder-extended-validation.mjs",
+    "validate:foundry-autonomy": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types lib/agents/ops/engineering/autonomy/autonomy.validation.ts",
     "validate:council-local-backend": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-local-backend-foundation-validation.mjs",
     "validate:council-backend-status-ui": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-backend-status-ui-validation.mjs",
     "validate:council-live-routing": "node --loader ./scripts/ts-extension-loader.mjs --experimental-transform-types scripts/run-council-live-routing-validation.mjs",

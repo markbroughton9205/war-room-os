@@ -1,4 +1,5 @@
 import type { ModelClient, ModelResult } from './ports'
+import { trackAbort } from './activity'
 
 /** Loopback-only Ollama client. Never contacts a non-loopback host; reports ACTUAL executor and real token counts (UNKNOWN when absent). */
 export function loopbackBaseUrl(raw: string | undefined = process.env.WAR_ROOM_OLLAMA_URL): string {
@@ -30,6 +31,7 @@ export class OllamaModelClient implements ModelClient {
     let looped = false
     const timer = setTimeout(() => ctrl.abort(), input.timeoutMs ?? 240_000)
     input.signal?.addEventListener('abort', () => ctrl.abort(), { once: true })
+    const untrack = trackAbort(ctrl)
     try {
       const res = await fetch(`${this.baseUrl}/api/generate`, {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: ctrl.signal,
@@ -63,6 +65,6 @@ export class OllamaModelClient implements ModelClient {
     } catch (err) {
       if (looped) return { ok: false, detail: 'degenerate repetition (runaway generation)', executor }
       return { ok: false, detail: err instanceof Error ? (err.name === 'AbortError' ? 'timeout or cancelled' : err.message.slice(0, 160)) : 'failed', executor }
-    } finally { clearTimeout(timer) }
+    } finally { clearTimeout(timer); untrack() }
   }
 }

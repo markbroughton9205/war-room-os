@@ -30,7 +30,26 @@ export type FoundryStartBody = {
   install: boolean
 }
 
+/** A plain-language engineering command as Foundry's autonomous controller sees it (Council only mirrors it). */
+export type FoundryCommandView = {
+  id: string
+  state: string
+  stateReason: string
+  stateAt: string
+  title: string
+  missionId: string | null
+  stepIndex: number
+  stepCount: number
+  ladder: { codeGenerated: boolean; testsPassed: boolean; verificationPassed: boolean; buildCreated: boolean; installed: boolean; running: boolean; uiProof: string; promoted: boolean }
+  installPath: string | null
+  mission: FoundryMissionView | null
+}
+
 export type FoundryPort = {
+  /** the autonomous controller: one sentence in, a tracked mission out. Council never executes anything itself. */
+  submitCommand?(text: string, origin: { conversationId: string; ownerId: string }, actor: string): Promise<{ commandId: string; missionId: string | null; state: string; reason: string }>
+  getCommand?(commandId: string): FoundryCommandView | null
+  cancelCommand?(commandId: string, actor: string, reason: string): Promise<void>
   /** truthful availability (is a repository configured, is the engine reachable) */
   availability(): { ok: true } | { ok: false; reason: string }
   start(body: FoundryStartBody, actor: string): Promise<{ missionId: string; state: string }>

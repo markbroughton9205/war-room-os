@@ -2,6 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { copyTreeNoLinks } from './safeFs'
 import { wrapSandboxed, SandboxUnavailable } from './sandbox'
+import { trackChild } from './activity'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -41,12 +42,13 @@ export function runCommand(root: string, argv: string[], tools: EngineeringTool[
     return Promise.resolve({ argv, cwd: root, exitCode: null, timedOut: false, stdout: '', stderr: msg, durationMs: 0, startedAt: started.toISOString(), outputHash: sha(msg), refused: msg })
   }
   return new Promise((resolve) => {
-    execFile(exec[0], exec.slice(1), { cwd: root, env: scrubbedEnv(opts.env), timeout: opts.timeoutMs ?? 60_000, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
+    const child = execFile(exec[0], exec.slice(1), { cwd: root, env: scrubbedEnv(opts.env), timeout: opts.timeoutMs ?? 60_000, maxBuffer: 4 * 1024 * 1024, killSignal: 'SIGKILL' }, (err, stdout, stderr) => {
       const clip = (t: string) => redactText(String(t ?? '')).slice(-MAX_OUTPUT)
       const out = clip(stdout); const er = clip(stderr)
       const e = err as (NodeJS.ErrnoException & { killed?: boolean; code?: number | string }) | null
       resolve({ argv, cwd: root, exitCode: e ? (typeof e.code === 'number' ? e.code : null) : 0, timedOut: !!e?.killed, stdout: out, stderr: er, durationMs: Date.now() - t0, startedAt: started.toISOString(), outputHash: sha(out + '\n' + er) })
     })
+    trackChild(child, argv.slice(0, 3).join(' ').slice(0, 80))
   })
 }
 
@@ -58,6 +60,7 @@ export async function startWorkspaceServer(root: string, script: string, tools: 
   const port = 20000 + Math.floor(Math.random() * 20000)
   const wrapped = wrapSandboxed(['node', script], { rw: [root], net: true }).argv
   const child = spawn(wrapped[0], wrapped.slice(1), { cwd: root, env: scrubbedEnv({ PORT: String(port), HOST: '127.0.0.1', ...env }), stdio: ['ignore', 'pipe', 'pipe'] })
+  trackChild(child, `workspace server ${script}`)
   let buf = ''
   child.stdout.on('data', (d) => { buf += String(d) }); child.stderr.on('data', (d) => { buf += String(d) })
   const baseUrl = `http://127.0.0.1:${port}`
