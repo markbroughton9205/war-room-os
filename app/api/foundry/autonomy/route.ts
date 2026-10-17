@@ -55,6 +55,7 @@ export async function POST(req: Request) {
       case 'estop': return NextResponse.json({ emergencyStop: c.emergencyStop(actor, typeof body.reason === 'string' && body.reason.trim() ? body.reason.slice(0, 200) : 'Emergency Stop pressed by the Commander') })
       case 'clear-stop': return NextResponse.json({ cleared: c.clearStop(actor) })
       case 'restart': return NextResponse.json({ command: await c.restartStopped(String(body.commandId ?? ''), actor) }, { status: 202 })
+      case 'reopen': return NextResponse.json({ command: await c.reopen(String(body.commandId ?? ''), actor) }, { status: 202 })
       case 'settings': {
         const p = (body.settings ?? {}) as Record<string, unknown>
         const bool = (v: unknown) => (typeof v === 'boolean' ? v : undefined)
@@ -67,7 +68,7 @@ export async function POST(req: Request) {
         if (path.dirname(backup) !== launcherDir || !path.basename(backup).startsWith(path.basename(defaultLauncher()) + '.rollback-') || /[^\w./-]/.test(backup)) return NextResponse.json({ error: 'invalid backup path: it must be a rollback copy beside the launcher' }, { status: 400 })
         return NextResponse.json(rollbackPromotion(backup))
       }
-      default: return NextResponse.json({ error: 'unknown action', actions: ['command', 'pause', 'resume', 'cancel', 'estop', 'clear-stop', 'restart', 'settings', 'rollback-promotion'] }, { status: 400 })
+      default: return NextResponse.json({ error: 'unknown action', actions: ['command', 'pause', 'resume', 'cancel', 'estop', 'clear-stop', 'restart', 'reopen', 'settings', 'rollback-promotion'] }, { status: 400 })
     }
   } catch (e) {
     if (e instanceof ControllerError) return NextResponse.json({ error: e.message, code: e.code }, { status: e.code === 'NOT_FOUND' ? 404 : e.code === 'AUTONOMY_OFF' || e.code === 'STOPPED' ? 409 : e.code === 'ILLEGAL' || e.code === 'BUSY' ? 409 : 400 })

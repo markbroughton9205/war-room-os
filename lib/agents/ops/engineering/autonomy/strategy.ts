@@ -29,7 +29,7 @@ export function diagnose(m: MissionFacts): Diagnosis {
   }
   if (m.verifierLines?.length) return make('VERIFIER', 'the independent verifier rejected the final workspace', m.verifierLines.join('\n'))
   const r = m.receipt
-  if (r?.install.state === 'FAILED') return make('INSTALL', `the installation build failed: ${r.install.detail ?? 'no detail'}`.slice(0, 300), r.install.detail ?? reason, false)
+  if (r?.install.state === 'FAILED') return make('INSTALL', `the installation build failed: ${r.install.detail ?? 'no detail'}`.slice(0, 300), r.install.detail ?? reason, /Export encountered|prerender|Type error|ReferenceError|is not defined|Module not found|Failed to compile/i.test(r.install.detail ?? '') && r.integration.state === 'APPLIED')
   if (r?.integration.state === 'REFUSED') return make('INTEGRATION', `integration was refused: ${r.integration.refused.join('; ')}`.slice(0, 300), r.integration.refused.join('\n'))
   if (r?.integration.state === 'GATES_FAILED') {
     const g = r.integration.gates.filter((x) => x.exitCode !== 0)

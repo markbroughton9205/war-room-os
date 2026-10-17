@@ -9,6 +9,13 @@ import { resolveBin, runTool, type ToolRun } from './toolchain'
  * runtime from the clean tree, stamp it, and leave every earlier install and the canonical launcher untouched. Any failure aborts the merge it made.
  * The packaged output is MOVED (not copied) into the install directory so a root-owned sandbox helper applied during packaging keeps its ownership.
  */
+/** What went wrong in a build, for a reader (and for the next repair attempt): the lines that name the error first, then the tail. Redacted by runTool already. */
+export const buildFailureDetail = (r: { stdout: string; stderr: string }): string => {
+  const all = `${r.stderr}\n${r.stdout}`.trim()
+  const hits = all.split('\n').map((l) => l.trim()).filter((l) => /(^|\W)(\w*Error\b|error TS\d+|Export encountered|is not defined|Cannot find|Module not found|Failed to compile|Unhandled)/.test(l)).slice(0, 10).map((l) => l.slice(0, 220))
+  return `${hits.join(' | ')}${hits.length ? ' … ' : ''}${all.slice(-500)}`.slice(0, 1600)
+}
+
 export async function installRuntime(m: MissionRecord, integ: ChangeReceipt['integration'], on: (s: string) => void, repo: string | null, opts: { optRoot?: string; version?: string } = {}): Promise<ChangeReceipt['install']> {
   if (!repo) return { state: 'FAILED', detail: 'no engineering repository is configured' }
   if (integ.state !== 'APPLIED' || !integ.commit || !integ.branch) return { state: 'FAILED', detail: 'there is no integrated commit to install' }
@@ -42,7 +49,7 @@ export async function installRuntime(m: MissionRecord, integ: ChangeReceipt['int
   const dest = path.join(optRoot, installId)
   if (existsSync(dest)) return rollback(`install directory already exists and is never overwritten: ${dest}`)
   const b1 = await run('next build', [pnpm, 'run', 'build'], repo, 30 * 60_000)
-  if (b1.exitCode !== 0) return rollback(`next build failed: ${(b1.stderr || b1.stdout).trim().slice(-300)}`)
+  if (b1.exitCode !== 0) return rollback(`next build failed: ${buildFailureDetail(b1)}`)
   const b2 = await run('prepare the desktop runtime', [node, 'scripts/prepare-desktop-runtime.mjs'], repo, 15 * 60_000)
   if (b2.exitCode !== 0) return rollback(`prepare-desktop-runtime failed: ${(b2.stderr || b2.stdout).trim().slice(-300)}`)
   const b3 = await run('package the desktop app', [path.join(path.dirname(node), 'npx'), 'electron-builder', '--linux', 'dir', '--x64'], path.join(repo, 'desktop'), 30 * 60_000)

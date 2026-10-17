@@ -168,6 +168,7 @@ export function CommandCard({ c, detail, open, onToggle, busy, post, compact }: 
       <div className="mt-1">
         <button type="button" className="mr-3 text-xs underline text-sky-300" onClick={onToggle}>{open ? 'Hide details' : 'Details'}</button>
         {c.controls.includes('cancel') && <button data-testid="command-cancel" type="button" disabled={busy} className="mr-3 text-xs underline text-red-300" onClick={() => void post({ action: 'cancel', commandId: c.id, reason: 'Commander cancelled from the Autonomy Control Center' }, 'Cancel')}>Cancel</button>}
+        {(c.state === 'BLOCKED' || c.state === 'FAILED') && <button data-testid="command-reopen" type="button" disabled={busy} className="mr-3 text-xs underline text-sky-300" title="Continue from the last checkpoint: verified work is kept, the failure is diagnosed again" onClick={() => void post({ action: 'reopen', commandId: c.id }, 'Continue')}>Continue from checkpoint</button>}
         {c.state === 'STOPPED' && <button data-testid="command-restart" type="button" disabled={busy} className="mr-3 text-xs underline text-sky-300" onClick={() => void post({ action: 'restart', commandId: c.id }, 'Restart')}>Restart from checkpoint</button>}
       </div>
       {open && (

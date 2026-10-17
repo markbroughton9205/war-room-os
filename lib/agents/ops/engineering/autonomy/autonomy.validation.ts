@@ -42,9 +42,11 @@ const C = 'commander:mark'
 const sh = (cwd: string, ...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd, encoding: 'utf8' }).trim()
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const { check, finish } = harness('FOUNDRY_AUTONOMY_VALIDATION')
+/** AUTONOMY_ONLY=O,K runs just those sections (diagnosis aid); unset runs everything */
+const only = (s: string) => !process.env.AUTONOMY_ONLY || process.env.AUTONOMY_ONLY.split(',').includes(s)
 
 // ============================================================ A. authority, settings, Emergency Stop file
-{
+if (only('A')) {
   const adir = path.join(tmp(), 'autonomy')
   check('A01_defaults_are_conservative_full_autonomy_off_deployment_off', (() => { const c = readConfig(adir); return c.fullAutonomy === false && c.deploymentAuthority === false && c.paused === false })())
   updateConfig(adir, { fullAutonomy: true, maxStrategyAttempts: 99 }, C)
@@ -56,7 +58,7 @@ const { check, finish } = harness('FOUNDRY_AUTONOMY_VALIDATION')
 
 // ============================================================ B. interpretation: sentence in, plan out (run against THIS repository)
 const SPACESHIP = 'Foundry, change my mouse pointer inside War Room to a small futuristic spaceship. Make it glow and emit an energy pulse when I click. Keep normal clicking, dragging and text selection working, and let me switch back to the standard cursor.'
-{
+if (only('B')) {
   check('B01_the_address_is_stripped', stripAddress('Foundry, add a thing') === 'add a thing' && stripAddress('Hey Council: build x now') === 'build x now' && stripAddress('please add y') === 'add y')
   check('B02_the_spaceship_sentence_is_classified_as_a_global_ui_change', classify(stripAddress(SPACESHIP)) === 'ui-global')
   check('B03_other_requests_classify_sensibly', classify('fix the crash when I open the Terra page') === 'bugfix' && classify('add a CSV export button to the income list') === 'ui-component' && classify('compute a rolling median in the stats helper') === 'logic')
@@ -91,7 +93,7 @@ const SPACESHIP = 'Foundry, change my mouse pointer inside War Room to a small f
 }
 
 // ============================================================ C. the cursor recipe's hidden verifier: satisfiable by a correct build, strict about defects
-{
+if (only('C')) {
   const names = cursorNames(SPACESHIP)
   const { verifyScript } = cursorRecipe(names, SPACESHIP)
   const seedRoot = tmp()
@@ -123,7 +125,7 @@ const SPACESHIP = 'Foundry, change my mouse pointer inside War Room to a small f
 }
 
 // ============================================================ D. the UI proof: real Chrome, real mouse events, a real server
-{
+if (only('D')) {
   const chrome = existsSync('/usr/bin/google-chrome') || existsSync('/usr/bin/chromium')
   check('D00_a_real_browser_is_available_for_the_proof', chrome)
   if (chrome) {
@@ -150,7 +152,7 @@ const SPACESHIP = 'Foundry, change my mouse pointer inside War Room to a small f
 }
 
 // ============================================================ E. strategy: diagnosis, the ladder, never the same approach twice
-{
+if (only('E')) {
   const gate = diagnose({ state: 'FAILED', stateReason: 'integration gates failed: typecheck (tsc --noEmit)', result: { status: 'COMPLETED', reason: 'all steps validated' }, receipt: { verifier: { exitCode: 0, summary: '' }, integration: { state: 'GATES_FAILED', gates: [{ name: 'typecheck (tsc --noEmit)', exitCode: 2, summary: 'x', detail: "components/a.tsx(12,3): error TS2304: Cannot find name 'foo'.\ncomponents/a.tsx(30,1): error TS1005: ';' expected." }], refused: [] }, install: { state: 'NOT_RUN' } }, events: [] })
   check('E01_a_failed_repository_gate_is_diagnosed_with_the_compiler_errors', gate.cls === 'GATE' && /TS2304/.test(gate.detail) && gate.retriable)
   const infra = diagnose({ state: 'FAILED', stateReason: 'BLOCKED: model unavailable: fetch failed ECONNREFUSED', result: { status: 'BLOCKED', reason: 'fetch failed' }, receipt: null, events: [] })
@@ -158,7 +160,8 @@ const SPACESHIP = 'Foundry, change my mouse pointer inside War Room to a small f
   const ver = diagnose({ state: 'FAILED', stateReason: 'the independent verifier failed on the final workspace', result: { status: 'COMPLETED', reason: 'x' }, receipt: { verifier: { exitCode: 1, summary: '# fail 1 | not ok - addPulse keeps only the newest MAX_PULSES' }, integration: { state: 'NOT_RUN', gates: [], refused: [] }, install: { state: 'NOT_REQUESTED' } }, events: [] })
   check('E03_a_rejected_verifier_run_quotes_the_failing_contract_lines', ver.cls === 'VERIFIER' && /MAX_PULSES/.test(ver.detail))
   const inst = diagnose({ state: 'FAILED', stateReason: 'install failed: next build failed', result: { status: 'COMPLETED', reason: 'x' }, receipt: { verifier: { exitCode: 0, summary: '' }, integration: { state: 'APPLIED', gates: [], refused: [] }, install: { state: 'FAILED', detail: 'next build failed: Type error' } }, events: [] })
-  check('E04_an_install_failure_is_not_retried_by_rewriting_code', inst.cls === 'INSTALL' && inst.retriable === false)
+  check('E04_an_install_failure_without_a_code_cause_is_not_retried_by_rewriting_code', inst.cls === 'INSTALL' && inst.retriable === false)
+  check('E04b_a_prerender_failure_in_the_build_is_a_code_cause_and_is_repairable', diagnose({ state: 'FAILED', stateReason: 'install failed', result: { status: 'COMPLETED', reason: 'x' }, receipt: { verifier: { exitCode: 0, summary: '' }, integration: { state: 'APPLIED', gates: [], refused: [] }, install: { state: 'FAILED', detail: 'Export encountered an error on /commander/proposals/page: window is not defined' } }, events: [] }).retriable === true)
   const same = diagnose({ state: 'FAILED', stateReason: 'x', result: { status: 'FAILED', reason: 'y' }, receipt: null, events: [] })
   check('E05_equal_failures_have_equal_fingerprints_and_different_ones_do_not', gate.fingerprint === diagnose({ state: 'FAILED', stateReason: 'integration gates failed: typecheck (tsc --noEmit)', result: { status: 'COMPLETED', reason: 'all steps validated' }, receipt: { verifier: { exitCode: 0, summary: '' }, integration: { state: 'GATES_FAILED', gates: [{ name: 'typecheck (tsc --noEmit)', exitCode: 2, summary: 'x', detail: "components/a.tsx(99,3): error TS2304: Cannot find name 'foo'.\ncomponents/a.tsx(30,1): error TS1005: ';' expected." }], refused: [] }, install: { state: 'NOT_RUN' } }, events: [] }).fingerprint && gate.fingerprint !== same.fingerprint)
   const sub: Subtask = { n: 1, title: 't', request: 'r', acceptance: ['a lib/x.mjs works'], targets: [{ path: 'lib/x.mjs', action: 'create' }, { path: 'test/x.test.mjs', action: 'create' }, { path: 'components/X.tsx', action: 'create' }], scope: { paths: [], write: ['lib/x.mjs', 'test/x.test.mjs', 'components/X.tsx'] }, hints: [], reverseFirst: false }
@@ -174,7 +177,7 @@ const SPACESHIP = 'Foundry, change my mouse pointer inside War Room to a small f
 }
 
 // ============================================================ F. resources
-{
+if (only('F')) {
   const rd = (gpuFreeMiB: number | null, ram: number | null, resident: { name: string; vramMiB: number }[] = []) => ({ gpuFreeMiB, gpuTotalMiB: 16000, ramAvailableMiB: ram, residentModels: resident })
   check('F01_enough_memory_starts_the_mission', judgeResources(rd(12000, 14000), 'b').ok)
   check('F02_short_gpu_memory_waits_with_the_numbers', (() => { const v = judgeResources(rd(3000, 14000), 'b'); return !v.ok && /GPU memory is short: 3000/.test(v.reason) })())
@@ -216,7 +219,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
   for (;;) { await c.advance(); const r = c.commands.read(id)!; if (until(r.state)) return r; if (Date.now() - t0 > ms) return r; await sleep(300) }
 }
 
-{
+if (only('G')) {
   const w = world()
   const c = w.mk()
   let off = ''; try { await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C) } catch (e) { off = e instanceof ControllerError ? e.code : 'other' }
@@ -241,7 +244,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
 }
 
 // ============================================================ H. automatic repair: a failure is diagnosed, the approach CHANGES, and a repeated failure ends honestly
-{
+if (only('H')) {
   const w = world((c) => (/PREVIOUS ATTEMPT/.test(c.prompt) ? goodReply(c) : c.kind === 'file' ? '```js\nexport const broken = ;\n```' : null))
   const c = w.mk(); c.setSettings({ fullAutonomy: true }, C)
   const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
@@ -251,7 +254,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
   check('H02_the_diagnosis_is_recorded_and_quoted_to_the_builder', (done.diagnoses['1']?.length ?? 0) === 1 && done.timeline.some((t) => t.kind === 'DIAGNOSIS') && done.timeline.some((t) => t.kind === 'STRATEGY') && w.calls.some((x) => /PREVIOUS ATTEMPT/.test(x.prompt)))
   check('H03_two_different_missions_with_two_ids_and_the_first_one_stays_FAILED_as_evidence', step.missions[0].id !== step.missions[1].id && w.store.read(step.missions[0].id)!.state === 'FAILED' && w.store.read(step.missions[1].id)!.state === 'COMPLETED')
 }
-{
+if (only('H')) {
   const w = world((c) => (c.kind === 'file' ? '```js\nexport const broken = ;\n```' : null))
   const c = w.mk(); c.setSettings({ fullAutonomy: true, maxStrategyAttempts: 3 }, C)
   const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
@@ -265,7 +268,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
 }
 
 // ============================================================ I. recovery: the worker dies mid-mission, the mission survives and continues from its checkpoint
-{
+if (only('I')) {
   const w = world(goodReply, {}, { crashAfterSteps: 1 })
   const c = w.mk(); c.setSettings({ fullAutonomy: true }, C)
   const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
@@ -282,7 +285,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
   check('I03_recovery_is_in_the_timeline_with_the_cause', done.timeline.some((t) => t.kind === 'RECOVERED' && /vanished|not running|no runner|worker/i.test(t.detail)) || done.timeline.some((t) => t.kind === 'RUNNING' && /recovered/.test(t.detail)))
   check('I04_recovery_does_not_redo_completed_work_or_apply_twice', (() => { const ints = w.runner.integrationRoot; return existsSync(ints) && sh(w.repo, 'rev-list', '--count', `${m.workspace.baseCommit}..foundry/${m.id}`) === '1' })())
 }
-{
+if (only('I')) {
   // automatic recovery is bounded: a mission that keeps dying is eventually reported, not resumed forever
   const w = world(goodReply, {}, { crashAfterSteps: 1 })
   const c = w.mk(); c.setSettings({ fullAutonomy: true, maxAutoResumes: 1, maxStrategyAttempts: 1 }, C)
@@ -292,7 +295,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
 }
 
 // ============================================================ J. pause and resume
-{
+if (only('J')) {
   let slow = true
   const w = world(async (c) => { if (slow) await sleep(1200); return goodReply(c) })
   const c = w.mk(); c.setSettings({ fullAutonomy: true }, C)
@@ -318,7 +321,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
 }
 
 // ============================================================ K. Emergency Stop: it stops execution, it is not a label
-{
+if (only('K')) {
   let hang = true
   const w = world((c) => (hang ? new Promise<string | null>(() => { /* a model call that never answers */ }) : goodReply(c)))
   const c = w.mk(); c.setSettings({ fullAutonomy: true }, C)
@@ -354,7 +357,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
 }
 
 // ============================================================ L. resource governance
-{
+if (only('L')) {
   let ok = false
   const w = world(goodReply, { resources: async () => (ok ? { ok: true, reason: 'ok', reading: { gpuFreeMiB: 12000, gpuTotalMiB: 16000, ramAvailableMiB: 20000, residentModels: [] } } : { ok: false, reason: 'GPU memory is short: 2000 MiB free', reading: { gpuFreeMiB: 2000, gpuTotalMiB: 16000, ramAvailableMiB: 20000, residentModels: [] } }) })
   const c = w.mk(); c.setSettings({ fullAutonomy: true }, C)
@@ -366,7 +369,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
 }
 
 // ============================================================ M. concurrency: one builder, no corruption
-{
+if (only('M')) {
   const w = world(async (c) => { await sleep(300); return goodReply(c) })
   const c = w.mk(); c.setSettings({ fullAutonomy: true }, C)
   const c2 = w.mk()
@@ -381,7 +384,7 @@ async function settle(c: AutonomyController, id: string, until: (s: string) => b
 }
 
 // ============================================================ N. chained subtasks: each step is seeded from the previous step's integrated commit
-{
+if (only('N')) {
   const STORE_TEST = `import test from 'node:test'
 import assert from 'node:assert'
 import { mkdtempSync } from 'node:fs'
@@ -410,7 +413,7 @@ test('sessions round-trip through the data file', () => {
   const wsFiles = ms.length === 2 ? readFileSync(path.join(ms[1].workspace.root, 'src/messageStore.mjs'), 'utf8') : ''
   check('N05_step_two_really_saw_step_ones_work', /loadSessions/.test(wsFiles))
 }
-{
+if (only('N')) {
   const repo = makeRepo()
   sh(repo, 'checkout', '-q', '-b', 'side'); writeFileSync(path.join(repo, 'src', 'extra.mjs'), 'export const extra = 1\n'); sh(repo, 'add', '--', '.'); sh(repo, 'commit', '-q', '-m', 'side'); sh(repo, 'checkout', '-q', 'main')
   const ref = resolveRef(repo, 'side')
@@ -424,12 +427,12 @@ test('sessions round-trip through the data file', () => {
 }
 
 // ============================================================ O. install, real-input proof and repair: the ladder rungs are claimed one by one
-{
+if (only('O')) {
   const fakeInstall = path.join(tmp(), 'war-room-os-0.2.0-fake'); mkdirSync(fakeInstall, { recursive: true })
   const proofSpec = { kind: 'cursor-skin' as const, steps: [{ do: 'goto' as const, path: '/x' }, { do: 'click-xy' as const, x: 10, y: 10 }] }
   const planWithInstall: ControllerDeps['planner'] = async (text) => { const r = await chatPlan()!(text, { repo: '' }); return { ...r, interpretation: { ...r.interpretation, needsInstall: true, uiProof: proofSpec } } }
   /** a builder that really changes something when it is shown a failed real-input check (a repair that changes nothing is refused at integration, as it should be) */
-  const repairing: Script = (c) => { const r = goodReply(c); return r && /FAILED/.test(c.prompt) && /energy pulse|follows the pointer/.test(c.prompt) && c.path === 'src/chatService.mjs' ? r.replace(/\n```$/, `\n// repaired after real-input testing (call ${c.callNumber})\n\`\`\``) : r }
+  const repairing: Script = (c) => { const r = goodReply(c); return r && /FAILED/.test(c.prompt) && /energy pulse|follows the pointer|window is not defined/.test(c.prompt) && c.path === 'src/chatService.mjs' ? r.replace(/\n```$/, `\n// repaired after real-input testing (call ${c.callNumber})\n\`\`\``) : r }
   const installer: RunnerDeps['installer'] = async (_m, integ) => ({ state: 'INSTALLED', path: fakeInstall, stamp: path.join(fakeInstall, 'INSTALL_STAMP.json'), detail: `built from ${integ.commit?.slice(0, 8)}` })
   // 1. proof passes first time
   {
@@ -471,6 +474,17 @@ test('sessions round-trip through the data file', () => {
     const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 420_000)
     check('O06_a_build_that_keeps_failing_real_input_testing_is_BLOCKED_not_delivered', done.state === 'BLOCKED' && /UI proof failed/.test(done.stateReason) && !done.ladder.running, `${done.state}: ${done.stateReason.slice(0, 200)}`)
   }
+  // 4b. the production build breaks on the verified change (server-side render): the work is kept and repaired on top, then installed
+  {
+    let tries = 0
+    const w = world(repairing, { planner: planWithInstall, proveUi: async ({ outDir }) => ({ passed: true, steps: [{ label: 'ok', ok: true, detail: '' }], dir: outDir }) })
+    w.runner.installer = async (m, integ) => { tries++; return tries === 1 ? { state: 'FAILED', detail: 'next build failed: Export encountered an error on /commander/proposals/page: ReferenceError: window is not defined' } : { state: 'INSTALLED', path: fakeInstall, stamp: path.join(fakeInstall, 'INSTALL_STAMP.json'), detail: `built from ${integ.commit?.slice(0, 8)}` } }
+    const c = w.mk({ runner: w.runner }); c.setSettings({ fullAutonomy: true }, C)
+    const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
+    const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 420_000)
+    const rep = done.steps[1] ? w.store.read(done.steps[1].missions[0]?.id ?? '') : null
+    check('O09_a_production_build_failure_keeps_the_verified_work_and_repairs_it_with_the_build_log_then_installs', done.state === 'DELIVERED' && done.steps.length === 2 && /Repair after build failure/.test(done.steps[1].title) && done.steps[0].state === 'COMPLETED' && !!done.steps[0].integratedCommit && !!rep && /window is not defined/.test(rep.request) && /never touch window/.test(rep.request) && done.ladder.installed && tries === 2, `${done.state}: ${done.stateReason.slice(0, 200)}; steps ${done.steps.map((x) => x.title + ':' + x.state).join(' | ')}`)
+  }
   // 5. promotion only with authority AND a proven build
   {
     let promoted = 0
@@ -493,7 +507,7 @@ test('sessions round-trip through the data file', () => {
 }
 
 // ============================================================ P. Council -> Foundry: the same controller, the same conversation, no second execution logic
-{
+if (only('P')) {
   const rows: CouncilMissionProposal[] = []
   const posted: { family: string; content: string }[] = []
   const storage: CouncilMissionStorage = { read: () => rows.slice(), write: (n) => { rows.splice(0, rows.length, ...n) }, postMessage: (m) => { posted.push({ family: m.family, content: m.content }); return { id: 'm1' } } }
@@ -529,7 +543,7 @@ test('sessions round-trip through the data file', () => {
 }
 
 // ============================================================ Q. promotion is reversible, and refused when the new build could not start
-{
+if (only('Q')) {
   const home = tmp()
   const launcher = path.join(home, 'war-room-os-user')
   const oldExe = '/home/u/.local/opt/war-room-os-0.2.0-6964268d-council-stage3/opt/War-Room-OS/war-room-os'
@@ -558,7 +572,7 @@ test('sessions round-trip through the data file', () => {
 }
 
 // ============================================================ R. capabilities are probed, not assumed
-{
+if (only('R')) {
   const rows = await probeCapabilities({ repo: REPO_ROOT, config: { ...readConfig(path.join(tmp(), 'x')), deploymentAuthority: false } })
   const by = Object.fromEntries(rows.map((r) => [r.id, r]))
   const sudoWorks = spawnSync('sudo', ['-n', 'true'], { timeout: 4000 }).status === 0

@@ -47,6 +47,7 @@ const PROVING = Symbol.for('war-room.autonomy.proving')
 const g = globalThis as unknown as Record<symbol, Promise<void> | Set<string> | undefined>
 const proving = (): Set<string> => (g[PROVING] ??= new Set<string>()) as Set<string>
 
+const ADVANCE_STALL_MS = 5 * 60_000
 const MAX_RESOURCE_WAIT_MS = 15 * 60_000
 const MAX_INFRA_RETRIES = 3
 
@@ -108,10 +109,14 @@ export class AutonomyController {
   /** Advance every open command by at most one transition. Single-flight inside this process; every write is a locked read-modify-write, so another process cannot corrupt it. */
   advance(): Promise<void> {
     const prev = (g[MUTEX] as Promise<void> | undefined) ?? Promise.resolve()
-    const next = prev.catch(() => undefined).then(() => this.advanceOnce())
+    // a pass that never finishes must not freeze the controller forever: after 5 minutes later callers go ahead (every step is a guarded read-modify-write, so a late straggler is harmless) and the stall is recorded
+    const wait = Promise.race([prev.catch(() => undefined), new Promise<void>((r) => { const t = setTimeout(() => { this.noteStall(); r() }, ADVANCE_STALL_MS); t.unref?.() })])
+    const next = wait.then(() => this.advanceOnce())
     g[MUTEX] = next.catch(() => undefined)
     return next
   }
+
+  private noteStall() { for (const c of this.openCommands()) this.commands.note(c.id, 'CONTROLLER_STALL', 'a previous controller pass did not finish within 5 minutes; continuing') }
 
   private async advanceOnce(): Promise<void> {
     if (isEmergencyStopped(this.deps.adir)) { this.markStopped(); return }
@@ -310,23 +315,30 @@ export class AutonomyController {
 
   /** The delivered build misbehaves under real input: the failed checks go back to the builder as a chained repair step (bounded), never silently accepted. */
   private async repairAfterProof(id: string, res: UiProofResult) {
+    const failed = res.steps.filter((s) => !s.ok)
+    await this.queueRepair(id, 'UI proof', failed.map((f) => `- ${f.label}: ${f.detail}`).join('\n').slice(0, 1500), 'The delivered build was tested with real pointer input and these checks FAILED:', failed.map((f) => f.label).join('; '), true)
+  }
+
+  /** A repair is a new mission chained on the last integrated commit, shown the exact failure; bounded by the strategy budget. */
+  private async queueRepair(id: string, kind: 'UI proof' | 'build', evidence: string, lead: string, short: string, kick: boolean) {
     const cmd = this.commands.read(id)!
     const cfg = this.cfg()
-    const repairs = cmd.steps.filter((s) => s.title.startsWith('Repair after UI proof')).length
-    const failed = res.steps.filter((s) => !s.ok)
+    const repairs = cmd.steps.filter((s) => s.title.startsWith('Repair after')).length
     const last = cmd.steps[cmd.steps.length - 1]
     if (repairs >= Math.max(1, cfg.maxStrategyAttempts - 1) || !last.integratedCommit) {
-      this.setState(id, 'BLOCKED', `UI proof failed (${failed.map((f) => f.label).join('; ').slice(0, 240)}) and the repair budget is used up. The installed build is at ${cmd.evidence.install?.path}.`); return
+      this.setState(id, 'BLOCKED', `${kind === 'UI proof' ? 'UI proof failed' : 'The installation build failed'} (${short.slice(0, 240)}) and the repair budget is used up. ${cmd.evidence.install?.path ? `The installed build is at ${cmd.evidence.install.path}.` : `The verified change is on ${last.integratedBranch ?? 'its foundry branch'}.`}`); return
     }
+    const title = kind === 'UI proof' ? `Repair after UI proof ${repairs + 1}` : `Repair after build failure ${repairs + 1}`
     const sub: Subtask = {
-      ...last.subtask, n: cmd.steps.length + 1, title: `Repair after UI proof ${repairs + 1}`,
-      request: `${last.subtask.request}\n\nThe delivered build was tested with real pointer input and these checks FAILED:\n${failed.map((f) => `- ${f.label}: ${f.detail}`).join('\n').slice(0, 1500)}\nFix the cause in the existing files (modify them); keep everything that already works.`,
+      ...last.subtask, n: cmd.steps.length + 1, title,
+      request: `${last.subtask.request}\n\n${lead}\n${evidence}\nFix the cause in the existing files (modify them); keep everything that already works. Code in this application is also executed on the server while the production build prerenders pages: never touch window, document, localStorage or matchMedia while rendering (only inside useEffect or event handlers).`,
       targets: last.subtask.targets.map((t) => ({ path: t.path, action: 'modify' as const })), reverseFirst: false,
     }
-    this.commands.update(id, (c) => { c.steps.push({ n: c.steps.length + 1, title: sub.title, subtask: sub, missions: [], state: 'PENDING', autoResumes: 0 }); c.currentStep = c.steps.length - 1; c.ladder.uiProof = 'PENDING'; return c })
-    this.setState(id, 'QUEUED', `UI proof failed on ${failed.length} check(s); repairing: ${failed.map((f) => f.label).join('; ').slice(0, 200)}`)
-    this.postMilestone(id, `proof-repair-${repairs + 1}`, `Real-pointer testing of the installed build failed (${failed.map((f) => f.label).join('; ').slice(0, 200)}). Foundry is repairing it.`)
-    await this.advance()
+    this.commands.update(id, (c) => { c.steps.push({ n: c.steps.length + 1, title, subtask: sub, missions: [], state: 'PENDING', autoResumes: 0 }); c.currentStep = c.steps.length - 1; c.ladder.uiProof = c.interpretation.uiProof ? 'PENDING' : c.ladder.uiProof; return c })
+    this.setState(id, 'QUEUED', `${kind} failed; repairing: ${short.slice(0, 200)}`)
+    this.postMilestone(id, `repair-${repairs + 1}`, `${kind === 'UI proof' ? 'Real-pointer testing of the installed build failed' : 'The production build of the verified change failed'} (${short.slice(0, 200)}). Foundry is repairing it.`)
+    // called from inside a controller pass (build failure) the next pass starts the repair; awaiting a new pass from here would wait on the pass that is calling us
+    if (kick) await this.advance()
   }
 
   private async finalize(id: string): Promise<void> {
@@ -365,7 +377,15 @@ export class AutonomyController {
     const view = missionView(this.deps.runner, m, true)
     const verifierLines = /independent verification|verifier/i.test(m.stateReason) && !view.receipt ? await this.verifierFailures(m) : []
     const facts: MissionFacts = { state: m.state, stateReason: m.stateReason, result: m.result ? { status: m.result.status, reason: m.result.reason } : null, receipt: view.receipt ? { verifier: view.receipt.verifier, integration: view.receipt.integration, install: view.receipt.install } : null, events: view.events.map((e) => ({ kind: e.kind, detail: e.detail })), ...(verifierLines.length ? { verifierLines } : {}) }
-    this.recordFailure(cmd, step, m, diagnose(facts))
+    const d = diagnose(facts)
+    if (d.cls === 'INSTALL' && view.receipt?.integration.state === 'APPLIED' && view.receipt.integration.commit) {
+      // the change passed verification and is integrated; only the production build broke: keep the verified work and repair on top of it
+      const integ = view.receipt.integration
+      this.commands.update(cmd.id, (c) => { const s = c.steps[c.currentStep]; if (s.n !== step.n || s.missions.at(-1)?.id !== m.id || s.state === 'COMPLETED') return null; s.state = 'COMPLETED'; s.integratedCommit = integ.commit; s.integratedBranch = integ.branch; const l = s.missions.at(-1); if (l) { l.endState = 'FAILED'; l.fingerprint = d.fingerprint }; (c.diagnoses[String(s.n)] ??= []).push(d); c.ladder.codeGenerated = true; c.ladder.verificationPassed = true; c.timeline.push({ at: this.now().toISOString(), kind: 'DIAGNOSIS', detail: `${m.id}: INSTALL — ${d.summary}`.slice(0, 400) }); return c })
+      if (this.commands.read(cmd.id)!.steps[cmd.currentStep]?.integratedCommit === integ.commit) await this.queueRepair(cmd.id, 'build', d.detail.slice(-1500), 'The production build (next build) of this change FAILED with:', d.summary, false)
+      return false
+    }
+    this.recordFailure(cmd, step, m, d)
     void alreadyStarted
     return false
   }
@@ -507,6 +527,23 @@ export class AutonomyController {
     const step = cmd.steps[cmd.currentStep]; const m = this.missionOf(step)
     this.setState(commandId, 'QUEUED', `restarted by ${actor}`)
     if (m?.state === 'INTERRUPTED') { try { resumeMission(this.deps.runner, m.id, cmd.createdBy) } catch (e) { this.commands.note(commandId, 'RESUME_REFUSED', e instanceof Error ? e.message : String(e)) } }
+    await this.advance()
+    return this.commands.read(commandId)!
+  }
+
+  /** Continue a BLOCKED/FAILED command from where it stopped: the same command, its verified work and its integrated commit are kept; the last failure is diagnosed again and handled (repair on top of the integrated commit, or a changed strategy). No duplicate command or mission is created for work that already exists. */
+  async reopen(commandId: string, actor: string): Promise<CommandRecord> {
+    if (isEmergencyStopped(this.deps.adir)) throw new ControllerError('STOPPED', 'Emergency Stop is active; clear it first.')
+    const cmd = this.commands.read(commandId)
+    if (!cmd) throw new ControllerError('NOT_FOUND', 'unknown command')
+    if (cmd.state !== 'BLOCKED' && cmd.state !== 'FAILED') throw new ControllerError('ILLEGAL', `only a BLOCKED or FAILED command can be continued (this one is ${cmd.state})`)
+    const at = this.now().toISOString()
+    this.commands.update(commandId, (c) => {
+      c.state = 'QUEUED'; c.stateReason = `continued by ${actor} from the last checkpoint (${cmd.stateReason.slice(0, 160)})`; c.stateAt = at
+      c.timeline.push({ at, kind: 'REOPENED', detail: `${actor} continued this command; verified work and integrated commits are kept` })
+      const s = c.steps[c.currentStep]; if (s) { delete s.pendingRung; delete s.retryNotBefore }
+      return c
+    })
     await this.advance()
     return this.commands.read(commandId)!
   }
