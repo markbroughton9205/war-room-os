@@ -81,7 +81,7 @@ export function SpaceshipCursor() {
 export const mountInto = (providers: string): string => providers.replace("import { CouncilSourceNavigationProvider }", "import { SpaceshipCursor } from '@/components/war-room/SpaceshipCursor'\nimport { CouncilSourceNavigationProvider }").replace('<MediaHost />', '<MediaHost />\n              <SpaceshipCursor />')
 
 /** A plain HTML page that implements the SAME DOM contract in the browser, with switchable defects, to exercise the real-input proof without a Next build. */
-export function proofPage(defect: 'none' | 'captures-pointer' | 'pulses-never-leave' | 'no-toggle-effect' = 'none'): string {
+export function proofPage(defect: 'none' | 'captures-pointer' | 'pulses-never-leave' | 'no-toggle-effect' | 'wrapper' | 'ship-stuck' = 'none'): string {
   return `<!doctype html><html><head><meta charset="utf-8"><title>proof</title><style>
 body{margin:0;font-family:sans-serif;min-height:1200px;background:#123;color:#fff}
 html.wr-ship-cursor, html.wr-ship-cursor * { cursor: none !important }
@@ -91,10 +91,11 @@ html.wr-ship-cursor, html.wr-ship-cursor * { cursor: none !important }
 const DEFECT=${JSON.stringify(defect)}; let on=true; let x=0,y=0,angle=0
 try{ if((localStorage.getItem('wr.spaceship-cursor')||'').trim().toLowerCase()==='standard') on=false }catch{}
 const ship=document.createElement('div'); ship.dataset.testid='spaceship-cursor'; ship.setAttribute('data-testid','spaceship-cursor')
-ship.style.cssText='position:fixed;left:0;top:0;width:28px;height:28px;background:#8ef;border-radius:50% 0 50% 50%;z-index:2147483000;filter:drop-shadow(0 0 6px #6cf);'+(DEFECT==='captures-pointer'?'pointer-events:auto;width:400px;height:400px;opacity:.01':'pointer-events:none')
+const glyph=document.createElement('div'); glyph.style.cssText='position:absolute;left:0;top:0;width:28px;height:28px;background:#8ef;border-radius:50% 0 50% 50%'; if(DEFECT==='wrapper'){ ship.appendChild(glyph) }
+ship.style.cssText=DEFECT==='wrapper'?'position:fixed;left:0;top:0;width:100%;height:100%;z-index:2147483000;pointer-events:none':'position:fixed;left:0;top:0;width:28px;height:28px;background:#8ef;border-radius:50% 0 50% 50%;z-index:2147483000;filter:drop-shadow(0 0 6px #6cf);'+(DEFECT==='captures-pointer'?'pointer-events:auto;width:400px;height:400px;opacity:.01':'pointer-events:none')
 const tg=document.createElement('button'); tg.setAttribute('data-testid','spaceship-cursor-toggle'); tg.style.cssText='position:fixed;right:12px;bottom:12px;z-index:2147483001'
 function render(){ document.documentElement.classList.toggle('wr-ship-cursor',on); if(on){ if(!ship.isConnected) document.body.appendChild(ship) } else { ship.remove(); document.querySelectorAll('[data-testid=spaceship-cursor-pulse]').forEach(e=>e.remove()) } tg.textContent=on?'Ship cursor: on':'Ship cursor: off'; tg.setAttribute('aria-pressed',String(on)) }
-window.addEventListener('pointermove',e=>{ if(!on) return; const dx=e.clientX-x,dy=e.clientY-y; if(Math.hypot(dx,dy)>=2) angle=Math.atan2(dy,dx)*180/Math.PI; x=e.clientX;y=e.clientY; ship.style.transform='translate3d('+x+'px,'+y+'px,0) translate(-50%,-50%) rotate('+angle+'deg)' },{passive:true})
+window.addEventListener('pointermove',e=>{ if(!on) return; const dx=e.clientX-x,dy=e.clientY-y; if(Math.hypot(dx,dy)>=2) angle=Math.atan2(dy,dx)*180/Math.PI; x=e.clientX;y=e.clientY; if(DEFECT==='ship-stuck') return; if(DEFECT==='wrapper'){ glyph.style.left=(x-14)+'px'; glyph.style.top=(y-14)+'px' } else ship.style.transform='translate3d('+x+'px,'+y+'px,0) translate(-50%,-50%) rotate('+angle+'deg)' },{passive:true})
 window.addEventListener('pointerdown',e=>{ if(!on) return; const p=document.createElement('div'); p.setAttribute('data-testid','spaceship-cursor-pulse'); p.style.cssText='position:fixed;left:'+e.clientX+'px;top:'+e.clientY+'px;width:60px;height:60px;border-radius:50%;border:2px solid #6cf;pointer-events:none;z-index:2147482999;animation:pulse 700ms ease-out forwards'; document.body.appendChild(p); if(DEFECT!=='pulses-never-leave') setTimeout(()=>p.remove(),700) },{passive:true})
 tg.addEventListener('click',()=>{ if(DEFECT==='no-toggle-effect') return; on=!on; try{ localStorage.setItem('wr.spaceship-cursor', on?'spaceship':'standard') }catch{} render() })
 document.body.appendChild(tg); render()

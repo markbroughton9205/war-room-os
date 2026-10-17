@@ -100,7 +100,7 @@ export async function mintSession(h: ServerHandle): Promise<string> {
 async function launchChrome(): Promise<{ page: CdpPage; stop: () => void }> {
   const profile = mkdtempSync(path.join(os.tmpdir(), 'wr-proof-'))
   const bin = ['google-chrome', 'chromium', 'chromium-browser'].find((b) => existsSync(`/usr/bin/${b}`)) ?? 'google-chrome'
-  const chrome = spawn(bin, ['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--window-size=1400,900', '--no-first-run', '--disable-gpu', '--force-device-scale-factor=1', 'about:blank'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], detached: true })
+  const chrome = spawn(bin, ['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profile}`, '--window-size=1400,900', '--no-first-run', '--disable-gpu', '--force-device-scale-factor=1', '--blink-settings=primaryPointerType=4,availablePointerTypes=4,primaryHoverType=4,availableHoverTypes=4', 'about:blank'], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'], detached: true })
   trackChild(chrome, 'headless Chrome (UI proof)')
   const kill = () => { try { process.kill(-chrome.pid!, 'SIGKILL') } catch { /* gone */ } try { rmSync(profile, { recursive: true, force: true }) } catch { /* best effort */ } }
   try {
@@ -168,9 +168,10 @@ export async function runProofSpec(base: string, session: string, steps: UiProof
           case 'move': await moveTo(s.x, s.y, 6, pointer); pointer = { x: s.x, y: s.y }; break
           case 'expect-follows': {
             await sleep(200)
-            const r = await page.eval<{ x: number; y: number } | null>(`(() => { const e = document.querySelector(${JSON.stringify(s.selector)}); if (!e) return null; const b = e.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 } })()`)
+            // the element itself, or the glyph inside it: a full-viewport pointer-events:none wrapper that carries the test id and holds a small ship is a legitimate layout
+            const r = await page.eval<{ x: number; y: number; of: string } | null>(`(() => { const e = document.querySelector(${JSON.stringify(s.selector)}); if (!e) return null; const vw = innerWidth * innerHeight; const cands = [e, ...e.querySelectorAll('*')].map((n) => { const b = n.getBoundingClientRect(); return { n, x: b.left + b.width / 2, y: b.top + b.height / 2, area: b.width * b.height } }).filter((c) => c.area > 0 && c.area < vw * 0.5); if (!cands.length) { const b = e.getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2, of: e.tagName } } cands.sort((a, b) => Math.hypot(a.x - ${s.x}, a.y - ${s.y}) - Math.hypot(b.x - ${s.x}, b.y - ${s.y})); const c = cands[0]; return { x: c.x, y: c.y, of: c.n.tagName.toLowerCase() } })()`)
             const d = r ? Math.hypot(r.x - s.x, r.y - s.y) : Infinity
-            rec(s.label, d <= s.tolerance, r ? `ship centre at (${Math.round(r.x)}, ${Math.round(r.y)}), pointer at (${s.x}, ${s.y}), distance ${Math.round(d)} px` : 'the ship element does not exist'); break
+            rec(s.label, d <= s.tolerance, r ? `ship (${r.of}) centre at (${Math.round(r.x)}, ${Math.round(r.y)}), pointer at (${s.x}, ${s.y}), distance ${Math.round(d)} px` : 'the ship element does not exist'); break
           }
           case 'click-xy': await mouse('mousePressed', s.x, s.y); await sleep(60); await mouse('mouseReleased', s.x, s.y); break
           case 'wait': await sleep(s.ms); break

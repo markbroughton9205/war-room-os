@@ -547,6 +547,15 @@ export class AutonomyController {
     const cmd = this.commands.read(commandId)
     if (!cmd) throw new ControllerError('NOT_FOUND', 'unknown command')
     if (cmd.state !== 'BLOCKED' && cmd.state !== 'FAILED') throw new ControllerError('ILLEGAL', `only a BLOCKED or FAILED command can be continued (this one is ${cmd.state})`)
+    // the work is verified and installed and only the real-input proof failed or could not run (for example the proof environment was wrong): prove again, do not rebuild or re-ask the builder
+    const lastStep = cmd.steps[cmd.currentStep]
+    if (lastStep?.state === 'COMPLETED' && cmd.evidence.install?.path && cmd.interpretation.uiProof && cmd.ladder.uiProof !== 'PASSED' && existsSync(cmd.evidence.install.path)) {
+      this.commands.update(commandId, (c) => { c.ladder.uiProof = 'PENDING'; delete c.evidence.uiProof; c.timeline.push({ at: this.now().toISOString(), kind: 'REOPENED', detail: `${actor} asked for the installed build to be proven again (no new mission: the verified work and the installation are kept)` }); return c })
+      const at2 = this.now().toISOString()
+      this.commands.update(commandId, (c) => { c.state = 'PROVING'; c.stateReason = 'driving the installed build with real pointer input again'; c.stateAt = at2; c.timeline.push({ at: at2, kind: 'PROVING', detail: c.stateReason }); return c }) // an explicit Commander reopen is the one way out of a terminal state
+      this.ensureProof(this.commands.read(commandId)!)
+      return this.commands.read(commandId)!
+    }
     const at = this.now().toISOString()
     this.commands.update(commandId, (c) => {
       c.state = 'QUEUED'; c.stateReason = `continued by ${actor} from the last checkpoint (${cmd.stateReason.slice(0, 160)})`; c.stateAt = at

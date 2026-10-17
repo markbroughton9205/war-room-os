@@ -147,6 +147,10 @@ if (only('D')) {
     check('D05_a_cursor_layer_that_captures_the_pointer_FAILS_the_proof', !capture.passed && capture.steps.some((s) => !s.ok && /clicking|selection|dragging/.test(s.label)), capture.steps.filter((s) => !s.ok).map((s) => s.label).join(' | '))
     const leak = await run('pulses-never-leave')
     check('D06_pulses_that_never_leave_FAIL_the_proof', !leak.passed && leak.steps.some((s) => !s.ok && /removed afterwards/.test(s.label)))
+    const wrapper = await run('wrapper')
+    check('D08_a_full_viewport_wrapper_holding_a_small_ship_that_follows_the_pointer_passes', wrapper.passed, wrapper.steps.filter((x) => !x.ok).map((x) => x.label + ': ' + x.detail).join(' | '))
+    const stuck = await run('ship-stuck')
+    check('D09_a_ship_that_does_not_follow_the_pointer_FAILS_the_proof', !stuck.passed && stuck.steps.some((x) => !x.ok && /follows the real pointer/.test(x.label)))
     const noToggle = await run('no-toggle-effect')
     check('D07_a_toggle_that_does_nothing_FAILS_the_proof', !noToggle.passed && noToggle.steps.some((s) => !s.ok && /gone after switching back|native cursor is visible/.test(s.label)))
   }
@@ -489,6 +493,20 @@ if (only('O')) {
     const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
     const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 420_000)
     check('O06_a_build_that_keeps_failing_real_input_testing_is_BLOCKED_not_delivered', done.state === 'BLOCKED' && /UI proof failed/.test(done.stateReason) && !done.ladder.running, `${done.state}: ${done.stateReason.slice(0, 200)}`)
+  }
+  // 4a. the proof failed because of the proof environment, not the build: continuing re-proves the installed build, with no new mission
+  {
+    let broken = true; let proofs = 0
+    const w = world(repairing, { planner: planWithInstall, proveUi: async ({ outDir }) => { proofs++; return broken ? { passed: false, steps: [{ label: 'the ship follows the pointer', ok: false, detail: '0 element(s)' }], dir: outDir } : { passed: true, steps: [{ label: 'the ship cursor is on the page', ok: true, detail: '1 element(s)' }], dir: outDir } } })
+    w.runner.installer = installer
+    const c = w.mk({ runner: w.runner }); c.setSettings({ fullAutonomy: true, maxStrategyAttempts: 2 }, C)
+    const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
+    const blocked = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 420_000)
+    const missionsBefore = w.store.list().length
+    broken = false
+    await c.reopen(sub.commandId, C)
+    const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s))
+    check('O11_continuing_re_proves_the_installed_build_without_a_new_mission_and_then_delivers', blocked.state === 'BLOCKED' && done.state === 'DELIVERED' && w.store.list().length === missionsBefore && done.ladder.uiProof === 'PASSED' && done.ladder.running && done.timeline.some((t) => t.kind === 'REOPENED' && /proven again/.test(t.detail)), `${blocked.state} -> ${done.state}: ${done.stateReason.slice(0, 160)}; proofs ${proofs}; step ${blocked.steps.at(-1)?.state}; install ${blocked.evidence.install?.path}; uiProof ${blocked.ladder.uiProof}; timeline ${done.timeline.slice(-4).map((t) => t.kind).join('>')}`)
   }
   // 4b. the production build breaks on the verified change (server-side render): the work is kept and repaired on top, then installed
   {
