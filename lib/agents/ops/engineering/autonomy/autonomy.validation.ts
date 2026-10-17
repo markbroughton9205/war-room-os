@@ -118,7 +118,7 @@ const SPACESHIP = 'Foundry, change my mouse pointer inside War Room to a small f
   fails('C09_a_missing_toggle_fails', { 'components/war-room/SpaceshipCursor.tsx': REF_COMPONENT.replaceAll('spaceship-cursor-toggle', 'ship-switch') }, /toggle/)
   fails('C10_an_unmounted_cursor_fails', { 'components/ClientProviders.tsx': providers }, /ClientProviders must import/)
   fails('C11_a_mount_that_drops_existing_providers_fails', { 'components/ClientProviders.tsx': mountInto(providers).replace('<MediaHost />', '').replace("import { MediaHost } from '@/components/war-room/media/MediaHost'", '') }, /existing providers/)
-  fails('C12_missing_tests_fail', { 'test/spaceshipCursor.test.mjs': null }, /test file is missing/)
+  check('C12_the_verifier_runs_before_tests_exist_so_it_tolerates_a_missing_test_file_and_still_fails_a_broken_one', build({ 'test/spaceshipCursor.test.mjs': null }).code === 0 && build({ 'test/spaceshipCursor.test.mjs': 'import test from "node:test"; test("x", () => { throw new Error("boom") })' }).code === 1)
   fails('C13_unprotected_storage_access_fails', { 'components/war-room/SpaceshipCursor.tsx': REF_COMPONENT.replaceAll('try {', 'if (true) {').replaceAll(' catch { /* storage unavailable */ }', '').replaceAll(' catch { /* ignore */ }', '') }, /localStorage/)
 }
 

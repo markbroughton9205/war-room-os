@@ -136,11 +136,9 @@ if (!fails.length) {
   const m = readFileSync(path.join(root, M), 'utf8')
   ok(new RegExp('import[^;\\\\n]*\\\\b' + NAME + '\\\\b').test(m) && new RegExp('<' + NAME + '\\\\s*/>').test(m), 'ClientProviders must import and render <' + NAME + ' />')
   ok(/MediaHost/.test(m) && /ApplicationActivityGovernor/.test(m), 'ClientProviders must keep its existing providers')
-  const t = spawnSync(process.execPath, ['--test', 'test/'], { cwd: root, encoding: 'utf8', timeout: 100000 })
+  // the engine runs this verifier BEFORE it authors the test file, so a missing test file is not a verifier failure here; the controller requires the planned test file afterwards
   const tf = path.join(root, ${JSON.stringify(`test/${n.slug}.test.mjs`)})
-  ok(existsSync(tf), 'the logic test file is missing')
   if (existsSync(tf)) { const r = spawnSync(process.execPath, ['--test', tf], { cwd: root, encoding: 'utf8', timeout: 100000 }); ok(r.status === 0, 'the delivered logic tests fail: ' + (r.stdout + r.stderr).split('\\n').filter((l) => /^not ok|# fail/.test(l.trim())).slice(0, 3).join(' | ')) }
-  void t
 }
 if (fails.length) { console.log('# verifier: ' + fails.length + ' contract failure(s)'); for (const f of fails) console.log('not ok - ' + f); process.exit(1) }
 console.log('# verifier: contract satisfied'); process.exit(0)

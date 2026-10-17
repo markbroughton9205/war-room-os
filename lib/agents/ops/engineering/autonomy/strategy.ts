@@ -13,6 +13,8 @@ export type MissionFacts = {
   result: { status: string; reason: string } | null
   receipt: { verifier: { exitCode: number | string; summary: string }; integration: { state: string; gates: { name: string; exitCode: number | string; summary: string; detail?: string }[]; refused: string[] }; install: { state: string; detail?: string } } | null
   events: { kind: string; detail: string }[]
+  /** failing lines from re-running the independent verifier on the failed workspace (the engine reports only 'UNDETERMINED') */
+  verifierLines?: string[]
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/[0-9a-f]{8,}/g, '#').replace(/\d+/g, 'N').replace(/\/[\w./@-]+/g, (p) => p.split('/').pop() ?? p).replace(/\s+/g, ' ').trim()
@@ -25,6 +27,7 @@ export function diagnose(m: MissionFacts): Diagnosis {
   if (/ECONNREFUSED|not reachable|fetch failed|timeout or cancelled|HTTP 5\d\d|model error|no builder|is not installed in the local model|out of memory|CUDA|launch timed out/i.test(reason + ' ' + m.events.slice(-6).map((e) => e.detail).join(' '))) {
     if (!/independent verifier|integration gates|install failed/i.test(m.stateReason)) return make('INFRA', 'the local model runtime or the machine was unavailable', reason, true)
   }
+  if (m.verifierLines?.length) return make('VERIFIER', 'the independent verifier rejected the final workspace', m.verifierLines.join('\n'))
   const r = m.receipt
   if (r?.install.state === 'FAILED') return make('INSTALL', `the installation build failed: ${r.install.detail ?? 'no detail'}`.slice(0, 300), r.install.detail ?? reason, false)
   if (r?.integration.state === 'REFUSED') return make('INTEGRATION', `integration was refused: ${r.integration.refused.join('; ')}`.slice(0, 300), r.integration.refused.join('\n'))

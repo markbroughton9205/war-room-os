@@ -1,4 +1,7 @@
+import { existsSync } from 'node:fs'
+import path from 'node:path'
 import type { AgentOpsLog } from '../../log'
+import { resolveBin, runTool } from '../missions/toolchain'
 import { deriveAssignments, interruptAssignment, pauseAssignment } from '../assignments'
 import { assessLiveness } from '../missions/liveness'
 import { realFacts, reconcileMissions, resumability } from '../missions/reconcile'
@@ -160,7 +163,7 @@ export class AutonomyController {
     }
     if (m.state === 'INTERRUPTED') return this.handleInterrupted(cmd, step, m, cfg)
     if (m.state === 'COMPLETED') { await this.handleCompleted(cmd, step, m); return false }
-    if (m.state === 'FAILED') return this.handleFailed(cmd, step, m, alreadyStarted)
+    if (m.state === 'FAILED') return await this.handleFailed(cmd, step, m, alreadyStarted)
     if (m.state === 'CANCELLED') { this.setState(cmd.id, 'CANCELLED', `mission ${m.id} was cancelled: ${m.stateReason}`); return false }
     return false
   }
@@ -255,6 +258,9 @@ export class AutonomyController {
     const r = view.receipt
     const evidenceOk = view.result?.status === 'COMPLETED' && !!r && r.verifier.exitCode === 0 && view.receiptCheck !== 'NO_RECEIPT' && view.receiptCheck.ok
     if (!evidenceOk) { this.recordFailure(cmd, step, m, { cls: 'ENGINE', summary: 'the mission reported COMPLETED but its own records do not support it', detail: `result=${view.result?.status}; verifier=${r?.verifier.exitCode}; receipt=${JSON.stringify(view.receiptCheck).slice(0, 160)}`, fingerprint: 'unsupported-completion', retriable: true }); return }
+    // every test file the plan promised must really have been written (the engine verifies before it authors tests, so this is where a missing one is caught)
+    const missingTests = step.subtask.targets.filter((t) => t.action === 'create' && /^test\//.test(t.path) && !r.filesCreated.some((f) => f.path === t.path)).map((t) => t.path)
+    if (missingTests.length) { this.recordFailure(cmd, step, m, { cls: 'TESTS', summary: `the planned test file was never written: ${missingTests.join(', ')}`, detail: `The change must include its tests: create ${missingTests.join(', ')} with node:test tests for every exported function.`, fingerprint: 'missing-tests', retriable: true }); return }
     const integration = r.integration
     const isLast = cmd.currentStep === cmd.steps.length - 1
     const tests = r.testsAdded.length + r.testsChanged.length > 0
@@ -345,9 +351,20 @@ export class AutonomyController {
     this.postMilestone(id, 'final', `${blocked ? 'Foundry could not deliver this.' : 'Foundry delivered this.'} ${summary}${promotedNote}`)
   }
 
-  private handleFailed(cmd: CommandRecord, step: CommandStep, m: MissionRecord, alreadyStarted: boolean): boolean {
+  /** The engine reports a failed final verification only as UNDETERMINED. Re-run the (hidden) verifier on the failed workspace, sandboxed, to learn WHICH contract lines failed, so the retry is told the real cause. */
+  private async verifierFailures(m: MissionRecord): Promise<string[]> {
+    try {
+      const script = path.join(this.deps.runner.store.dir(m.id), 'verifier', 'verify.mjs')
+      if (!existsSync(script) || !existsSync(m.workspace.root)) return []
+      const r = await runTool([resolveBin('node'), script, m.workspace.root], m.workspace.root, { timeoutMs: 120_000, sandbox: { rw: [m.workspace.root] } })
+      return (r.stdout + '\n' + r.stderr).split('\n').filter((l) => /^not ok/.test(l.trim())).map((l) => l.trim().slice(0, 300)).slice(0, 10)
+    } catch { return [] }
+  }
+
+  private async handleFailed(cmd: CommandRecord, step: CommandStep, m: MissionRecord, alreadyStarted: boolean): Promise<boolean> {
     const view = missionView(this.deps.runner, m, true)
-    const facts: MissionFacts = { state: m.state, stateReason: m.stateReason, result: m.result ? { status: m.result.status, reason: m.result.reason } : null, receipt: view.receipt ? { verifier: view.receipt.verifier, integration: view.receipt.integration, install: view.receipt.install } : null, events: view.events.map((e) => ({ kind: e.kind, detail: e.detail })) }
+    const verifierLines = /independent verification|verifier/i.test(m.stateReason) && !view.receipt ? await this.verifierFailures(m) : []
+    const facts: MissionFacts = { state: m.state, stateReason: m.stateReason, result: m.result ? { status: m.result.status, reason: m.result.reason } : null, receipt: view.receipt ? { verifier: view.receipt.verifier, integration: view.receipt.integration, install: view.receipt.install } : null, events: view.events.map((e) => ({ kind: e.kind, detail: e.detail })), ...(verifierLines.length ? { verifierLines } : {}) }
     this.recordFailure(cmd, step, m, diagnose(facts))
     void alreadyStarted
     return false
