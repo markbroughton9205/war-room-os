@@ -379,9 +379,9 @@ const code = (fn: () => unknown) => { try { fn(); return 'none' } catch (e) { re
   const repo = makeRepo(); const head0 = sh(repo, 'rev-parse', 'HEAD')
   sh(repo, 'checkout', '-q', '-b', 'foundry/x'); writeFileSync(path.join(repo, 'src', 'added.mjs'), 'export const a = 1\n'); sh(repo, 'add', '--', 'src/added.mjs'); sh(repo, 'commit', '-q', '-m', 'foundry work'); const fc = sh(repo, 'rev-parse', 'HEAD'); sh(repo, 'checkout', '-q', 'main')
   process.env.WAR_ROOM_ENG_PNPM = '/bin/false'
-  const res = await installRuntime({ id: 'msn-20261014T000000-aaaaaaaa', title: 't' } as MissionRecord, { state: 'APPLIED', branch: 'foundry/x', commit: fc, gates: [], refused: [] }, () => {}, repo, { optRoot: path.join(tmp(), 'opt') })
+  const res = await installRuntime({ id: 'msn-20261014T000000-aaaaaaaa', title: 't' } as MissionRecord, { state: 'APPLIED', branch: 'foundry/x', commit: fc, gates: [], refused: [] }, () => {}, repo, { optRoot: path.join(tmp(), 'opt'), scratchRoot: path.join(tmp(), 'scratch') })
   delete process.env.WAR_ROOM_ENG_PNPM
-  check('R12_a_build_that_fails_after_the_merge_rolls_the_repository_back_and_keeps_the_foundry_branch', res.state === 'FAILED' && /rolled back/.test(res.detail ?? '') && sh(repo, 'rev-parse', 'HEAD') === head0 && sh(repo, 'status', '--porcelain') === '' && sh(repo, 'rev-parse', 'foundry/x') === fc, JSON.stringify(res))
+  check('R12_a_build_that_fails_leaves_the_repository_untouched_and_keeps_the_foundry_branch', res.state === 'FAILED' && /repository was not touched/.test(res.detail ?? '') && sh(repo, 'rev-parse', 'HEAD') === head0 && sh(repo, 'status', '--porcelain') === '' && sh(repo, 'rev-parse', 'foundry/x') === fc, JSON.stringify(res))
 }
 
 finish()

@@ -31,7 +31,7 @@ export function serviceDeps(log: AgentOpsLog = new AgentOpsLog()): RunnerDeps {
   const base = path.dirname(log.file)
   const adir = autonomyDir(base)
   const guard = () => (isEmergencyStopped(adir) ? 'Emergency Stop is active: Foundry will not start or resume any work until the Commander clears it' : readConfig(adir).paused ? 'Foundry is paused by the Commander: resume it to start or continue work' : null)
-  return { log, store: new MissionStore(log), guard, workspacesRoot: path.join(base, 'engineering-workspaces'), integrationRoot: path.join(base, 'engineering-integration'), lineup: () => defaultLineup(), installer: (m, i, on) => installRuntime(m, i, on, engineeringRepo(log)) }
+  return { log, store: new MissionStore(log), guard, workspacesRoot: path.join(base, 'engineering-workspaces'), integrationRoot: path.join(base, 'engineering-integration'), lineup: () => defaultLineup(), installer: (m, i, on) => installRuntime(m, i, on, engineeringRepo(log), { scratchRoot: path.join(base, 'engineering-install') }) }
 }
 
 export type MissionView = {
