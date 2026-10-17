@@ -5,6 +5,8 @@ import { autonomyController } from '@/lib/agents/ops/engineering/autonomy/servic
 import { ControllerError } from '@/lib/agents/ops/engineering/autonomy/controller'
 import { isCommandId } from '@/lib/agents/ops/engineering/autonomy/store'
 import { rollbackPromotion } from '@/lib/agents/ops/engineering/autonomy/promote'
+import { defaultLauncher } from '@/lib/agents/ops/engineering/autonomy/capabilities'
+import path from 'node:path'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -62,7 +64,8 @@ export async function POST(req: Request) {
       }
       case 'rollback-promotion': {
         const backup = String(body.backup ?? '')
-        if (!/^\/[\w./-]+\.rollback-[\w.-]+$/.test(backup)) return NextResponse.json({ error: 'invalid backup path' }, { status: 400 })
+        const launcherDir = path.dirname(defaultLauncher())
+        if (path.dirname(backup) !== launcherDir || !path.basename(backup).startsWith(path.basename(defaultLauncher()) + '.rollback-') || /[^\w./-]/.test(backup)) return NextResponse.json({ error: 'invalid backup path: it must be a rollback copy beside the launcher' }, { status: 400 })
         return NextResponse.json(rollbackPromotion(backup))
       }
       default: return NextResponse.json({ error: 'unknown action', actions: ['command', 'pause', 'resume', 'cancel', 'estop', 'clear-stop', 'restart', 'settings', 'rollback-promotion'] }, { status: 400 })

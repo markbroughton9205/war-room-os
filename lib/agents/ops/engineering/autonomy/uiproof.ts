@@ -5,6 +5,7 @@ import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { trackChild } from '../runtime/activity'
+import { SandboxUnavailable, wrapSandboxed } from '../runtime/sandbox'
 import type { UiProofResult } from './controller'
 import type { CommandRecord, UiProofStep } from './types'
 
@@ -47,7 +48,10 @@ export async function bootInstalledServer(installPath: string, dataDir: string, 
   mkdirSync(dataDir, { recursive: true })
   const port = await freePort()
   const secret = randomBytes(32).toString('hex')
-  const child: ChildProcess = spawn(exe, ['boot-ui.cjs'], {
+  // the freshly built app contains model-written code: it runs inside the OS sandbox (read-only host, empty HOME, writable private data directory only). Loopback is shared so the browser can reach it.
+  let argv = [exe, 'boot-ui.cjs']
+  try { argv = wrapSandboxed(argv, { rw: [dataDir], ro: [installPath], net: true, cwd: rt }).argv } catch (e) { if (e instanceof SandboxUnavailable) throw new Error(`refusing to run a freshly built app unsandboxed: ${e.message}`); throw e }
+  const child: ChildProcess = spawn(argv[0], argv.slice(1), {
     cwd: rt, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
     env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: os.homedir(), ELECTRON_RUN_AS_NODE: '1', PORT: String(port), HOSTNAME: '127.0.0.1', WAR_ROOM_RUNTIME_SURFACE: 'DESKTOP_LOCAL', WAR_ROOM_PACKAGED: '1', NODE_ENV: 'production', WAR_ROOM_LOCAL_DATA_DIR: dataDir, WAR_ROOM_AGENT_FOUNDRY_DIR: path.join(dataDir, 'data', 'agent-foundry'), WAR_ROOM_DESKTOP_TRUST_SECRET: secret, WAR_ROOM_ENG_SUPERVISOR: 'off' },
   })
