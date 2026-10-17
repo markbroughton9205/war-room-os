@@ -29,6 +29,7 @@ import { parseLauncherTarget, promoteInstall, rollbackPromotion } from './promot
 import { probeCapabilities } from './capabilities'
 import { proofPage, REF_COMPONENT, REF_LOGIC, REF_LOGIC_TEST, mountInto } from './autonomy.fixtures'
 import { runProofSpec } from './uiproof'
+import { findSsrHazards, ssrAdvice } from './ssr'
 import { isDeictic, isFoundryCommand } from '@/lib/intent-prerouter/foundryIntent'
 import { createCouncilMissionService, statusFromCommand, type CouncilMissionStorage } from '@/lib/council/missions/service'
 import type { FoundryCommandView, FoundryPort } from '@/lib/council/missions/foundryPort'
@@ -159,7 +160,7 @@ if (only('E')) {
   check('E02_a_lost_model_connection_is_infrastructure_not_a_code_failure', infra.cls === 'INFRA')
   const ver = diagnose({ state: 'FAILED', stateReason: 'the independent verifier failed on the final workspace', result: { status: 'COMPLETED', reason: 'x' }, receipt: { verifier: { exitCode: 1, summary: '# fail 1 | not ok - addPulse keeps only the newest MAX_PULSES' }, integration: { state: 'NOT_RUN', gates: [], refused: [] }, install: { state: 'NOT_REQUESTED' } }, events: [] })
   check('E03_a_rejected_verifier_run_quotes_the_failing_contract_lines', ver.cls === 'VERIFIER' && /MAX_PULSES/.test(ver.detail))
-  const inst = diagnose({ state: 'FAILED', stateReason: 'install failed: next build failed', result: { status: 'COMPLETED', reason: 'x' }, receipt: { verifier: { exitCode: 0, summary: '' }, integration: { state: 'APPLIED', gates: [], refused: [] }, install: { state: 'FAILED', detail: 'next build failed: Type error' } }, events: [] })
+  const inst = diagnose({ state: 'FAILED', stateReason: 'install failed: next build failed', result: { status: 'COMPLETED', reason: 'x' }, receipt: { verifier: { exitCode: 0, summary: '' }, integration: { state: 'APPLIED', gates: [], refused: [] }, install: { state: 'FAILED', detail: 'next build failed: ENOSPC: no space left on device' } }, events: [] })
   check('E04_an_install_failure_without_a_code_cause_is_not_retried_by_rewriting_code', inst.cls === 'INSTALL' && inst.retriable === false)
   check('E04b_a_prerender_failure_in_the_build_is_a_code_cause_and_is_repairable', diagnose({ state: 'FAILED', stateReason: 'install failed', result: { status: 'COMPLETED', reason: 'x' }, receipt: { verifier: { exitCode: 0, summary: '' }, integration: { state: 'APPLIED', gates: [], refused: [] }, install: { state: 'FAILED', detail: 'Export encountered an error on /commander/proposals/page: window is not defined' } }, events: [] }).retriable === true)
   const same = diagnose({ state: 'FAILED', stateReason: 'x', result: { status: 'FAILED', reason: 'y' }, receipt: null, events: [] })
@@ -174,6 +175,16 @@ if (only('E')) {
   check('E08_a_retry_carries_the_diagnosis_and_forbids_repeating_the_approach', /PREVIOUS ATTEMPT/.test(applied.request) && /TS2304/.test(applied.request) && /Do not repeat/.test(applied.request) && applied.hints.includes('repair-attempt') && applyRung('reverse-context', sub, [gate]).reverseFirst === true)
   const parts = splitSubtask(sub)
   check('E09_split_makes_logic_first_then_interface_and_only_the_last_part_keeps_the_verifier', !!parts && parts[0].targets.every((t) => /^(lib|test)\//.test(t.path)) && parts[1].targets.map((t) => t.path).join() === 'components/X.tsx' && parts[0].verifyKey === undefined)
+}
+
+// ============================================================ S. server-render hazards: the build log names a page, the scan names the line
+if (only('S')) {
+  const BAD = `'use client'\nimport { useRef, useState, useEffect } from 'react'\nexport function X() {\n  const [on, setOn] = useState(() => {\n    try {\n      return localStorage.getItem('k') !== 'off'\n    } catch { return true }\n  })\n  const fine = useRef(window.matchMedia('(pointer: fine)').matches)\n  useEffect(() => { document.title = 'x'; window.addEventListener('resize', () => {}) }, [])\n  const click = () => { window.localStorage.setItem('k', 'on') }\n  return null\n}\n`
+  const h = findSsrHazards([{ path: 'components/X.tsx', text: BAD }])
+  check('S01_state_and_ref_initializers_that_read_browser_globals_are_found_with_their_lines', h.length === 2 && h.some((x) => x.line === 6) && h.some((x) => x.line === 9), JSON.stringify(h.map((x) => x.line)))
+  check('S02_effects_and_event_handlers_are_not_flagged', !h.some((x) => x.line === 10 || x.line === 11) && findSsrHazards([{ path: 'a.tsx', text: REF_COMPONENT }]).length === 0)
+  check('S03_the_advice_names_file_line_and_the_fix', /components\/X\.tsx:9/.test(ssrAdvice(h)) && /inside useEffect/.test(ssrAdvice(h)) && ssrAdvice([]) === '')
+  check('S04_server_files_and_non_client_components_are_ignored', findSsrHazards([{ path: 'lib/a.ts', text: BAD }, { path: 'c/Y.tsx', text: BAD.replace(`'use client'`, '') }]).length === 0)
 }
 
 // ============================================================ F. resources
@@ -484,6 +495,21 @@ if (only('O')) {
     const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 420_000)
     const rep = done.steps[1] ? w.store.read(done.steps[1].missions[0]?.id ?? '') : null
     check('O09_a_production_build_failure_keeps_the_verified_work_and_repairs_it_with_the_build_log_then_installs', done.state === 'DELIVERED' && done.steps.length === 2 && /Repair after build failure/.test(done.steps[1].title) && done.steps[0].state === 'COMPLETED' && !!done.steps[0].integratedCommit && !!rep && /window is not defined/.test(rep.request) && /never touch window/.test(rep.request) && done.ladder.installed && tries === 2, `${done.state}: ${done.stateReason.slice(0, 200)}; steps ${done.steps.map((x) => x.title + ':' + x.state).join(' | ')}`)
+  }
+  // 4c. a client component that reads window while rendering is caught and repaired BEFORE integration and the build, with the exact line named
+  {
+    const HAZARD = `'use client'\nimport { useRef } from 'react'\nexport function Widget() {\n  const fine = useRef(window.matchMedia('(pointer: fine)').matches)\n  return null\n}\n`
+    const FIXED = `'use client'\nimport { useEffect, useRef } from 'react'\nexport function Widget() {\n  const fine = useRef(false)\n  useEffect(() => { fine.current = window.matchMedia('(pointer: fine)').matches }, [])\n  return null\n}\n`
+    const seen: string[] = []
+    const w = world((c) => { if (c.kind === 'file' && c.path === 'components/Widget.tsx') { seen.push(c.prompt); return fenced(/server-render hazards/.test(c.prompt) ? FIXED : HAZARD) } return goodReply(c) })
+    const plan: ControllerDeps['planner'] = async (text) => { const r = await chatPlan({ targets: [{ path: 'components/Widget.tsx', action: 'create' as const }, ...['src/messageStore.mjs', 'src/chatService.mjs', 'server.mjs', 'public/app.js', 'public/index.html'].map((f) => ({ path: f, action: 'modify' as const })), { path: 'test/chatSessions.test.mjs', action: 'create' as const }], scope: { paths: chatFiles, write: [...chatFiles, 'components/Widget.tsx', 'test/chatSessions.test.mjs'] } })!(text, { repo: '' }); return { ...r, interpretation: { ...r.interpretation, needsInstall: true } } }
+    w.runner.installer = async (_m, integ) => ({ state: 'INSTALLED', path: fakeInstall, stamp: path.join(fakeInstall, 'INSTALL_STAMP.json'), detail: `built from ${integ.commit?.slice(0, 8)}` })
+    const c = w.mk({ runner: w.runner, planner: plan }); c.setSettings({ fullAutonomy: true }, C)
+    const sub = await c.submit('Foundry, build persistent chat sessions please', { kind: 'foundry-ui' }, C)
+    const done = await settle(c, sub.commandId, (s) => ['DELIVERED', 'BLOCKED', 'FAILED'].includes(s), 420_000)
+    const m = w.store.read(done.steps[0]?.missions[0]?.id ?? '')
+    const ev = m ? w.store.events(m.id).map((e) => e.kind) : []
+    check('O10_a_render_time_window_read_is_found_and_repaired_before_integration_and_the_build', done.state === 'DELIVERED' && ev.includes('SSR_HAZARD') && ev.includes('SSR_REPAIR') && !!m && /useEffect/.test(readFileSync(path.join(m.workspace.root, 'components/Widget.tsx'), 'utf8')) && seen.some((p) => /Widget\.tsx:4|line 4/.test(p)), `${done.state}: ${done.stateReason.slice(0, 160)}; events ${ev.filter((k) => /SSR/.test(k)).join(',')}; mission ${m?.state} ${m?.stateReason.slice(0, 160)}`)
   }
   // 5. promotion only with authority AND a proven build
   {

@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import type { AgentOpsLog } from '../../log'
 import { resolveBin, runTool } from '../missions/toolchain'
@@ -13,6 +13,7 @@ import { haltAllActivity, activitySnapshot, releaseActivityHold } from '../runti
 import { probeCapabilities, type Capability } from './capabilities'
 import { clearEmergencyStop, isEmergencyStopped, readConfig, readEmergencyStop, setPaused, updateConfig, writeEmergencyStop, type AutonomyConfig, type ConfigPatch, type EmergencyStop } from './config'
 import { interpret, type InterpretDeps } from './interpret'
+import { findSsrHazards, ssrAdvice } from './ssr'
 import { judgeResources, readResources, type ResourceVerdict } from './resources'
 import { CommandStore, isCommandId } from './store'
 import { applyRung, diagnose, nextRung, splitSubtask, type MissionFacts } from './strategy'
@@ -364,6 +365,15 @@ export class AutonomyController {
   }
 
   /** The engine reports a failed final verification only as UNDETERMINED. Re-run the (hidden) verifier on the failed workspace, sandboxed, to learn WHICH contract lines failed, so the retry is told the real cause. */
+  /** For a build that died while prerendering: read the changed client components from the mission workspace and name the exact lines that touch browser globals while rendering. */
+  private ssrEvidence(m: MissionRecord, receipt: MissionView['receipt']): string {
+    try {
+      if (!receipt || !/window is not defined|document is not defined|localStorage is not defined|navigator is not defined|prerender/i.test(receipt.install.detail ?? '')) return ''
+      const paths = [...receipt.filesCreated, ...receipt.filesModified].map((f) => f.path).filter((p) => /\.(tsx|jsx)$/.test(p))
+      return ssrAdvice(findSsrHazards(paths.map((p) => ({ path: p, text: readFileSync(path.join(m.workspace.root, p), 'utf8') }))))
+    } catch { return '' }
+  }
+
   private async verifierFailures(m: MissionRecord): Promise<string[]> {
     try {
       const script = path.join(this.deps.runner.store.dir(m.id), 'verifier', 'verify.mjs')
@@ -382,7 +392,7 @@ export class AutonomyController {
       // the change passed verification and is integrated; only the production build broke: keep the verified work and repair on top of it
       const integ = view.receipt.integration
       this.commands.update(cmd.id, (c) => { const s = c.steps[c.currentStep]; if (s.n !== step.n || s.missions.at(-1)?.id !== m.id || s.state === 'COMPLETED') return null; s.state = 'COMPLETED'; s.integratedCommit = integ.commit; s.integratedBranch = integ.branch; const l = s.missions.at(-1); if (l) { l.endState = 'FAILED'; l.fingerprint = d.fingerprint }; (c.diagnoses[String(s.n)] ??= []).push(d); c.ladder.codeGenerated = true; c.ladder.verificationPassed = true; c.timeline.push({ at: this.now().toISOString(), kind: 'DIAGNOSIS', detail: `${m.id}: INSTALL — ${d.summary}`.slice(0, 400) }); return c })
-      if (this.commands.read(cmd.id)!.steps[cmd.currentStep]?.integratedCommit === integ.commit) await this.queueRepair(cmd.id, 'build', d.detail.slice(-1500), 'The production build (next build) of this change FAILED with:', d.summary, false)
+      if (this.commands.read(cmd.id)!.steps[cmd.currentStep]?.integratedCommit === integ.commit) await this.queueRepair(cmd.id, 'build', (d.detail.slice(-1100) + '\n' + this.ssrEvidence(m, view.receipt)).slice(0, 2600), 'The production build (next build) of this change FAILED with:', d.summary, false)
       return false
     }
     this.recordFailure(cmd, step, m, d)

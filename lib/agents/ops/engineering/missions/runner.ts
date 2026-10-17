@@ -15,6 +15,7 @@ import { Workspace } from '../runtime/workspaceFs'
 import { runFeatureWorkflow, type FinalVerification, type WorkflowResult } from '../workflow'
 import type { ModelClient } from '../runtime/ports'
 import { integrate, planApply, type GateSpec, DEFAULT_GATES } from './apply'
+import { findSsrHazards } from '../autonomy/ssr'
 import { GATE_REPAIR_ROUNDS, GATE_REPAIR_SYSTEM, extractCorrected, gateRepairPrompt, splitErrors, tscErrorsByFile } from './gateRepair'
 import { fileProvenance, roleOf, type LedgerDelivery, type LedgerWrite } from './provenance'
 import { buildReceipt, verifyReceipt } from './receipt'
@@ -284,6 +285,39 @@ async function execute(deps: RunnerDeps, id: string, workerId: string, kind: 'ST
     const fv = await verification.run()
     let verifier: ChangeReceipt['verifier'] = { label: verification.label, exitCode: fv.exitCode ?? -1, summary: (fv.stdout + '\n' + fv.stderr).trim().split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ').slice(0, 400) || 'no summary', at: clock().toISOString() }
     if (fv.exitCode !== 0) { await finishAs('FAILED', 'the independent verifier failed on the final workspace', noInt, noInst, verifier); return }
+    // ---- server-render hazards (application code that will be built into an installation): the type checker cannot see them and `next build` would fail minutes later, so they are repaired now, naming the exact lines
+    if (m0.install) {
+      for (let round = 1; round <= 2; round++) {
+        if (!owns()) { store.event(id, { kind: 'LATE_RESULT_DISCARDED', detail: `worker ${workerId} lost the mission during the server-render check`, attempt: attemptNo }); return }
+        const fin0 = ws.snapshot()
+        const inScope = (p: string) => m0.scope.write.some((w) => p === w || p.startsWith(w.replace(/\/$/, '') + '/'))
+        // every client component the mission may write, not only the ones changed in this run: a repair mission starts from a seed that already contains the hazard
+        const changedUi = Object.keys(fin0).filter((p) => /\.(tsx|jsx)$/.test(p) && inScope(p))
+        const hz = findSsrHazards(changedUi.map((p) => ({ path: p, text: ws.read(p) })))
+        if (!hz.length) { if (round > 1) store.event(id, { kind: 'SSR_CHECK', detail: 'no server-render hazards remain', attempt: attemptNo }); break }
+        setState(deps, id, workerId, 'RUNNING', `repairing server-render hazards (round ${round}) in ${[...new Set(hz.map((h) => h.path))].join(', ')}`); beat('server-render repair', true)
+        store.event(id, { kind: 'SSR_HAZARD', detail: hz.slice(0, 4).map((h) => `${h.path}:${h.line} ${h.text}`).join(' | ').slice(0, 500), attempt: attemptNo })
+        let wrote = 0
+        for (const file of new Set(hz.map((h) => h.path))) {
+          const errs = hz.filter((h) => h.path === file).map((h) => `line ${h.line}: \`${h.text}\` — ${h.why}. Use a safe server value as the initial state and read the browser global inside useEffect (then set state).`)
+          const cur = ws.read(file)
+          const r = await lineup.builder.model.generate({ system: GATE_REPAIR_SYSTEM.replace('compile errors reported by the repository\'s own TypeScript check', 'server-render hazards found by static analysis (the production build prerenders this component on the server, where window, document, localStorage and matchMedia do not exist)'), prompt: gateRepairPrompt(file, cur, errs, [], 'Static analysis found these server-render hazards in this file:'), maxTokens: 6000, timeoutMs: 300_000 })
+          if (!r.ok) { store.event(id, { kind: 'SSR_REPAIR_FAILED', detail: `${file}: ${r.detail}`, attempt: attemptNo }); continue }
+          const author = `${r.executor.provider}/${r.executor.model}`
+          deliveries.push({ type: 'delivery', model: r.executor.model, provider: r.executor.provider, role: roleOf(author, cfg), attempt: attemptNo, recovered, latencyMs: r.latencyMs, outputTokens: r.outputTokens, at: clock().toISOString() }); store.ledgerAppend(id, deliveries[deliveries.length - 1])
+          const fixed = extractCorrected(r.text, cur)
+          if (!fixed || fixed === cur) { store.event(id, { kind: 'SSR_REPAIR_NOOP', detail: `${file}: the reply changed nothing usable`, attempt: attemptNo }); continue }
+          const w = ws.write(file, fixed)
+          const e: LedgerWrite = { type: 'write', path: file, stepId: `ssr-repair-${round}`, tag: ':ssr-repair', author, role: roleOf(author, cfg), deterministic: false, autofixed: false, attempt: attemptNo, recovered, workerId, beforeHash: w.beforeHash, afterHash: w.afterHash, at: clock().toISOString() }
+          writes.push(e); store.ledgerAppend(id, e); wrote++
+          store.event(id, { kind: 'SSR_REPAIR', detail: `round ${round}: ${file} rewritten against ${errs.length} server-render hazard(s)`, attempt: attemptNo })
+        }
+        if (!wrote) break
+        const re = await verification.run()
+        verifier = { ...verifier, exitCode: re.exitCode ?? -1, at: clock().toISOString(), summary: `after server-render repair: ${(re.stdout + '\n' + re.stderr).trim().split('\n').filter((l) => /^(not ok|# )/.test(l)).join(' | ').slice(0, 300)}` }
+        if (re.exitCode !== 0) { await finishAs('FAILED', 'the independent verifier failed after the server-render repair', noInt, noInst, verifier); return }
+      }
+    }
     // ---- integration into the repository branch (only for repository missions)
     let integration = noInt
     if (m0.scope.source) {

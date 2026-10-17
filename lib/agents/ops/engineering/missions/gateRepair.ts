@@ -23,10 +23,10 @@ export function splitErrors(byFile: Map<string, string[]>, missionFiles: string[
   return { mine, others }
 }
 
-export function gateRepairPrompt(file: string, content: string, errors: string[], related: { path: string; text: string }[]): string {
+export function gateRepairPrompt(file: string, content: string, errors: string[], related: { path: string; text: string }[], lead = 'The repository type check reports these errors in this file:'): string {
   return [
     `FILE TO FIX: ${file}`,
-    'The repository type check reports these errors in this file:',
+    lead,
     ...errors.map((e) => `- ${e}`),
     ...(related.length ? ['', 'FILES THIS ONE RELIES ON (already correct; do not rewrite them):', ...related.map((r) => `--- ${r.path}\n${r.text.slice(0, 3000)}`)] : []),
     '', 'CURRENT CONTENT OF THE FILE:', '```', content, '```',
