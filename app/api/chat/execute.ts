@@ -831,6 +831,21 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
   // full multi-provider Council deliberation below and are answered deterministically from
   // structured project/open-loop/memory state (see lib/intent-prerouter). Everything else falls
   // through to the unchanged Council pipeline exactly as before this block was added.
+  // Council -> Foundry: an engineering command ("Foundry, build ...", "Council, build this") is handed to Foundry's autonomous controller, which owns the mission.
+  // This runs for local War Room conversations too (ids like lcnv_<32 hex>, which are detached from the remote-conversation path above), because the desktop app uses those.
+  {
+    const localConvId = typeof body.conversationId === 'string' && /^lcnv_[0-9a-f]{32}$/i.test(body.conversationId.trim()) ? body.conversationId.trim() : null
+    const foundryConvId = conversationId ?? localConvId
+    if (foundryConvId && !conversationalTurn) {
+      const foundryHandled = await import('@/lib/intent-prerouter/foundry')
+        .then(mod => mod.tryHandleFoundryCommand(req, message, foundryConvId))
+        .catch(error => {
+          console.error('[foundry-prerouter] failed, falling through to Council pipeline:', error instanceof Error ? error.message : error)
+          return null
+        })
+      if (foundryHandled) return foundryHandled
+    }
+  }
   if (conversationId && !conversationalTurn) {
     const preRouted = await import('@/lib/intent-prerouter/handle')
       .then(mod => mod.tryHandleIntentPreRouter(message, conversationId))
@@ -855,6 +870,7 @@ export async function executeCouncilChatRequest(req: Request, options: ExecuteCo
       .then(mod => mod.tryHandleFoundryCommand(req, message, conversationId))
       .catch(error => { console.error('[foundry-prerouter]', error); return null })
     if (foundryHandled) return foundryHandled
+
   }
 
   councilTrace.record('request_received', {
