@@ -135,7 +135,7 @@ if (!fails.length) {
   ok(/aria-pressed/.test(c), 'toggle must expose aria-pressed')
   const m = readFileSync(path.join(root, M), 'utf8')
   ok(new RegExp('import[^;\\\\n]*\\\\b' + NAME + '\\\\b').test(m) && new RegExp('<' + NAME + '\\\\s*/>').test(m), 'ClientProviders must import and render <' + NAME + ' />')
-  ok(/MediaHost/.test(m) && /ApplicationActivityGovernor/.test(m), 'ClientProviders must keep its existing providers')
+  ok((/ManualCopyProvider/.test(m) && /<ManualCopyProvider>/.test(m)) || (/MediaHost/.test(m) && /ApplicationActivityGovernor/.test(m)), 'ClientProviders must keep its existing providers')
   // the engine runs this verifier BEFORE it authors the test file, so a missing test file is not a verifier failure here; the controller requires the planned test file afterwards
   const tf = path.join(root, ${JSON.stringify(`test/${n.slug}.test.mjs`)})
   if (existsSync(tf)) { const r = spawnSync(process.execPath, ['--test', tf], { cwd: root, encoding: 'utf8', timeout: 100000 }); ok(r.status === 0, 'the delivered logic tests fail: ' + (r.stdout + r.stderr).split('\\n').filter((l) => /^not ok|# fail/.test(l.trim())).slice(0, 3).join(' | ')) }

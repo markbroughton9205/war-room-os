@@ -78,7 +78,11 @@ export function SpaceshipCursor() {
 `
 
 /** ClientProviders with the cursor mounted (what a correct mission produces from the real file). */
-export const mountInto = (providers: string): string => providers.replace("import { CouncilSourceNavigationProvider }", "import { SpaceshipCursor } from '@/components/war-room/SpaceshipCursor'\nimport { CouncilSourceNavigationProvider }").replace('<MediaHost />', '<MediaHost />\n              <SpaceshipCursor />')
+export const mountInto = (providers: string): string => {
+  const statement = "import { SpaceshipCursor } from '@/components/war-room/SpaceshipCursor'"
+  if (providers.includes('import { CouncilSourceNavigationProvider }')) return providers.replace('import { CouncilSourceNavigationProvider }', statement + '\nimport { CouncilSourceNavigationProvider }').replace('<MediaHost />', '<MediaHost />\n              <SpaceshipCursor />')
+  return providers.replace("import type { ReactNode } from 'react'", "import type { ReactNode } from 'react'\n" + statement).replace('<ManualCopyProvider>{children}', '<ManualCopyProvider><SpaceshipCursor />{children}')
+}
 
 /** A plain HTML page that implements the SAME DOM contract in the browser, with switchable defects, to exercise the real-input proof without a Next build. */
 export function proofPage(defect: 'none' | 'captures-pointer' | 'pulses-never-leave' | 'no-toggle-effect' | 'wrapper' | 'ship-stuck' = 'none'): string {
