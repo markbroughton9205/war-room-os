@@ -9,6 +9,8 @@ import type { NativeRepairProposal, PatchPolicyResult, PatchPolicyViolation, Str
 
 export const MAX_CHANGED_FILES = 5
 export const MAX_CHANGED_LINES = 150
+/** Dedicated Foundry authoring ceiling; does not change the restrictive default patch policy. */
+export const AUTHORING_MAX_CHANGED_LINES = 2000
 /** Conservative fixed line-budget charge for a delete_file patch (policy reads nothing from disk,
  * so the real line count is unknowable here — see validateOnePatch). */
 export const DELETE_FILE_LINE_COST = 50
