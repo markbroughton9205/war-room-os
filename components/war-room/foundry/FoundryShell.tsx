@@ -1455,7 +1455,7 @@ function FoundryShellInner({ basePath = DEFAULT_BASE_PATH }: { basePath?: string
         </div>
       ) : null}
     <div className={`relative grid min-h-[calc(100vh-4.5rem)] grid-cols-1 gap-2 lg:grid-cols-[208px_minmax(0,1fr)] lg:grid-rows-[calc(100vh-4.5rem)_auto] ${showInspector ? 'xl:grid-cols-[208px_minmax(0,1fr)_320px]' : ''}`} data-testid="foundry-normal-mode" data-inspector={showInspector ? 'open' : 'closed'} onClick={() => setMenu(null)}>
-      <MatrixBackground contained channelOverride={workVisual.matrixChannel} intensity={workVisual.intensity} />
+      <MatrixBackground />
       <FoundryTerraBackground terraContext={terraMode} />
       <aside className="foundry-glass foundry-q-rail relative z-10 flex max-h-[34vh] min-h-0 flex-col space-y-3 overflow-y-auto rounded-lg p-2.5 lg:max-h-none" data-testid="foundry-left">
         <div className="px-1 py-0.5" data-testid="foundry-identity-rail">

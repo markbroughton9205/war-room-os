@@ -18,10 +18,12 @@
  * a secret printed by a build tool must never land in .war-room/ persistence or an SSE frame.
  */
 import { execFile, spawn } from 'node:child_process'
+import path from 'node:path'
 import { promisify } from 'node:util'
-import { access } from 'node:fs/promises'
-import { constants as FsConstants } from 'node:fs'
+import { access, realpath } from 'node:fs/promises'
+import { constants as FsConstants, lstatSync, realpathSync } from 'node:fs'
 import { resolveRepoRoot } from '@/lib/repo/paths'
+import { classifyCommandCwd } from './commandPolicy'
 import { getRepoStatus } from '@/lib/repo/status'
 import { previewDiff } from '@/lib/repo/diff'
 import { resolveRepoRelativePath } from './repositoryInspector'
@@ -34,11 +36,13 @@ import {
   unregisterActiveProcess,
 } from './processRegistry'
 import type { NativeValidationOperation, NativeValidationResult } from './types'
+import { assertShellArgvGoverned } from '@/lib/permissions/equivalentActionGuard'
 
 const execFileAsync = promisify(execFile)
 const MAX_BUFFER = 10 * 1024 * 1024
 const DEFAULT_TIMEOUT_MS = 120_000
 const BUILD_TIMEOUT_MS = 400_000
+const PACKAGE_TIMEOUT_MS = 600_000
 const CAPTURE_LIMIT = 20_000
 
 /** pnpm on Windows resolves via a .cmd shim, which execFile/spawn need shell:true to locate — args
@@ -54,7 +58,7 @@ async function runExecFile(
       windowsHide: true,
       maxBuffer: MAX_BUFFER,
       timeout: opts.timeoutMs,
-      shell: process.platform === 'win32',
+      shell: false,
     })
     return { stdout, stderr, exitCode: 0 }
   } catch (error) {
@@ -88,7 +92,7 @@ function runSpawnedStreaming(
   cmd: string,
   args: string[],
   opts: { cwd: string; timeoutMs: number; operationId: string; streaming?: StreamingRunOptions },
-): Promise<{ stdout: string; stderr: string; exitCode: number | null }> {
+): Promise<{ stdout: string; stderr: string; exitCode: number | null; timedOut?: boolean }> {
   return new Promise(resolve => {
     const emit = (stream: 'stdout' | 'stderr' | 'system', text: string) => {
       const safe = redactSecretsFromOutput(text)
@@ -100,7 +104,7 @@ function runSpawnedStreaming(
     const child = spawn(cmd, args, {
       cwd: opts.cwd,
       windowsHide: true,
-      shell: process.platform === 'win32',
+      shell: false,
       detached: process.platform !== 'win32',
     })
 
@@ -109,21 +113,22 @@ function runSpawnedStreaming(
     let stdout = ''
     let stderr = ''
     let finished = false
-    const finish = (exitCode: number | null) => {
+    const finish = (exitCode: number | null, timedOut = false) => {
       if (finished) return
       finished = true
       clearTimeout(timer)
       if (opts.streaming?.repairId) unregisterActiveProcess(opts.streaming.repairId, child)
-      resolve({ stdout, stderr, exitCode })
+      resolve({ stdout, stderr, exitCode, timedOut })
     }
 
     const timer = setTimeout(() => {
       emit('system', `[timeout] exceeded ${opts.timeoutMs}ms — killing process tree.`)
+      stderr = (stderr + `\n[timeout] exceeded ${opts.timeoutMs}ms`).slice(-CAPTURE_LIMIT)
       if (opts.streaming?.repairId) {
-        void killProcessesForRepair(opts.streaming.repairId).then(() => finish(null))
+        void killProcessesForRepair(opts.streaming.repairId).then(() => finish(null, true))
       } else {
         child.kill('SIGKILL')
-        finish(null)
+        finish(null, true)
       }
     }, opts.timeoutMs)
 
@@ -161,13 +166,18 @@ async function isRegisteredValidationScript(relPath: string): Promise<boolean> {
 
 function validateTargetFiles(targets: string[] | undefined): string[] {
   if (!targets?.length) return []
-  const out: string[] = []
-  for (const t of targets) {
-    // throws RepoAccessDeniedError (propagates) if the target escapes the repo or hits a denylisted path
-    resolveRepoRelativePath(t)
-    out.push(t)
-  }
-  return out
+  const root = realpathSync(resolveRepoRoot())
+  return targets.map(t => {
+    // A leading dash or shell control characters must never become interpreter argv.
+    if (!t || t.startsWith('-') || path.basename(t).startsWith('-') || /[\x00-\x1f;$`|><]/.test(t)) throw new Error('Validation target contains prohibited characters.')
+    const abs = resolveRepoRelativePath(t)
+    const lst = lstatSync(abs) // reject non-existent test files; no speculative target execution
+    if (!lst.isFile() || lst.isSymbolicLink()) throw new Error('Validation target is not a regular file.')
+    const real = realpathSync(abs)
+    const rel = path.relative(root, real)
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error('Validation target escapes the workspace.')
+    return rel.split(path.sep).join('/')
+  })
 }
 
 type ResolvedArgv = { cmd: string; args: string[]; timeoutMs: number }
@@ -184,14 +194,86 @@ async function resolveOperationArgv(
     case 'eslint_targeted': {
       const files = validateTargetFiles(op.targets)
       if (!files.length) return { ok: false, error: 'eslint_targeted requires at least one target file.' }
-      return { ok: true, argv: { cmd: 'pnpm', args: ['exec', 'eslint', ...files, '--max-warnings=0'], timeoutMs: DEFAULT_TIMEOUT_MS } }
+      // The installed runtime carries its own pinned ESLint closure; workspace files remain the lint targets.
+      const bundled = path.join(process.cwd(), 'toolchain', 'node_modules', 'eslint', 'bin', 'eslint.js')
+      try {
+        await access(bundled, FsConstants.R_OK)
+        const cli = await realpath(bundled)
+        const root = await realpath(resolveRepoRoot())
+        const relative = path.relative(root, cli)
+        if (!relative.startsWith('..' + path.sep) && !path.isAbsolute(relative)) return { ok: false, error: 'Bundled lint toolchain must be outside the mission workspace.' }
+        const { foundryNodeExecutable } = await import('./foundryProjectIsolation')
+        return { ok: true, argv: { cmd: foundryNodeExecutable(), args: [cli, '--max-warnings=0', '--', ...files], timeoutMs: DEFAULT_TIMEOUT_MS } }
+      } catch { /* Ordinary source checkouts use their own package-manager toolchain. */ }
+      return { ok: true, argv: { cmd: 'pnpm', args: ['exec', 'eslint', '--max-warnings=0', '--', ...files], timeoutMs: DEFAULT_TIMEOUT_MS } }
     }
 
     case 'build':
       return { ok: true, argv: { cmd: 'pnpm', args: ['run', 'build'], timeoutMs: BUILD_TIMEOUT_MS } }
 
+    case 'prepare_desktop_runtime':
+      return { ok: true, argv: { cmd: 'node', args: ['scripts/prepare-desktop-runtime.mjs'], timeoutMs: BUILD_TIMEOUT_MS } }
+
+    case 'package_desktop_linux':
+      return { ok: true, argv: { cmd: 'npm', args: ['run', 'desktop:dist:linux'], timeoutMs: PACKAGE_TIMEOUT_MS } }
+
     case 'git_diff_check':
       return { ok: true, argv: { cmd: 'git', args: ['diff', '--check'], timeoutMs: DEFAULT_TIMEOUT_MS } }
+
+    case 'node_test': {
+      const files = validateTargetFiles(op.targets)
+      // The War Room tree keeps its scripts/foundry convention; any other workspace may test any test file inside it (containment was enforced by validateTargetFiles).
+      const { isWarRoomSourceTree } = await import('./foundryWorkspaceKind')
+      const warRoom = isWarRoomSourceTree(path.resolve(resolveRepoRoot()))
+      const scoped = files.filter(file => (warRoom ? /^scripts\/foundry\/.+\.test\.(mjs|js)$/ : /(^|\/)[^/]+\.(test|spec)\.(mjs|cjs|js|ts)$/).test(file))
+      if (files.length && scoped.length !== files.length) {
+        return { ok: false, error: warRoom ? 'node_test targets must be scripts/foundry/*.test.mjs files.' : 'node_test targets must be *.test.* or *.spec.* files inside the workspace.' }
+      }
+      const { foundryNodeExecutable } = await import('./foundryProjectIsolation')
+      return { ok: true, argv: { cmd: foundryNodeExecutable(), args: scoped.length ? ['--test', '--', ...scoped] : ['--test'], timeoutMs: DEFAULT_TIMEOUT_MS } }
+    }
+
+    case 'package_install': {
+      const pm = op.targets?.[0] === 'npm' ? 'npm' : op.targets?.[0] === 'yarn' ? 'yarn' : 'pnpm'
+      return { ok: true, argv: { cmd: pm, args: ['install'], timeoutMs: BUILD_TIMEOUT_MS } }
+    }
+
+    case 'package_script': {
+      const script = op.targets?.[0]
+      const allowed = new Set(['test', 'build', 'lint', 'typecheck', 'start'])
+      if (!script || !allowed.has(script)) {
+        return { ok: false, error: 'package_script requires an allowlisted script (test, build, lint, typecheck, start).' }
+      }
+      const pm = op.targets?.[1] === 'pnpm' ? 'pnpm' : op.targets?.[1] === 'yarn' ? 'yarn' : 'npm'
+      return { ok: true, argv: { cmd: pm, args: ['run', script], timeoutMs: BUILD_TIMEOUT_MS } }
+    }
+
+    case 'http_probe':
+      return { ok: false, error: 'http_probe is handled by the dedicated localhost probe, not argv spawn.' }
+
+    case 'validate_suite': {
+      const suite = op.targets?.[0]
+      if (!suite) return { ok: false, error: 'validate_suite requires a target script name.' }
+      if (!suite.startsWith('validate:')) {
+        return { ok: false, error: 'validate_suite only allows package.json scripts prefixed "validate:" (the project\'s test convention per CLAUDE.md).' }
+      }
+      if (suite.endsWith(':live')) {
+        return { ok: false, error: 'Live-acceptance suites (suffix ":live") call real external services and are excluded from test.run.' }
+      }
+      let scripts: Record<string, string> = {}
+      try {
+        const raw = await access(resolveRepoRelativePath('package.json'), FsConstants.F_OK).then(() => true).catch(() => false)
+        if (!raw) return { ok: false, error: 'package.json not found.' }
+        const { readFile } = await import('node:fs/promises')
+        scripts = (JSON.parse(await readFile(resolveRepoRelativePath('package.json'), 'utf8')) as { scripts?: Record<string, string> }).scripts ?? {}
+      } catch (error) {
+        return { ok: false, error: `Failed to read package.json scripts: ${error instanceof Error ? error.message : String(error)}` }
+      }
+      if (!Object.prototype.hasOwnProperty.call(scripts, suite)) {
+        return { ok: false, error: `Unknown package.json script: "${suite}".` }
+      }
+      return { ok: true, argv: { cmd: 'pnpm', args: ['run', suite], timeoutMs: BUILD_TIMEOUT_MS } }
+    }
 
     case 'validation_script': {
       const script = op.targets?.[0]
@@ -208,7 +290,21 @@ async function resolveOperationArgv(
   }
 }
 
-function toResult(op: NativeValidationOperation, captured: { stdout: string; stderr: string; exitCode: number | null }, startedAt: number): NativeValidationResult {
+/** #22 Phase 1 — reject argv that is an equivalent of a forbidden dangerous action (e.g. git push). */
+export function assertResolvedArgvNotDangerousEquivalent(cmd: string, args: readonly string[]): string | null {
+  const gate = assertShellArgvGoverned({
+    cmd,
+    args,
+    mode: 'commander',
+    safetyLock: true,
+    body: {},
+    commanderSessionOk: false,
+  })
+  if (gate.outcome !== 'ALLOW') return gate.reason
+  return null
+}
+
+function toResult(op: NativeValidationOperation, captured: { stdout: string; stderr: string; exitCode: number | null; timedOut?: boolean }, startedAt: number): NativeValidationResult {
   return {
     operation: op,
     ok: captured.exitCode === 0,
@@ -217,6 +313,52 @@ function toResult(op: NativeValidationOperation, captured: { stdout: string; std
     stderr: redactSecretsFromOutput(captured.stderr).slice(0, CAPTURE_LIMIT),
     durationMs: Date.now() - startedAt,
     ranAt: new Date().toISOString(),
+    timedOut: captured.timedOut === true,
+  }
+}
+
+function isLoopbackUrl(raw: string): boolean {
+  try {
+    const url = new URL(raw)
+    return url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost')
+  } catch {
+    return false
+  }
+}
+
+async function runHttpProbe(op: NativeValidationOperation, startedAt: number): Promise<NativeValidationResult> {
+  const target = op.targets?.[0] ?? 'http://127.0.0.1:18765/'
+  if (!isLoopbackUrl(target)) {
+    return toResult(op, { stdout: '', stderr: 'http_probe only allows http://127.0.0.1 or http://localhost.', exitCode: 1 }, startedAt)
+  }
+  try {
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 4000)
+    const res = await fetch(target, { signal: controller.signal })
+    clearTimeout(timeout)
+    const body = await res.text().catch(() => '')
+    const ok = res.status >= 200 && res.status < 300
+    return toResult(
+      op,
+      {
+        stdout: redactSecretsFromOutput(`HTTP ${res.status} ${body.slice(0, 500)}`),
+        stderr: ok ? '' : `Unexpected status ${res.status}`,
+        exitCode: ok ? 0 : 1,
+      },
+      startedAt,
+    )
+  } catch (error) {
+    const timedOut = error instanceof Error && (error.name === 'AbortError' || /aborted/i.test(error.message))
+    return toResult(
+      op,
+      {
+        stdout: '',
+        stderr: error instanceof Error ? error.message : String(error),
+        exitCode: 1,
+        timedOut,
+      },
+      startedAt,
+    )
   }
 }
 
@@ -224,9 +366,18 @@ function toResult(op: NativeValidationOperation, captured: { stdout: string; std
 export async function runValidationOperation(op: NativeValidationOperation): Promise<NativeValidationResult> {
   const repoRoot = resolveRepoRoot()
   const startedAt = Date.now()
+  const cwdPolicy = classifyCommandCwd(repoRoot, repoRoot)
+  if (cwdPolicy.policyClass !== 'SAFE_LOCAL') {
+    return toResult(op, { stdout: '', stderr: cwdPolicy.reason, exitCode: 1 }, startedAt)
+  }
+  if (op.id === 'http_probe') return runHttpProbe(op, startedAt)
   const resolved = await resolveOperationArgv(op)
   if (!resolved.ok) {
     return toResult(op, { stdout: '', stderr: resolved.error, exitCode: 1 }, startedAt)
+  }
+  const bypass = assertResolvedArgvNotDangerousEquivalent(resolved.argv.cmd, resolved.argv.args)
+  if (bypass) {
+    return toResult(op, { stdout: '', stderr: bypass, exitCode: 1 }, startedAt)
   }
   const captured = await runExecFile(resolved.argv.cmd, resolved.argv.args, { cwd: repoRoot, timeoutMs: resolved.argv.timeoutMs })
   return toResult(op, captured, startedAt)
@@ -240,9 +391,18 @@ export async function runValidationOperationStreaming(
 ): Promise<NativeValidationResult> {
   const repoRoot = resolveRepoRoot()
   const startedAt = Date.now()
+  const cwdPolicy = classifyCommandCwd(repoRoot, repoRoot)
+  if (cwdPolicy.policyClass !== 'SAFE_LOCAL') {
+    return toResult(op, { stdout: '', stderr: cwdPolicy.reason, exitCode: 1 }, startedAt)
+  }
+  if (op.id === 'http_probe') return runHttpProbe(op, startedAt)
   const resolved = await resolveOperationArgv(op)
   if (!resolved.ok) {
     return toResult(op, { stdout: '', stderr: resolved.error, exitCode: 1 }, startedAt)
+  }
+  const bypass = assertResolvedArgvNotDangerousEquivalent(resolved.argv.cmd, resolved.argv.args)
+  if (bypass) {
+    return toResult(op, { stdout: '', stderr: bypass, exitCode: 1 }, startedAt)
   }
   streaming.onOutput?.({ operationId: op.id, stream: 'system', text: `[run] ${resolved.argv.cmd} ${resolved.argv.args.join(' ')}` })
   if (streaming.repairId) appendCommandOutput(streaming.repairId, op.id, 'system', `[run] ${resolved.argv.cmd} ${resolved.argv.args.join(' ')}`)

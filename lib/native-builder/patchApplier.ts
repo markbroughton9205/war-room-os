@@ -4,7 +4,7 @@
  * and the whole proposal is applied transactionally: if any file in the batch fails, everything
  * already written in this run is reverted before returning.
  */
-import { access, rm, writeFile } from 'node:fs/promises'
+import { access, open, rm, writeFile } from 'node:fs/promises'
 import { constants as FsConstants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import type { NativeRepairProposal, StructuredPatch } from './types'
@@ -65,7 +65,17 @@ async function applyOnePatch(repairId: string, patch: StructuredPatch): Promise<
       return { file: patch.file, ok: false, detail: 'create_file refused: file already exists.' }
     }
     await snapshotFileBeforePatch(repairId, patch.file, null, false)
-    await writeFile(abs, patch.newFileContent ?? '', 'utf8')
+    // Atomic exclusive create rejects existing dangling symlinks too (access() cannot detect them).
+    // O_NOFOLLOW also rejects a leaf symlink planted between policy verification and open().
+    let handle
+    try {
+      handle = await open(abs, FsConstants.O_WRONLY | FsConstants.O_CREAT | FsConstants.O_EXCL | (FsConstants.O_NOFOLLOW ?? 0), 0o600)
+      await handle.writeFile(patch.newFileContent ?? '', 'utf8')
+    } catch (error) {
+      return { file: patch.file, ok: false, detail: `create_file refused: unable to create an exclusive regular file (${error instanceof Error ? error.message : 'unknown error'}).` }
+    } finally {
+      await handle?.close()
+    }
     return { file: patch.file, ok: true, detail: 'File created.' }
   }
 
@@ -113,8 +123,8 @@ async function applyOnePatch(repairId: string, patch: StructuredPatch): Promise<
  * function does not itself gate on approval (the API route layer does, via
  * lib/permissions/policy.ts assertAutoOrApproval with actionKind 'file_modification').
  */
-export async function applyProposal(repairId: string, proposal: NativeRepairProposal): Promise<PatchApplyResult> {
-  const policy = validatePatchPolicy(proposal)
+export async function applyProposal(repairId: string, proposal: NativeRepairProposal, options?: { maxChangedLines?: number }): Promise<PatchApplyResult> {
+  const policy = validatePatchPolicy(proposal, options)
   if (!policy.ok) {
     return {
       ok: false,

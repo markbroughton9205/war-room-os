@@ -1,29 +1,150 @@
 /**
- * Phase B — workspace registry. Tracks explicit workspace identities (currently: "Open Existing
- * Repository" only — New Project and Clone Repository are documented as the remaining bounded
- * capability, see the Phase B section of the completion report). Stored as a single JSON file
- * under the process's own base repo root (resolveBaseRepoRoot(), NOT resolveRepoRoot() — the
- * registry must always be discoverable regardless of which workspace is currently active),
- * mirroring the existing file-based JSON pattern in native-builder/storage.ts and
- * repo/checkpoint-store.ts. No new persistence system introduced.
+ * Workspace registry — canonical Engineer project identity.
+ *
+ * Extends Phase B: still stores JSON under the process base repo (resolveBaseRepoRoot),
+ * still uses realpath to close traversal/symlink tricks at registration. Adds:
+ *   - configurable projects root (WAR_ROOM_PROJECTS_ROOT, default C:\\Users\\markb\\WarRoomProjects)
+ *   - prefix allowlist (War Room root exact + projects root children)
+ *   - New Project (empty directory under projects root)
+ *   - Open existing non-git directories that sit inside the allowlist
+ *   - richer records (git/package/runtime/memory pointers)
+ *
+ * CODE_OPERATOR_ALLOWED_ROOTS is retained as a historical extra root (if it exists on disk).
+ * It is no longer the sole allowlist.
  */
-import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, stat } from 'node:fs/promises'
+import os from 'node:os'
+import { transactJsonFile } from './foundryJsonTransaction'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { resolveBaseRepoRoot } from '@/lib/repo/paths'
+import { recordBoundaryViolation } from './boundaryLog'
+import {
+  WAR_ROOM_CANONICAL_WORKSPACE_ID,
+  classifyWorkspaceRoot,
+  decorateWorkspaceIdentity,
+  getCanonicalWarRoomSourceRoot,
+  type FoundryWorkspaceType,
+} from './foundryWorkspaceIdentity'
+import {
+  decorateProjectVisibility,
+  filterProjectsForView,
+  type FoundryProjectClassification,
+  type FoundryProjectHistoryView,
+} from './foundryProjectVisibility'
+
+const execFileAsync = promisify(execFile)
 
 export interface WorkspaceRecord {
   id: string
   root: string
   label: string
   createdAt: string
+  name?: string
+  path?: string
+  projectType?: 'war_room' | 'new_project' | 'existing_project' | 'external_repository'
+  lastOpenedAt?: string
+  gitRepository?: boolean
+  gitBranch?: string
+  allowedScope?: string
+  validationCommands?: string[]
+  packageManager?: 'pnpm' | 'npm' | 'yarn' | 'pip' | 'uv' | 'cargo' | 'dotnet' | 'none'
+  runtime?: string
+  framework?: string
+  projectMemoryRel?: string
+  missionHistory?: string[]
+  workspaceType?: FoundryWorkspaceType
+  displayTitle?: string
+  displayKind?: string
+  classification?: FoundryProjectClassification
+  classificationEvidence?: string[]
+  visibility?: 'commander' | 'system'
+  testArtifact?: boolean
+  archived?: boolean
+  previewUrl?: string | null
+  previewPort?: number | null
+  previewLive?: boolean
+  runtimeStatus?: 'RUNNING' | 'STOPPED' | 'BUILDING' | 'NEEDS_ATTENTION'
+  lastWorkedAt?: string
+  applicationProjectId?: string
+  projectKindLabel?: string
 }
 
 const REGISTRY_REL = path.join('.war-room', 'workspaces', 'registry.json')
+/** Historical exact-root allowlist — still honored if the path exists. */
 export const CODE_OPERATOR_ALLOWED_ROOTS = ['/Users/markbroughton/Developer/war-room-os'] as const
 
 function registryPath(): string {
   return path.join(resolveBaseRepoRoot(), REGISTRY_REL)
+}
+
+export function getProjectsRoot(): string {
+  const env = process.env.WAR_ROOM_PROJECTS_ROOT?.trim()
+  if (env) return path.resolve(env)
+  if (process.platform === 'win32') return 'C:\\Users\\markb\\WarRoomProjects'
+  return path.join(os.homedir(), 'WarRoomProjects')
+}
+
+export async function getEngineerAllowedRoots(): Promise<string[]> {
+  const roots: string[] = []
+  const add = async (candidate: string) => {
+    try {
+      const canonical = await realpath(candidate)
+      if (!roots.includes(canonical)) roots.push(canonical)
+    } catch {
+      /* not present on this machine — skip, never fabricate */
+    }
+  }
+  await add(getCanonicalWarRoomSourceRoot())
+  const base = resolveBaseRepoRoot()
+  if (classifyWorkspaceRoot(base) !== 'INSTALLED_RUNTIME') await add(base)
+  try {
+    await mkdir(getProjectsRoot(), { recursive: true })
+    await add(getProjectsRoot())
+  } catch {
+    /* projects root could not be created */
+  }
+  try {
+    const foundryProjects = process.env.FOUNDRY_PROJECTS_ROOT?.trim()
+      ? path.resolve(process.env.FOUNDRY_PROJECTS_ROOT.trim())
+      : path.join(os.homedir(), 'FoundryProjects')
+    await mkdir(foundryProjects, { recursive: true })
+    await add(foundryProjects)
+  } catch {
+    /* FoundryProjects root could not be created */
+  }
+  for (const historical of CODE_OPERATOR_ALLOWED_ROOTS) {
+    await add(historical)
+  }
+  const extra = process.env.WAR_ROOM_ENGINEER_ALLOWED_ROOTS?.split(path.delimiter) ?? []
+  for (const item of extra) {
+    if (item.trim()) await add(item.trim())
+  }
+  return roots
+}
+
+export function isPathInsideRoot(canonicalPath: string, canonicalRoot: string): boolean {
+  if (/^[A-Za-z]:[\\/]/.test(canonicalPath) && process.platform !== 'win32') return false
+  if (/^[A-Za-z]:[\\/]/.test(canonicalRoot) && process.platform !== 'win32') return false
+  if (!path.isAbsolute(canonicalPath) || !path.isAbsolute(canonicalRoot)) return false
+  const rel = path.relative(canonicalRoot, canonicalPath)
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
+}
+
+export async function assertPathInsideAllowedRoots(canonicalPath: string): Promise<{ ok: true; root: string } | { ok: false; reason: string }> {
+  const allowed = await getEngineerAllowedRoots()
+  const warRoomRoot = allowed[0]
+  for (const root of allowed) {
+    if (!isPathInsideRoot(canonicalPath, root)) continue
+    // War Room: only the repository root itself, not arbitrary subdirectories (work/, WRIM, …).
+    if (warRoomRoot && root === warRoomRoot && canonicalPath !== warRoomRoot) {
+      continue
+    }
+    return { ok: true, root }
+  }
+  return { ok: false, reason: 'Path is outside the Engineer allowlist (War Room root or configured projects root).' }
 }
 
 function isWorkspaceRecord(v: unknown): v is WorkspaceRecord {
@@ -32,33 +153,85 @@ function isWorkspaceRecord(v: unknown): v is WorkspaceRecord {
   return typeof o.id === 'string' && typeof o.root === 'string' && typeof o.label === 'string' && typeof o.createdAt === 'string'
 }
 
-async function readRegistry(): Promise<WorkspaceRecord[]> {
-  try {
-    const raw = await readFile(registryPath(), 'utf8')
-    const parsed = JSON.parse(raw) as unknown
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(isWorkspaceRecord)
-  } catch {
-    return []
+async function readRegistry(target = registryPath()): Promise<WorkspaceRecord[]> {
+  let raw: string
+  try { raw = await readFile(target, 'utf8') } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
   }
+  const parsed: unknown = JSON.parse(raw)
+  if (!Array.isArray(parsed) || !parsed.every(isWorkspaceRecord)) {
+    throw new Error(`Invalid workspace registry at ${target}; existing bytes preserved.`)
+  }
+  return parsed
 }
 
-async function writeRegistry(records: WorkspaceRecord[]): Promise<void> {
-  const p = registryPath()
-  await mkdir(path.dirname(p), { recursive: true })
-  await writeFile(p, JSON.stringify(records, null, 2), 'utf8')
+function updateRegistry<R>(change: (all: WorkspaceRecord[]) => { value: WorkspaceRecord[]; result: R }): Promise<R> {
+  return transactJsonFile(registryPath(), readRegistry, change)
 }
 
 export class WorkspaceValidationError extends Error {}
 
-/**
- * Validates a candidate "Open Existing Repository" path: must be absolute, must exist, must be a
- * directory, must contain a .git directory (i.e. actually be a repository), and is resolved
- * through fs.realpath so registration always stores a canonical, symlink/`..`-resolved path —
- * closing the path-traversal angle at registration time rather than trusting caller-supplied
- * strings.
- */
-async function validateAndCanonicalizeRoot(candidate: string): Promise<string> {
+async function gitMeta(root: string): Promise<{ gitRepository: boolean; gitBranch?: string }> {
+  try {
+    const gitStat = await stat(path.join(root, '.git'))
+    if (!gitStat.isDirectory() && !gitStat.isFile()) return { gitRepository: false }
+  } catch {
+    return { gitRepository: false }
+  }
+  try {
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: root,
+      timeout: 8_000,
+      windowsHide: true,
+    })
+    return { gitRepository: true, gitBranch: stdout.trim() || undefined }
+  } catch {
+    return { gitRepository: true }
+  }
+}
+
+function detectPackageManager(rootHintFiles: { hasPnpm: boolean; hasNpm: boolean; hasYarn: boolean }): WorkspaceRecord['packageManager'] {
+  if (rootHintFiles.hasPnpm) return 'pnpm'
+  if (rootHintFiles.hasYarn) return 'yarn'
+  if (rootHintFiles.hasNpm) return 'npm'
+  return 'none'
+}
+
+async function enrich(record: WorkspaceRecord): Promise<WorkspaceRecord> {
+  const meta = await gitMeta(record.root)
+  let hasPnpm = false
+  let hasNpm = false
+  let hasYarn = false
+  try {
+    await stat(path.join(record.root, 'pnpm-lock.yaml'))
+    hasPnpm = true
+  } catch { /* */ }
+  try {
+    await stat(path.join(record.root, 'package-lock.json'))
+    hasNpm = true
+  } catch { /* */ }
+  try {
+    await stat(path.join(record.root, 'yarn.lock'))
+    hasYarn = true
+  } catch { /* */ }
+  try {
+    await stat(path.join(record.root, 'package.json'))
+    hasNpm = hasNpm || true
+  } catch { /* */ }
+  return {
+    ...record,
+    name: record.name ?? record.label,
+    path: record.root,
+    gitRepository: meta.gitRepository,
+    gitBranch: meta.gitBranch,
+    packageManager: record.packageManager ?? detectPackageManager({ hasPnpm, hasNpm, hasYarn }),
+    allowedScope: record.allowedScope ?? record.root,
+    projectMemoryRel: record.projectMemoryRel ?? '.war-room/engineer/project-memory.json',
+  }
+}
+
+async function canonicalExistingDir(candidate: string): Promise<string> {
   if (!path.isAbsolute(candidate)) {
     throw new WorkspaceValidationError('Workspace path must be absolute.')
   }
@@ -66,31 +239,166 @@ async function validateAndCanonicalizeRoot(candidate: string): Promise<string> {
   try {
     canonical = await realpath(candidate)
   } catch {
+    await recordBoundaryViolation({ action: 'open_workspace', attemptedPath: candidate, reason: 'path does not exist' })
     throw new WorkspaceValidationError('Workspace path does not exist.')
-  }
-  const allowedRoots = await Promise.all(CODE_OPERATOR_ALLOWED_ROOTS.map(root => realpath(root)))
-  if (!allowedRoots.includes(canonical)) {
-    throw new WorkspaceValidationError('Workspace is not in the Code Operator allowlist.')
   }
   const st = await stat(canonical)
   if (!st.isDirectory()) {
     throw new WorkspaceValidationError('Workspace path is not a directory.')
   }
-  try {
-    const gitStat = await stat(path.join(canonical, '.git'))
-    if (!gitStat.isDirectory() && !gitStat.isFile()) {
-      throw new WorkspaceValidationError('Workspace path is not a git repository.')
-    }
-  } catch (err) {
-    if (err instanceof WorkspaceValidationError) throw err
-    throw new WorkspaceValidationError('Workspace path is not a git repository (no .git found).')
+  const allowed = await assertPathInsideAllowedRoots(canonical)
+  if (!allowed.ok) {
+    await recordBoundaryViolation({ action: 'open_workspace', attemptedPath: canonical, reason: allowed.reason })
+    throw new WorkspaceValidationError(allowed.reason)
   }
   return canonical
 }
 
-export async function listWorkspaces(): Promise<WorkspaceRecord[]> {
-  const allowedRoots = new Set(await Promise.all(CODE_OPERATOR_ALLOWED_ROOTS.map(root => realpath(root))))
-  return (await readRegistry()).filter(workspace => allowedRoots.has(workspace.root))
+async function upsert(record: WorkspaceRecord): Promise<WorkspaceRecord> {
+  // Filesystem/git discovery can await outside the transaction. Identity and stored metadata
+  // are merged only after rereading under the shared filesystem lock.
+  const discovered = await enrich(record)
+  return updateRegistry(all => {
+    const existing = all.find(w => w.root === record.root)
+    const merged: WorkspaceRecord = existing ? {
+      ...discovered,
+      ...existing,
+      ...record,
+      id: existing.id,
+      root: existing.root,
+      createdAt: existing.createdAt,
+      path: existing.root,
+      gitRepository: discovered.gitRepository,
+      gitBranch: discovered.gitBranch,
+      lastOpenedAt: new Date().toISOString(),
+    } : { ...discovered, lastOpenedAt: new Date().toISOString() }
+    return {
+      value: existing ? all.map(w => w.id === existing.id ? merged : w) : [...all, merged],
+      result: merged,
+    }
+  })
+}
+
+function withIdentity(record: WorkspaceRecord): WorkspaceRecord {
+  const identity = decorateWorkspaceIdentity({
+    id: record.id,
+    root: record.root,
+    label: record.label,
+    name: record.name,
+  })
+  return {
+    ...record,
+    workspaceType: identity.workspaceType,
+    displayTitle: identity.displayTitle,
+    displayKind: identity.displayKind,
+    label: identity.displayTitle,
+  }
+}
+
+export async function listWorkspaces(view: FoundryProjectHistoryView | 'engine' = 'engine'): Promise<WorkspaceRecord[]> {
+  const allowed = await getEngineerAllowedRoots()
+  const listed = (await readRegistry()).filter(workspace => allowed.some(root => isPathInsideRoot(workspace.root, root)))
+  let canonicalRoot = getCanonicalWarRoomSourceRoot()
+  try {
+    canonicalRoot = await realpath(canonicalRoot)
+  } catch {
+    /* canonical path may be unresolved on this machine */
+  }
+  const withoutCanonicalDupes = listed.filter(w => path.resolve(w.root).toLowerCase() !== path.resolve(canonicalRoot).toLowerCase())
+  withoutCanonicalDupes.unshift(await enrich({
+    id: WAR_ROOM_CANONICAL_WORKSPACE_ID,
+    root: canonicalRoot,
+    label: 'WAR ROOM OS',
+    name: 'WAR ROOM OS',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    projectType: 'war_room',
+    classification: 'COMMANDER_REAL',
+    visibility: 'commander',
+    testArtifact: false,
+    archived: false,
+  }))
+  const decorated = withoutCanonicalDupes.map(record => decorateProjectVisibility(withIdentity(record)))
+  const { listFoundryApplicationProjects, toWorkspaceRecord } = await import('./foundryProjectIsolation')
+  const { presentCommanderProjectCard } = await import('./foundryCommanderProjects')
+  const { reconcileDuplicateFoundryProjects } = await import('./foundryProjectIndexHygiene')
+  if (view === 'commander') await reconcileDuplicateFoundryProjects()
+  const appProjects = await listFoundryApplicationProjects()
+  for (const project of appProjects) {
+    const existing = decorated.find(item => item.id === project.projectId || path.resolve(item.root) === path.resolve(project.projectRoot))
+    const card = await presentCommanderProjectCard(project)
+    if (existing) {
+      existing.previewUrl = card.previewUrl
+      existing.previewPort = card.previewPort
+      existing.previewLive = card.previewLive
+      existing.runtimeStatus = card.runtimeStatus
+      existing.lastWorkedAt = card.lastWorkedAt ?? existing.lastOpenedAt
+      existing.applicationProjectId = card.applicationProjectId ?? project.projectId
+      existing.projectKindLabel = card.kind
+      existing.displayKind = card.kind
+      existing.displayTitle = card.name
+      existing.label = card.name
+    } else {
+      const record = decorateProjectVisibility(withIdentity(toWorkspaceRecord(project)))
+      record.previewUrl = card.previewUrl
+      record.previewPort = card.previewPort
+      record.previewLive = card.previewLive
+      record.runtimeStatus = card.runtimeStatus
+      record.lastWorkedAt = card.lastWorkedAt ?? record.lastOpenedAt
+      record.applicationProjectId = project.projectId
+      record.projectKindLabel = card.kind
+      record.displayKind = card.kind
+      record.displayTitle = card.name
+      record.label = card.name
+      decorated.push(record)
+    }
+  }
+  const canonical = decorated.find(item => item.id === WAR_ROOM_CANONICAL_WORKSPACE_ID)
+  if (canonical) {
+    canonical.projectKindLabel = 'System Project'
+    canonical.displayKind = 'System Project'
+  }
+  if (view === 'engine') return decorated
+  return filterProjectsForView(decorated, view)
+}
+
+export async function archiveConfirmedTestProjects(): Promise<{
+  counts: Record<FoundryProjectClassification, number>
+  archived: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }>
+  preserved: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }>
+}> {
+  return updateRegistry(all => {
+  const counts: Record<FoundryProjectClassification, number> = {
+    COMMANDER_REAL: 0,
+    SYSTEM_TEST: 0,
+    ACCEPTANCE_FIXTURE: 0,
+    CONTRACT_TEST: 0,
+    INTERNAL: 0,
+    UNKNOWN: 0,
+  }
+  const archived: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }> = []
+  const preserved: Array<{ id: string; label: string; root: string; classification: FoundryProjectClassification }> = []
+  const next = all.map(record => {
+    const decorated = decorateProjectVisibility(record)
+    counts[decorated.classification ?? 'UNKNOWN'] += 1
+    if (decorated.testArtifact || decorated.visibility === 'system' || decorated.archived) {
+      archived.push({
+        id: decorated.id,
+        label: decorated.label,
+        root: decorated.root,
+        classification: decorated.classification ?? 'UNKNOWN',
+      })
+    } else {
+      preserved.push({
+        id: decorated.id,
+        label: decorated.label,
+        root: decorated.root,
+        classification: decorated.classification ?? 'UNKNOWN',
+      })
+    }
+    return decorated
+  })
+  return { value: next, result: { counts, archived, preserved } }
+  })
 }
 
 export async function getWorkspace(id: string): Promise<WorkspaceRecord | null> {
@@ -98,19 +406,103 @@ export async function getWorkspace(id: string): Promise<WorkspaceRecord | null> 
   return all.find(w => w.id === id) ?? null
 }
 
-/** "Open Existing Repository" — the one workspace-creation path implemented in Phase B. */
+export async function touchWorkspace(id: string): Promise<WorkspaceRecord | null> {
+  const current = await getWorkspace(id)
+  if (!current) return null
+  return updateRegistry(all => {
+    const stored = all.find(w => w.id === current.id || w.root === current.root)
+    if (!stored) {
+      const touched = { ...current, lastOpenedAt: new Date().toISOString() }
+      return { value: [...all, touched], result: touched }
+    }
+    const touched = { ...stored, lastOpenedAt: new Date().toISOString() }
+    return { value: all.map(w => w.id === stored.id ? touched : w), result: touched }
+  })
+}
+
+/** Phase B path — still requires a git repository. */
 export async function openExistingRepositoryWorkspace(candidatePath: string, label?: string): Promise<WorkspaceRecord> {
-  const root = await validateAndCanonicalizeRoot(candidatePath)
-  const existing = (await readRegistry()).find(w => w.root === root)
-  if (existing) return existing
-  const record: WorkspaceRecord = {
+  const root = await canonicalExistingDir(candidatePath)
+  try {
+    const gitStat = await stat(path.join(root, '.git'))
+    if (!gitStat.isDirectory() && !gitStat.isFile()) {
+      throw new WorkspaceValidationError('Workspace path is not a git repository.')
+    }
+  } catch (err) {
+    if (err instanceof WorkspaceValidationError) throw err
+    throw new WorkspaceValidationError('Workspace path is not a git repository (no .git found).')
+  }
+  return upsert({
     id: randomUUID(),
     root,
     label: label?.trim() || path.basename(root),
     createdAt: new Date().toISOString(),
+    projectType: 'external_repository',
+  })
+}
+
+/** Open an existing directory inside the allowlist. Git is optional. */
+export async function openExistingProjectWorkspace(candidatePath: string, label?: string): Promise<WorkspaceRecord> {
+  const root = await canonicalExistingDir(candidatePath)
+  const meta = await gitMeta(root)
+  return upsert({
+    id: randomUUID(),
+    root,
+    label: label?.trim() || path.basename(root),
+    createdAt: new Date().toISOString(),
+    projectType: meta.gitRepository ? 'existing_project' : 'existing_project',
+  })
+}
+
+const NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,62}$/
+
+export async function createNewProjectWorkspace(input: {
+  name: string
+  initializeGit?: boolean
+  label?: string
+}): Promise<WorkspaceRecord> {
+  const name = input.name.trim()
+  if (!NAME_PATTERN.test(name)) {
+    throw new WorkspaceValidationError('Project name must be 1–63 characters: letters, digits, dot, underscore, hyphen.')
   }
-  const all = await readRegistry()
-  all.push(record)
-  await writeRegistry(all)
-  return record
+  const projectsRoot = getProjectsRoot()
+  await mkdir(projectsRoot, { recursive: true })
+  const dest = path.join(projectsRoot, name)
+  try {
+    await stat(dest)
+    throw new WorkspaceValidationError(`Project directory already exists: ${dest}`)
+  } catch (err) {
+    if (err instanceof WorkspaceValidationError) throw err
+  }
+  await mkdir(dest, { recursive: true })
+  let canonical: string
+  try {
+    canonical = await realpath(dest)
+  } catch {
+    throw new WorkspaceValidationError('Created project path could not be resolved.')
+  }
+  const allowed = await assertPathInsideAllowedRoots(canonical)
+  if (!allowed.ok) {
+    await recordBoundaryViolation({ action: 'create_workspace', attemptedPath: canonical, reason: allowed.reason })
+    throw new WorkspaceValidationError(allowed.reason)
+  }
+  if (input.initializeGit) {
+    await execFileAsync('git', ['init', '--quiet'], { cwd: canonical, timeout: 15_000, windowsHide: true })
+  }
+  return upsert({
+    id: randomUUID(),
+    root: canonical,
+    label: input.label?.trim() || name,
+    name,
+    createdAt: new Date().toISOString(),
+    projectType: 'new_project',
+    classification: /wr-engineer-e2e|wr-foundry-e2e|(?:^|[\\/])(?:tmp|temp)[\\/]|appdata[\\/]local[\\/]temp/i.test(projectsRoot)
+      ? 'SYSTEM_TEST'
+      : 'COMMANDER_REAL',
+    visibility: /wr-engineer-e2e|wr-foundry-e2e|(?:^|[\\/])(?:tmp|temp)[\\/]|appdata[\\/]local[\\/]temp/i.test(projectsRoot)
+      ? 'system'
+      : 'commander',
+    testArtifact: /wr-engineer-e2e|wr-foundry-e2e|(?:^|[\\/])(?:tmp|temp)[\\/]|appdata[\\/]local[\\/]temp/i.test(projectsRoot),
+    archived: /wr-engineer-e2e|wr-foundry-e2e|(?:^|[\\/])(?:tmp|temp)[\\/]|appdata[\\/]local[\\/]temp/i.test(projectsRoot),
+  })
 }

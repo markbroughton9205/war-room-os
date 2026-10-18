@@ -32,6 +32,11 @@ const BLOCKED_PATH_PATTERNS: RegExp[] = [
   /(^|\/)next\.config\.[jt]s$/i,
   /(^|\/)middleware\.[jt]s$/i, // auth/routing policy
   /(^|\/)lib\/permissions\//i, // approval/authorization policy itself
+  /(^|\/)lib\/security\//i,
+  /(^|\/)lib\/native-builder\/(?:patchPolicy|patchApplier|commandPolicy|installerTool|validationRunner|processRegistry|workspaceRegistry)\.[jt]s$/i,
+  /(^|\/)desktop\//i,
+  /(^|\/)app\/api\/(?:security|auth|sovereign)\//i,
+  /(^|\/)\.cursor\/rules\//i,
   /(^|\/)lib\/payments\//i,
   /(^|\/)app\/api\/payments\//i,
   /(^|\/)lib\/billing\//i,
@@ -129,7 +134,9 @@ function validateOnePatch(patch: StructuredPatch, violations: PatchPolicyViolati
  * Full policy evaluation for a proposal. Purely structural — reads nothing from disk (that's
  * patchApplier's job when it re-verifies expectedOriginalHash at apply time).
  */
-export function validatePatchPolicy(proposal: NativeRepairProposal): PatchPolicyResult {
+export function validatePatchPolicy(proposal: NativeRepairProposal, options?: { maxChangedLines?: number }): PatchPolicyResult {
+  const maxLines = typeof options?.maxChangedLines === 'number' && Number.isInteger(options.maxChangedLines)
+    ? Math.min(AUTHORING_MAX_CHANGED_LINES, Math.max(1, options.maxChangedLines)) : MAX_CHANGED_LINES
   const violations: PatchPolicyViolation[] = []
   const seenFiles = new Set<string>()
   let changedLineCount = 0
@@ -152,10 +159,10 @@ export function validatePatchPolicy(proposal: NativeRepairProposal): PatchPolicy
       detail: `Patch touches ${seenFiles.size} files; limit is ${MAX_CHANGED_FILES}.`,
     })
   }
-  if (changedLineCount > MAX_CHANGED_LINES) {
+  if (changedLineCount > maxLines) {
     violations.push({
       rule: 'max_lines_exceeded',
-      detail: `Patch changes ~${changedLineCount} lines; limit is ${MAX_CHANGED_LINES}.`,
+      detail: `Patch changes ~${changedLineCount} lines; limit is ${maxLines}.`,
     })
   }
 

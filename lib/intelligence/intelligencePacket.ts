@@ -1,3 +1,4 @@
+export type EvidenceDiscoveryProvider = 'GOOGLE' | 'TAVILY' | 'RESEARCH_ENGINE' | 'RSS' | 'SEARXNG' | 'WAR_ROOM_LOCAL' | 'COMMANDER'
 import type { CouncilOrchestrationFamily } from '@/components/council/councilSessionTypes'
 import { classifyConfidenceSummary } from '@/lib/intelligence/confidenceClassifier'
 import { scanContradictions } from '@/lib/intelligence/contradictionScanner'
