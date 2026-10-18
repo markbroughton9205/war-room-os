@@ -1,4 +1,4 @@
-import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { requireCommanderSession, requireCommanderMutationOrigin } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import {
   replayInstalledMutation,
@@ -16,6 +16,8 @@ function localRequest(req: Request): boolean {
 }
 
 export async function POST(req: Request) {
+  const csrf = requireCommanderMutationOrigin(req)
+  if (csrf) return csrf
   const commander = await requireCommanderSession('Foundry')
   if (!commander.ok) return commander.response
   if (!localRequest(req) || req.headers.get('x-frk-prod-proof') !== 'disposable') {

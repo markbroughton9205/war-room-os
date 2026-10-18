@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { requireCommanderSession, requireCommanderMutationOrigin } from '@/lib/security/commanderSession'
 import { commanderActor } from '@/lib/agents/ops/api'
 import { getLocalOwnershipStore } from '@/lib/sovereign-runtime/local-ownership/store'
 import { localCommanderOwnerId } from '@/lib/war-room/localConversationGateway'
@@ -44,6 +44,8 @@ export async function GET(req: Request) {
 
 /** Propose / approve / reject / cancel. Approval is the Commander's session plus a custom header (cross-site requests cannot set it). */
 export async function POST(req: Request) {
+  const csrf = requireCommanderMutationOrigin(req)
+  if (csrf) return csrf
   if (req.headers.get('x-wr-council-missions') !== '1') return NextResponse.json({ error: 'missing control header' }, { status: 400 })
   let body: Record<string, unknown>
   try {

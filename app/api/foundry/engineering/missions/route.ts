@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { requireCommanderSession, requireCommanderMutationOrigin } from '@/lib/security/commanderSession'
 import { commanderActor } from '@/lib/agents/ops/api'
 import { getMission, listMissions, serviceDeps, startFromApi, resumeMission, cancelMission, MissionError } from '@/lib/agents/ops/engineering/missions/service'
 import { isMissionId } from '@/lib/agents/ops/engineering/missions/store'
@@ -34,6 +34,8 @@ export async function GET(req: Request) {
 
 /** Commander controls: start, resume, cancel. The actor comes from the session only; a custom header blocks cross-site requests. */
 export async function POST(req: Request) {
+  const csrf = requireCommanderMutationOrigin(req)
+  if (csrf) return csrf
   const commander = await requireCommanderSession('Foundry')
   if (!commander.ok) return commander.response
   if (req.headers.get('x-wr-agent-ops') !== '1') return NextResponse.json({ error: 'missing control header' }, { status: 400 })

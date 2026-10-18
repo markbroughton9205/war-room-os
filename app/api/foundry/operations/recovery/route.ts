@@ -1,11 +1,13 @@
-import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { requireCommanderSession, requireCommanderMutationOrigin } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import { recoverOperations } from '@/lib/native-builder/foundryOperationsManager'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
-export async function POST() {
+export async function POST(req: Request) {
+  const csrf = requireCommanderMutationOrigin(req)
+  if (csrf) return csrf
   const commander = await requireCommanderSession('Foundry')
   if (!commander.ok) return commander.response
   const result = await recoverOperations()

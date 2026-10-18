@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { requireCommanderSession, requireCommanderMutationOrigin } from '@/lib/security/commanderSession'
 import { AgentOpsLog } from '@/lib/agents/ops/log'
 import { commanderActor, handleOpsControl, handleOpsRead } from '@/lib/agents/ops/api'
 import { buildPoolView } from '@/lib/agents/forge/poolView'
@@ -26,6 +26,8 @@ export async function GET(req: Request) {
  * header is required so cross-site requests cannot reach this handler without a CORS preflight.
  */
 export async function POST(req: Request) {
+  const csrf = requireCommanderMutationOrigin(req)
+  if (csrf) return csrf
   const commander = await requireCommanderSession('Foundry')
   if (!commander.ok) return commander.response
   if (req.headers.get('x-wr-agent-ops') !== '1') return NextResponse.json({ error: 'missing control header' }, { status: 400 })

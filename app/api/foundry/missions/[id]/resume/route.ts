@@ -1,4 +1,4 @@
-import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { requireCommanderSession, requireCommanderMutationOrigin } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import { resumeMission } from '@/lib/native-builder/foundryMissionController'
 import { toFoundryMissionCommanderView } from '@/lib/native-builder/foundryMissionView'
@@ -8,6 +8,8 @@ export const runtime = 'nodejs'
 export const maxDuration = 300
 
 export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const csrf = requireCommanderMutationOrigin(_req)
+  if (csrf) return csrf
   const commander = await requireCommanderSession('Foundry')
   if (!commander.ok) return commander.response
   const { id } = await params

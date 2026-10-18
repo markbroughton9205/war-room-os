@@ -1,4 +1,4 @@
-import { requireCommanderSession } from '@/lib/security/commanderSession'
+import { requireCommanderSession, requireCommanderMutationOrigin } from '@/lib/security/commanderSession'
 import { NextResponse } from 'next/server'
 import { parseLaunchModelPolicy, FoundryLaunchPolicyError } from '@/lib/native-builder/foundryLaunchPolicy'
 import { startMission } from '@/lib/native-builder/foundryMissionController'
@@ -23,6 +23,8 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const csrf = requireCommanderMutationOrigin(req)
+  if (csrf) return csrf
   const commander = await requireCommanderSession('Foundry')
   if (!commander.ok) return commander.response
   let body: { request?: string; title?: string; continueProjectId?: string; sessionId?: string; workspaceId?: string; modelPolicy?: unknown } = {}
