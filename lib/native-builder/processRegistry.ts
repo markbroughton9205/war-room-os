@@ -30,6 +30,15 @@ export function registerActiveProcess(repairId: string, child: ChildProcess, lab
   activeByRepair.set(repairId, set)
 }
 
+/** Drop wrapper event-loop refs so the parent can exit while the owned child keeps running. */
+export function detachChildFromWrapper(child: ChildProcess): void {
+  child.unref()
+  // Piped stdio of a child process are sockets at runtime; the stream types do not say so, so they are asked first.
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    if (stream && 'unref' in stream && typeof stream.unref === 'function') stream.unref()
+  }
+}
+
 export function unregisterActiveProcess(repairId: string, child: ChildProcess): void {
   const set = activeByRepair.get(repairId)
   if (!set) return
@@ -72,6 +81,23 @@ function killTreePosix(child: ChildProcess): void {
   }
 }
 
+function signalTreePosix(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (typeof child.pid !== 'number') return
+  try { process.kill(-child.pid, signal) } catch {
+    try { child.kill(signal) } catch { /* already exited */ }
+  }
+}
+
+async function stopTreePosix(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return
+  signalTreePosix(child, 'SIGTERM')
+  await new Promise<void>(resolve => {
+    const timer = setTimeout(resolve, 1500)
+    child.once('close', () => { clearTimeout(timer); resolve() })
+  })
+  if (child.exitCode === null && child.signalCode === null) killTreePosix(child)
+}
+
 async function killTreeWindows(child: ChildProcess): Promise<void> {
   if (typeof child.pid !== 'number') return
   await new Promise<void>(resolve => {
@@ -82,10 +108,42 @@ async function killTreeWindows(child: ChildProcess): Promise<void> {
   })
 }
 
+/** Public tree-kill, for owners (e.g. terminalSession.ts) that track a child outside the
+ * repairId-keyed registry but still want the same POSIX-group-kill / Windows-taskkill discipline
+ * instead of a second reimplementation. */
+export async function killChildTree(child: ChildProcess): Promise<void> {
+  if (process.platform === 'win32') {
+    await killTreeWindows(child)
+  } else {
+    killTreePosix(child)
+  }
+}
+
 export type KillResult = { killed: number; label: string }
 
 /** Kills every tracked process (and its tree) for this repair. Idempotent; returns what it did so
  * the caller can put a truthful note in the audit trail. */
+export type ListedProcess = { pid: number | undefined; label: string; startedAt: number; repairId: string }
+
+export function listProcessesForRepair(repairId: string): ListedProcess[] {
+  const set = activeByRepair.get(repairId)
+  if (!set?.size) return []
+  return [...set].map(tracked => ({
+    pid: tracked.child.pid,
+    label: tracked.label,
+    startedAt: tracked.startedAt,
+    repairId,
+  }))
+}
+
+export function listAllOwnedProcesses(): ListedProcess[] {
+  const out: ListedProcess[] = []
+  for (const repairId of activeByRepair.keys()) {
+    out.push(...listProcessesForRepair(repairId))
+  }
+  return out
+}
+
 export async function killProcessesForRepair(repairId: string): Promise<KillResult[]> {
   const set = activeByRepair.get(repairId)
   if (!set?.size) return []
@@ -94,7 +152,7 @@ export async function killProcessesForRepair(repairId: string): Promise<KillResu
     if (process.platform === 'win32') {
       await killTreeWindows(tracked.child)
     } else {
-      killTreePosix(tracked.child)
+      await stopTreePosix(tracked.child)
     }
     results.push({ killed: tracked.child.pid ?? -1, label: tracked.label })
     set.delete(tracked)
