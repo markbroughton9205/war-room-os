@@ -1,0 +1,96 @@
+import { AgentOpsLog } from './log'
+import { AgentTransitionError, assertTransition, isCommander } from './lifecycle'
+import { missingCriteria } from './need'
+import { PROTECTED_EFFECTS, SAFE_PERMISSIONS, type AdaptationProposal, type AgentOpsRecord, SPECIALIZATIONS, MEMORY_SCOPES, RISK_CLASSES, type Actor, type AgentSpec, type AgentState, type NeedRecord, type TransitionRecord } from './types'
+
+export type AgentView = { spec: AgentSpec; state: AgentState; history: TransitionRecord[] }
+
+export class NeedGateError extends Error { constructor(public readonly missing: string[], msg: string) { super(msg) } }
+
+export type AgentDraft = Omit<AgentSpec, 'id' | 'createdAt' | 'version' | 'needId'> & { id?: string }
+
+/** Derives agents from the log by replaying only transitions that are valid at their position (defends against forged records). */
+export function deriveAgents(log: AgentOpsLog): { agents: Map<string, AgentView>; needs: Map<string, NeedRecord>; rejectedTransitions: number; appliedScopes: Set<string> } {
+  const v = log.view()
+  const needs = new Map<string, NeedRecord>()
+  const agents = new Map<string, AgentView>()
+  let rejectedTransitions = 0
+  const proposals = new Map<string, AdaptationProposal>()
+  const decisions: Extract<AgentOpsRecord, { t: 'decision' }>[] = []
+  const appliedScopes = new Set<string>()
+  for (const r of v.records) {
+    if (r.t === 'need') needs.set(r.need.id, r.need)
+    else if (r.t === 'agent') {
+      // replay re-checks the need gate: a forged bare agent record without fully evidenced need is not an agent
+      const need = needs.get(r.agent.needId)
+      if (!agents.has(r.agent.id) && need && missingCriteria(need).length === 0) agents.set(r.agent.id, { spec: r.agent, state: 'PROPOSED', history: [] })
+      else if (!agents.has(r.agent.id)) rejectedTransitions += 1
+    }
+    else if (r.t === 'adaptation') { if (!proposals.has(r.proposal.id)) proposals.set(r.proposal.id, r.proposal); else rejectedTransitions += 1 } // first wins: a proposal cannot be rewritten after the fact
+    else if (r.t === 'decision') decisions.push(r)
+    else if (r.t === 'scope') {
+      // a scope change applies only if a Commander-APPROVED permission_change_request covers exactly the added scope
+      const a = agents.get(r.agentId)
+      const p = proposals.get(r.proposalId)
+      const dec = [...decisions].reverse().find((d) => d.proposalId === r.proposalId)
+      const addsPerm = r.permissionScope.filter((x) => !a?.spec.permissionScope.includes(x))
+      const addsMem = r.memoryScope.filter((x) => !a?.spec.memoryScope.includes(x))
+      const alreadyApplied = appliedScopes.has(r.proposalId)
+      const ok = !alreadyApplied && a && a.state !== 'RETIRED' && a.state !== 'REJECTED' && p && p.agentId === r.agentId && p.kind === 'permission_change_request'
+        && dec?.status === 'APPROVED' && isCommander(dec.by) && isCommander(r.by)
+        && addsPerm.every((x) => p.requestedPermissions?.includes(x)) && addsMem.every((x) => p.requestedMemory?.includes(x))
+        && r.permissionScope.every((x) => SAFE_PERMISSIONS.includes(x)) && r.memoryScope.every((x) => MEMORY_SCOPES.includes(x))
+      if (!ok || !a) { rejectedTransitions += 1; continue }
+      appliedScopes.add(r.proposalId)
+      a.spec = { ...a.spec, permissionScope: r.permissionScope, memoryScope: r.memoryScope, version: a.spec.version + 1 }
+    }
+    else if (r.t === 'transition') {
+      const a = agents.get(r.tr.agentId)
+      if (!a || a.state !== r.tr.from) { rejectedTransitions += 1; continue }
+      try { assertTransition(r.tr.from, r.tr.to, r.tr.by) } catch { rejectedTransitions += 1; continue }
+      a.state = r.tr.to
+      a.history.push(r.tr)
+    }
+  }
+  return { agents, needs, rejectedTransitions, appliedScopes }
+}
+
+export class AgentRegistry {
+  constructor(readonly log: AgentOpsLog) {}
+
+  recordNeed(need: NeedRecord): void { this.log.append({ t: 'need', need }) }
+
+  /** Propose an agent from a recorded need. Refused unless all seven roadmap criteria are evidenced. */
+  propose(needId: string, draft: AgentDraft, now: Date = new Date()): AgentSpec {
+    const need = deriveAgents(this.log).needs.get(needId)
+    if (!need) throw new Error(`unknown need: ${needId}`)
+    const missing = missingCriteria(need)
+    if (missing.length) throw new NeedGateError(missing, `agent proposal refused: no evidence for ${missing.join(', ')}`)
+    if (!SPECIALIZATIONS.includes(draft.specialization)) throw new Error(`unknown specialization: ${draft.specialization}`)
+    if (!RISK_CLASSES.includes(draft.riskCeiling)) throw new Error('unknown risk ceiling')
+    if (!draft.permissionScope.length || draft.permissionScope.some((p) => !SAFE_PERMISSIONS.includes(p))) throw new Error('permission scope must be a non-empty set of safe permissions')
+    if ((draft.permissionScope as string[]).some((p) => (PROTECTED_EFFECTS as readonly string[]).includes(p))) throw new Error('protected effects cannot be part of a permission scope')
+    if (!draft.memoryScope.length || draft.memoryScope.some((m) => !MEMORY_SCOPES.includes(m))) throw new Error('memory scope must be a non-empty set of known scopes')
+    if (draft.name.length > 120 || draft.purpose.length > 500 || draft.ioContract.input.length > 500 || draft.ioContract.output.length > 500 || draft.escalationPath.length > 120 || draft.reviewProcess.length > 500) throw new Error('field too long')
+    if (!draft.ioContract.input.trim() || !draft.ioContract.output.trim()) throw new Error('io contract required')
+    if (!draft.escalationPath.trim() || !draft.reviewProcess.trim()) throw new Error('escalation path and review process required')
+    const id = draft.id ?? `agent-${draft.specialization}-${needId.slice(-8)}`
+    if (deriveAgents(this.log).agents.has(id)) throw new Error(`agent already exists: ${id}`)
+    const spec: AgentSpec = { ...draft, id, needId, version: 1, createdAt: now.toISOString() }
+    this.log.append({ t: 'agent', agent: spec })
+    return spec
+  }
+
+  transition(agentId: string, to: AgentState, by: Actor, reason: string, now: Date = new Date()): AgentView {
+    if (!reason.trim()) throw new Error('transition reason required')
+    const cur = deriveAgents(this.log).agents.get(agentId)
+    if (!cur) throw new Error(`unknown agent: ${agentId}`)
+    assertTransition(cur.state, to, by) // throws AgentTransitionError, nothing written
+    this.log.append({ t: 'transition', tr: { agentId, from: cur.state, to, by, at: now.toISOString(), reason } })
+    return deriveAgents(this.log).agents.get(agentId)!
+  }
+
+  get(agentId: string): AgentView | undefined { return deriveAgents(this.log).agents.get(agentId) }
+  list(): AgentView[] { return [...deriveAgents(this.log).agents.values()] }
+}
+export { AgentTransitionError }
